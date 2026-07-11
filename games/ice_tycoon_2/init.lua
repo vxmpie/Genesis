@@ -1,7 +1,13 @@
-local IceTycoonModule = {}
+local IceTycoon = {}
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
+
+local REPO_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/"
+local function loadSubModule(path)
+    return loadstring(game:HttpGet(REPO_URL .. path))()
+end
+local WaterFarm = loadSubModule("games/ice_tycoon_2/water_farm.lua")
 
 local _autoFarmEnabled = false
 
@@ -84,20 +90,7 @@ local function startAutoFarmLoop()
                     local isBuying = processAutoBuy(tycoon)
                     
                     if not isBuying then
-                        local waterPrompt = getWaterSource()
-                        local pumpPrompt = getPumpPrompt(tycoon)
-                        
-                        if waterPrompt and pumpPrompt then
-                            rootPart.CFrame = waterPrompt.Parent.CFrame + Vector3.new(0, 3, 0)
-                            task.wait(0.4)
-                            pcall(function() fireproximityprompt(waterPrompt) end)
-                            task.wait(0.5)
-                            
-                            rootPart.CFrame = pumpPrompt.Parent.CFrame + Vector3.new(0, 3, 0)
-                            task.wait(0.4)
-                            pcall(function() fireproximityprompt(pumpPrompt) end)
-                            task.wait(0.5)
-                        end
+                        WaterFarm.doFarm(tycoon, rootPart, getWaterSource, getPumpPrompt)
                     end
                 end
             end
@@ -106,18 +99,16 @@ local function startAutoFarmLoop()
     end)
 end
 
-function IceTycoonModule.initUI(Rayfield)
+function IceTycoon.initUI(Rayfield)
     local Window = Rayfield:CreateWindow({
         Name = "Genesis Hub | Ice Tycoon 2",
         LoadingTitle = "Genesis System",
-        LoadingSubtitle = "Initializing Module...",
-        ConfigurationSaving = {
-            Enabled = false
-        },
+        LoadingSubtitle = "Initializing Ice Tycoon...",
+        ConfigurationSaving = { Enabled = false },
         KeySystem = false
     })
 
-    local MainTab = Window:CreateTab("Automation", 4483362458)
+    local MainTab = Window:CreateTab("Automation")
 
     MainTab:CreateToggle({
         Name = "Enable Auto Farm",
@@ -130,6 +121,14 @@ function IceTycoonModule.initUI(Rayfield)
             end
         end,
     })
+    
+    MainTab:CreateButton({
+        Name = "Unload UI",
+        Callback = function()
+            _autoFarmEnabled = false
+            Rayfield:Destroy()
+        end,
+    })
 end
 
-return IceTycoonModule
+return IceTycoon
