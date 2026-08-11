@@ -1,7 +1,6 @@
 --[[
     GENESIS — Character Reset Timer
     Storage Hunter | Auto Reset Script
-    สคริปต์ตั้งเวลารีเซ็ทตัวละครอัตโนมัติ
 ]]
 
 local Players = game:GetService("Players")
@@ -23,33 +22,31 @@ local State = {
 local timerThread = nil
 
 -- ══════════════════════════════════════════════
---  CHARACTER RESET (จำลองกดปุ่ม Reset ปกติ)
+--  CHARACTER RESET
 -- ══════════════════════════════════════════════
 local function resetCharacter()
-    -- วิธี 1: ใช้ StarterGui:SetCore (วิธีมาตรฐาน Roblox Reset)
+    local character = LocalPlayer.Character
+    if not character then return end
+
+    -- Method 1: BreakJoints (most reliable)
     local success = pcall(function()
-        local bindable = Instance.new("BindableEvent")
-        bindable.Event:Connect(function()
-            -- ยืนยัน reset
-        end)
-        StarterGui:SetCore("ResetButtonCallback", bindable)
-        task.wait(0.1)
-        bindable:Fire()
-        task.wait(0.5)
-        -- คืนค่า reset button กลับเป็นปกติ
-        StarterGui:SetCore("ResetButtonCallback", true)
+        character:BreakJoints()
     end)
 
-    -- วิธี 2 (fallback): BreakJoints
-    if not success or not LocalPlayer.Character then
+    -- Method 2: Set Humanoid health to 0
+    if not success then
         pcall(function()
-            local character = LocalPlayer.Character
-            if character then
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid.Health = 0
-                end
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.Health = 0
             end
+        end)
+    end
+
+    -- Method 3: Destroy HumanoidRootPart
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        pcall(function()
+            character.HumanoidRootPart:Destroy()
         end)
     end
 end
@@ -67,17 +64,17 @@ local function startTimer(countdownLabel, statusLabel, toggleBtn, toggleCircle)
     timerThread = task.spawn(function()
         while State.IsActive do
             if State.TimeRemaining <= 0 then
-                -- Reset ตัวละคร
+                -- Reset character
                 if statusLabel then
-                    statusLabel.Text = "⟳ RESETTING..."
+                    statusLabel.Text = "RESETTING..."
                     statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
                 end
                 resetCharacter()
-                task.wait(1)
-                -- เริ่มนับใหม่
+                task.wait(3)
+                -- Restart countdown
                 State.TimeRemaining = State.IntervalSeconds
                 if statusLabel then
-                    statusLabel.Text = "● ACTIVE"
+                    statusLabel.Text = "ACTIVE"
                     statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
                 end
             end
@@ -105,7 +102,7 @@ local function stopTimer(countdownLabel, statusLabel)
     end
     if countdownLabel then countdownLabel.Text = "00:00" end
     if statusLabel then
-        statusLabel.Text = "○ INACTIVE"
+        statusLabel.Text = "INACTIVE"
         statusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
     end
 end
@@ -300,7 +297,7 @@ local function createUI()
     StatusLabel.Size = UDim2.new(1, 0, 0, 20)
     StatusLabel.Position = UDim2.new(0, 0, 1, -28)
     StatusLabel.BackgroundTransparency = 1
-    StatusLabel.Text = "○ INACTIVE"
+    StatusLabel.Text = "INACTIVE"
     StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
     StatusLabel.Font = Enum.Font.GothamBold
     StatusLabel.TextSize = 12
@@ -517,7 +514,7 @@ local function createUI()
     local InfoLabel = Instance.new("TextLabel")
     InfoLabel.Size = UDim2.new(1, 0, 0, 40)
     InfoLabel.BackgroundTransparency = 1
-    InfoLabel.Text = "ตั้งเวลาแล้วกด ON\nตัวละครจะ Reset อัตโนมัติเมื่อหมดเวลา"
+    InfoLabel.Text = "Set the timer and press ON.\nCharacter will auto-reset when time is up."
     InfoLabel.TextColor3 = Color3.fromRGB(80, 80, 95)
     InfoLabel.Font = Enum.Font.Gotham
     InfoLabel.TextSize = 11
