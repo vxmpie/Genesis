@@ -32,6 +32,7 @@ local function saveSettings()
         local data = HttpService:JSONEncode({
             IntervalValue = State.IntervalValue,
             Unit = State.Unit,
+            IsActive = State.IsActive,
         })
         writefile(SETTINGS_FILE, data)
     end)
@@ -51,6 +52,9 @@ local function loadSettings()
             end
             if decoded.Unit == "Minutes" or decoded.Unit == "Seconds" then
                 State.Unit = decoded.Unit
+            end
+            if decoded.IsActive == true then
+                State.IsActive = true
             end
         end
     end
@@ -462,7 +466,6 @@ local function createUI()
     ToggleBtn.Name = "ToggleSwitch"
     ToggleBtn.Size = UDim2.new(0, 56, 0, 28)
     ToggleBtn.Position = UDim2.new(1, -72, 0.5, -14)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     ToggleBtn.Text = ""
     ToggleBtn.AutoButtonColor = false
     ToggleBtn.Parent = ToggleFrame
@@ -474,8 +477,6 @@ local function createUI()
     local ToggleCircle = Instance.new("Frame")
     ToggleCircle.Name = "Circle"
     ToggleCircle.Size = UDim2.new(0, 22, 0, 22)
-    ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
-    ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
     ToggleCircle.Parent = ToggleBtn
 
     local tcCorner = Instance.new("UICorner")
@@ -484,13 +485,29 @@ local function createUI()
 
     local ToggleText = Instance.new("TextLabel")
     ToggleText.Size = UDim2.new(0, 30, 1, 0)
-    ToggleText.Position = UDim2.new(1, -34, 0, 0)
     ToggleText.BackgroundTransparency = 1
-    ToggleText.Text = "OFF"
-    ToggleText.TextColor3 = Color3.fromRGB(150, 150, 160)
     ToggleText.Font = Enum.Font.GothamBold
     ToggleText.TextSize = 10
     ToggleText.Parent = ToggleBtn
+
+    if State.IsActive then
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+        ToggleCircle.Position = UDim2.new(1, -25, 0.5, -11)
+        ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleText.Text = "ON"
+        ToggleText.Position = UDim2.new(0, 4, 0, 0)
+        ToggleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+        cdStroke.Color = Color3.fromRGB(40, 160, 80)
+        StatusLabel.Text = "ACTIVE"
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+    else
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
+        ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+        ToggleText.Text = "OFF"
+        ToggleText.Position = UDim2.new(1, -34, 0, 0)
+        ToggleText.TextColor3 = Color3.fromRGB(150, 150, 160)
+    end
 
     ToggleBtn.MouseButton1Click:Connect(function()
         State.IsActive = not State.IsActive
@@ -517,6 +534,7 @@ local function createUI()
             saveSettings()
             startTimer(CountdownLabel, StatusLabel, ToggleBtn, ToggleCircle)
         else
+            saveSettings()
             ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
             ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
             ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
@@ -529,6 +547,10 @@ local function createUI()
             stopTimer(CountdownLabel, StatusLabel)
         end
     end)
+
+    if State.IsActive then
+        startTimer(CountdownLabel, StatusLabel, ToggleBtn, ToggleCircle)
+    end
 
     local Spacer2 = Instance.new("Frame")
     Spacer2.Size = UDim2.new(1, 0, 0, 5)
