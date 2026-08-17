@@ -5,26 +5,30 @@ local StarterGui = game:GetService("StarterGui")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
-local SETTINGS_FILE = "genesis_settings.json"
+local SETTINGS_FOLDER = "Genesis"
+local SETTINGS_FILE = SETTINGS_FOLDER .. "/settings.json"
 
-local function loadSettings()
-    local ok, data = pcall(function()
-        return readfile(SETTINGS_FILE)
-    end)
-    if ok and data then
-        local parsed = pcall(function()
-            return HttpService:JSONDecode(data)
-        end)
-        if parsed then
-            local decoded = HttpService:JSONDecode(data)
-            return decoded
+local State = {
+    IsActive = false,
+    IntervalSeconds = 60,
+    IntervalValue = 1,
+    TimeRemaining = 0,
+    Unit = "Minutes",
+}
+
+local timerThread = nil
+
+local function ensureFolder()
+    pcall(function()
+        if not isfolder(SETTINGS_FOLDER) then
+            makefolder(SETTINGS_FOLDER)
         end
-    end
-    return nil
+    end)
 end
 
 local function saveSettings()
     pcall(function()
+        ensureFolder()
         local data = HttpService:JSONEncode({
             IntervalValue = State.IntervalValue,
             Unit = State.Unit,
@@ -33,23 +37,32 @@ local function saveSettings()
     end)
 end
 
-local saved = loadSettings()
+local function loadSettings()
+    local ok, data = pcall(function()
+        return readfile(SETTINGS_FILE)
+    end)
+    if ok and data then
+        local success, decoded = pcall(function()
+            return HttpService:JSONDecode(data)
+        end)
+        if success and decoded then
+            if decoded.IntervalValue then
+                State.IntervalValue = tonumber(decoded.IntervalValue) or 1
+            end
+            if decoded.Unit == "Minutes" or decoded.Unit == "Seconds" then
+                State.Unit = decoded.Unit
+            end
+        end
+    end
+end
 
-local State = {
-    IsActive = false,
-    IntervalSeconds = 60,
-    IntervalValue = (saved and saved.IntervalValue) or 1,
-    TimeRemaining = 0,
-    Unit = (saved and saved.Unit) or "Minutes",
-}
+loadSettings()
 
 if State.Unit == "Minutes" then
     State.IntervalSeconds = State.IntervalValue * 60
 else
     State.IntervalSeconds = State.IntervalValue
 end
-
-local timerThread = nil
 
 local function resetCharacter()
     local character = LocalPlayer.Character
