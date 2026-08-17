@@ -1,39 +1,64 @@
---[[
-    GENESIS — Character Reset Timer
-    Storage Hunter | Auto Reset Script
-]]
-
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- ══════════════════════════════════════════════
---  CONFIG
--- ══════════════════════════════════════════════
+local SETTINGS_FILE = "genesis_settings.json"
+
+local function loadSettings()
+    local ok, data = pcall(function()
+        return readfile(SETTINGS_FILE)
+    end)
+    if ok and data then
+        local parsed = pcall(function()
+            return HttpService:JSONDecode(data)
+        end)
+        if parsed then
+            local decoded = HttpService:JSONDecode(data)
+            return decoded
+        end
+    end
+    return nil
+end
+
+local function saveSettings()
+    pcall(function()
+        local data = HttpService:JSONEncode({
+            IntervalValue = State.IntervalValue,
+            Unit = State.Unit,
+        })
+        writefile(SETTINGS_FILE, data)
+    end)
+end
+
+local saved = loadSettings()
+
 local State = {
     IsActive = false,
     IntervalSeconds = 60,
+    IntervalValue = (saved and saved.IntervalValue) or 1,
     TimeRemaining = 0,
-    Unit = "Minutes", -- "Minutes" or "Seconds"
+    Unit = (saved and saved.Unit) or "Minutes",
 }
+
+if State.Unit == "Minutes" then
+    State.IntervalSeconds = State.IntervalValue * 60
+else
+    State.IntervalSeconds = State.IntervalValue
+end
 
 local timerThread = nil
 
--- ══════════════════════════════════════════════
---  CHARACTER RESET
--- ══════════════════════════════════════════════
 local function resetCharacter()
     local character = LocalPlayer.Character
     if not character then return end
 
-    -- Method 1: BreakJoints (most reliable)
     local success = pcall(function()
         character:BreakJoints()
     end)
 
-    -- Method 2: Set Humanoid health to 0
     if not success then
         pcall(function()
             local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -43,7 +68,6 @@ local function resetCharacter()
         end)
     end
 
-    -- Method 3: Destroy HumanoidRootPart
     if character and character:FindFirstChild("HumanoidRootPart") then
         pcall(function()
             character.HumanoidRootPart:Destroy()
@@ -51,9 +75,6 @@ local function resetCharacter()
     end
 end
 
--- ══════════════════════════════════════════════
---  TIMER SYSTEM
--- ══════════════════════════════════════════════
 local function startTimer(countdownLabel, statusLabel, toggleBtn, toggleCircle)
     if timerThread then
         pcall(function() task.cancel(timerThread) end)
@@ -64,14 +85,12 @@ local function startTimer(countdownLabel, statusLabel, toggleBtn, toggleCircle)
     timerThread = task.spawn(function()
         while State.IsActive do
             if State.TimeRemaining <= 0 then
-                -- Reset character
                 if statusLabel then
                     statusLabel.Text = "RESETTING..."
                     statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
                 end
                 resetCharacter()
                 task.wait(3)
-                -- Restart countdown
                 State.TimeRemaining = State.IntervalSeconds
                 if statusLabel then
                     statusLabel.Text = "ACTIVE"
@@ -79,7 +98,6 @@ local function startTimer(countdownLabel, statusLabel, toggleBtn, toggleCircle)
                 end
             end
 
-            -- อัพเดท countdown
             if countdownLabel then
                 local mins = math.floor(State.TimeRemaining / 60)
                 local secs = State.TimeRemaining % 60
@@ -107,11 +125,7 @@ local function stopTimer(countdownLabel, statusLabel)
     end
 end
 
--- ══════════════════════════════════════════════
---  UI BUILDER
--- ══════════════════════════════════════════════
 local function createUI()
-    -- Cleanup ถ้ามี UI เก่า
     if CoreGui:FindFirstChild("GenesisResetTimer") then
         CoreGui.GenesisResetTimer:Destroy()
     end
@@ -125,9 +139,6 @@ local function createUI()
         ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
 
-    -- ─────────────────────────────────
-    --  FLOATING BUTTON "G"
-    -- ─────────────────────────────────
     local FloatingBtn = Instance.new("TextButton")
     FloatingBtn.Name = "FloatingBtn"
     FloatingBtn.Size = UDim2.new(0, 50, 0, 50)
@@ -150,7 +161,6 @@ local function createUI()
     floatStroke.Thickness = 2
     floatStroke.Parent = FloatingBtn
 
-    -- Hover effect
     FloatingBtn.MouseEnter:Connect(function()
         floatStroke.Thickness = 3
         FloatingBtn.BackgroundColor3 = Color3.fromRGB(25, 20, 22)
@@ -160,18 +170,16 @@ local function createUI()
         FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
     end)
 
-    -- ─────────────────────────────────
-    --  MAIN WINDOW
-    -- ─────────────────────────────────
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 340, 0, 420)
-    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -210)
+    MainFrame.Size = UDim2.new(0, 340, 0, 450)
+    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -225)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
     MainFrame.Active = true
     MainFrame.Draggable = true
+    MainFrame.ClipsDescendants = true
     MainFrame.Parent = ScreenGui
 
     local mainCorner = Instance.new("UICorner")
@@ -183,14 +191,10 @@ local function createUI()
     mainStroke.Thickness = 1
     mainStroke.Parent = MainFrame
 
-    -- Toggle window
     FloatingBtn.MouseButton1Click:Connect(function()
         MainFrame.Visible = not MainFrame.Visible
     end)
 
-    -- ─────────────────────────────────
-    --  TITLE BAR
-    -- ─────────────────────────────────
     local TitleBar = Instance.new("Frame")
     TitleBar.Size = UDim2.new(1, 0, 0, 50)
     TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
@@ -201,7 +205,6 @@ local function createUI()
     titleCorner.CornerRadius = UDim.new(0, 12)
     titleCorner.Parent = TitleBar
 
-    -- Fix bottom corners
     local titleFix = Instance.new("Frame")
     titleFix.Size = UDim2.new(1, 0, 0, 12)
     titleFix.Position = UDim2.new(0, 0, 1, -12)
@@ -231,7 +234,6 @@ local function createUI()
     SubTitle.TextXAlignment = Enum.TextXAlignment.Left
     SubTitle.Parent = TitleBar
 
-    -- Close button
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Size = UDim2.new(0, 30, 0, 30)
     CloseBtn.Position = UDim2.new(1, -40, 0, 10)
@@ -251,9 +253,6 @@ local function createUI()
         MainFrame.Visible = false
     end)
 
-    -- ─────────────────────────────────
-    --  CONTENT AREA
-    -- ─────────────────────────────────
     local Content = Instance.new("Frame")
     Content.Size = UDim2.new(1, -30, 1, -65)
     Content.Position = UDim2.new(0, 15, 0, 55)
@@ -265,7 +264,6 @@ local function createUI()
     layout.Padding = UDim.new(0, 10)
     layout.Parent = Content
 
-    -- ─── COUNTDOWN DISPLAY ───
     local CountdownFrame = Instance.new("Frame")
     CountdownFrame.Size = UDim2.new(1, 0, 0, 100)
     CountdownFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
@@ -303,7 +301,6 @@ local function createUI()
     StatusLabel.TextSize = 12
     StatusLabel.Parent = CountdownFrame
 
-    -- ─── TIMER SETTING SECTION ───
     local SectionHeader = Instance.new("TextLabel")
     SectionHeader.Size = UDim2.new(1, 0, 0, 20)
     SectionHeader.BackgroundTransparency = 1
@@ -315,7 +312,6 @@ local function createUI()
     SectionHeader.LayoutOrder = 2
     SectionHeader.Parent = Content
 
-    -- ─── TIME INPUT ROW ───
     local InputRow = Instance.new("Frame")
     InputRow.Size = UDim2.new(1, 0, 0, 44)
     InputRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
@@ -337,15 +333,14 @@ local function createUI()
     InputLabel.TextXAlignment = Enum.TextXAlignment.Left
     InputLabel.Parent = InputRow
 
-    -- Number input
     local TimeInput = Instance.new("TextBox")
     TimeInput.Name = "TimeInput"
     TimeInput.Size = UDim2.new(0, 70, 0, 30)
     TimeInput.Position = UDim2.new(0, 100, 0.5, -15)
     TimeInput.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     TimeInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TimeInput.PlaceholderText = "1"
-    TimeInput.Text = "1"
+    TimeInput.PlaceholderText = tostring(State.IntervalValue)
+    TimeInput.Text = tostring(State.IntervalValue)
     TimeInput.Font = Enum.Font.GothamBold
     TimeInput.TextSize = 14
     TimeInput.ClearTextOnFocus = false
@@ -360,25 +355,36 @@ local function createUI()
     tiStroke.Thickness = 1
     tiStroke.Parent = TimeInput
 
-    -- Unit toggle button (Minutes / Seconds)
     local UnitBtn = Instance.new("TextButton")
     UnitBtn.Name = "UnitToggle"
     UnitBtn.Size = UDim2.new(0, 95, 0, 30)
     UnitBtn.Position = UDim2.new(1, -107, 0.5, -15)
-    UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
-    UnitBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
-    UnitBtn.Text = "Minutes"
-    UnitBtn.Font = Enum.Font.GothamBold
-    UnitBtn.TextSize = 12
     UnitBtn.AutoButtonColor = false
     UnitBtn.Parent = InputRow
+
+    if State.Unit == "Seconds" then
+        UnitBtn.BackgroundColor3 = Color3.fromRGB(30, 45, 55)
+        UnitBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
+        UnitBtn.Text = "Seconds"
+    else
+        UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
+        UnitBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
+        UnitBtn.Text = "Minutes"
+    end
+
+    UnitBtn.Font = Enum.Font.GothamBold
+    UnitBtn.TextSize = 12
 
     local ubCorner = Instance.new("UICorner")
     ubCorner.CornerRadius = UDim.new(0, 6)
     ubCorner.Parent = UnitBtn
 
     local ubStroke = Instance.new("UIStroke")
-    ubStroke.Color = Color3.fromRGB(120, 80, 180)
+    if State.Unit == "Seconds" then
+        ubStroke.Color = Color3.fromRGB(60, 140, 200)
+    else
+        ubStroke.Color = Color3.fromRGB(120, 80, 180)
+    end
     ubStroke.Thickness = 1
     ubStroke.Parent = UnitBtn
 
@@ -396,16 +402,28 @@ local function createUI()
             UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
             ubStroke.Color = Color3.fromRGB(120, 80, 180)
         end
+        saveSettings()
     end)
 
-    -- ─── SPACER ───
+    TimeInput.FocusLost:Connect(function()
+        local rawVal = tonumber(TimeInput.Text) or State.IntervalValue
+        if rawVal <= 0 then rawVal = 1 end
+        State.IntervalValue = rawVal
+        TimeInput.Text = tostring(rawVal)
+        if State.Unit == "Minutes" then
+            State.IntervalSeconds = rawVal * 60
+        else
+            State.IntervalSeconds = rawVal
+        end
+        saveSettings()
+    end)
+
     local Spacer = Instance.new("Frame")
     Spacer.Size = UDim2.new(1, 0, 0, 5)
     Spacer.BackgroundTransparency = 1
     Spacer.LayoutOrder = 4
     Spacer.Parent = Content
 
-    -- ─── ON/OFF TOGGLE ───
     local ToggleFrame = Instance.new("Frame")
     ToggleFrame.Size = UDim2.new(1, 0, 0, 52)
     ToggleFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
@@ -427,7 +445,6 @@ local function createUI()
     ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
     ToggleLabel.Parent = ToggleFrame
 
-    -- Toggle switch (pill style)
     local ToggleBtn = Instance.new("TextButton")
     ToggleBtn.Name = "ToggleSwitch"
     ToggleBtn.Size = UDim2.new(0, 56, 0, 28)
@@ -441,7 +458,6 @@ local function createUI()
     tbCorner.CornerRadius = UDim.new(1, 0)
     tbCorner.Parent = ToggleBtn
 
-    -- Toggle circle
     local ToggleCircle = Instance.new("Frame")
     ToggleCircle.Name = "Circle"
     ToggleCircle.Size = UDim2.new(0, 22, 0, 22)
@@ -453,7 +469,6 @@ local function createUI()
     tcCorner.CornerRadius = UDim.new(1, 0)
     tcCorner.Parent = ToggleCircle
 
-    -- OFF label on toggle
     local ToggleText = Instance.new("TextLabel")
     ToggleText.Size = UDim2.new(0, 30, 1, 0)
     ToggleText.Position = UDim2.new(1, -34, 0, 0)
@@ -468,16 +483,15 @@ local function createUI()
         State.IsActive = not State.IsActive
 
         if State.IsActive then
-            -- Parse interval
             local rawVal = tonumber(TimeInput.Text) or 1
             if rawVal <= 0 then rawVal = 1 end
+            State.IntervalValue = rawVal
             if State.Unit == "Minutes" then
                 State.IntervalSeconds = rawVal * 60
             else
                 State.IntervalSeconds = rawVal
             end
 
-            -- Visual ON
             ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
             ToggleCircle.Position = UDim2.new(1, -25, 0.5, -11)
             ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -487,9 +501,9 @@ local function createUI()
 
             cdStroke.Color = Color3.fromRGB(40, 160, 80)
 
+            saveSettings()
             startTimer(CountdownLabel, StatusLabel, ToggleBtn, ToggleCircle)
         else
-            -- Visual OFF
             ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
             ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
             ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
@@ -503,14 +517,12 @@ local function createUI()
         end
     end)
 
-    -- ─── SPACER 2 ───
     local Spacer2 = Instance.new("Frame")
     Spacer2.Size = UDim2.new(1, 0, 0, 5)
     Spacer2.BackgroundTransparency = 1
     Spacer2.LayoutOrder = 6
     Spacer2.Parent = Content
 
-    -- ─── INFO TEXT ───
     local InfoLabel = Instance.new("TextLabel")
     InfoLabel.Size = UDim2.new(1, 0, 0, 40)
     InfoLabel.BackgroundTransparency = 1
@@ -522,7 +534,6 @@ local function createUI()
     InfoLabel.LayoutOrder = 7
     InfoLabel.Parent = Content
 
-    -- ─── UNLOAD BUTTON ───
     local UnloadBtn = Instance.new("TextButton")
     UnloadBtn.Size = UDim2.new(1, 0, 0, 38)
     UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 25, 28)
@@ -556,8 +567,5 @@ local function createUI()
     end)
 end
 
--- ══════════════════════════════════════════════
---  INIT
--- ══════════════════════════════════════════════
 createUI()
 warn("[GENESIS] Character Reset Timer loaded successfully!")
