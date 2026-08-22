@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Genesis Dashboard v2</title>
-    <meta name="description" content="Genesis — Real-Time System Monitor & Auto-Boost Engine with Fable 5 Maintenance Suite">
+    <title>Genesis Dashboard v2.1</title>
+    <meta name="description" content="Genesis — Real-Time System Monitor & Auto-Boost Engine with Fable 5 Hardened Suite">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
@@ -21,6 +21,10 @@
             </div>
         </div>
         <div class="header-right">
+            <div class="auth-badge" id="authBadge" title="Session Status">
+                <span class="auth-icon">🔒</span>
+                <span class="auth-text" id="authText">Unlocked</span>
+            </div>
             <div class="connection-status" id="connStatus">
                 <span class="conn-dot"></span>
                 <span class="conn-text">Connecting...</span>
@@ -62,7 +66,7 @@
                 </div>
                 <div class="metric-label">RAM</div>
                 <div class="metric-sub" id="ramSub">0 / 32 GB</div>
-                <!-- RAM Breakdown bar -->
+                <!-- RAM Breakdown bar (Module 1) -->
                 <div class="ram-breakdown" id="ramBreakdown">
                     <div class="ram-bar">
                         <div class="ram-bar-active" id="ramBarActive"></div>
@@ -121,7 +125,7 @@
             <div class="cores-chart" id="coresChart"></div>
         </section>
 
-        <!-- System Hardening Status (Module 2) -->
+        <!-- System Hardening Status (Module 2: 4/4 Complete) -->
         <section class="card hardening-card">
             <div class="card-header">
                 <h2>🛡️ System Hardening</h2>
@@ -141,6 +145,11 @@
                 <div class="hardening-item" id="hardenHypervisor">
                     <span class="hardening-icon">⏳</span>
                     <span class="hardening-name">Hypervisor</span>
+                    <span class="hardening-status">Checking...</span>
+                </div>
+                <div class="hardening-item" id="hardenExclusion">
+                    <span class="hardening-icon">⏳</span>
+                    <span class="hardening-name">Defender Excl.</span>
                     <span class="hardening-status">Checking...</span>
                 </div>
             </div>
@@ -342,6 +351,24 @@
             </div>
         </section>
     </main>
+
+    <!-- Authentication PIN Modal -->
+    <div class="auth-modal-overlay" id="authModal" style="display:none;">
+        <div class="auth-modal">
+            <div class="auth-modal-header">
+                <div class="auth-modal-icon">🔐</div>
+                <h2>Security Authentication</h2>
+                <p>Enter your 6-digit Genesis PIN to unlock control permissions</p>
+            </div>
+            <div class="auth-pin-inputs">
+                <input type="password" id="pinInput" maxlength="6" placeholder="••••••" autocomplete="off" autofocus>
+            </div>
+            <div class="auth-error-msg" id="authErrorMsg"></div>
+            <div class="auth-modal-actions">
+                <button class="auth-btn" id="pinSubmitBtn">Unlock Dashboard</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>

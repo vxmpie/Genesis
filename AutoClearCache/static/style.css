@@ -1,5 +1,5 @@
 /* ============================================================
-   Genesis Dashboard v2 — Dark Cyberpunk Theme + Fable 5 Modules
+   Genesis Dashboard v2.1 — Dark Cyberpunk Theme + Fable 5 Hardened
    Primary: #FF3C3C (Genesis Red)  Background: #0A0A0F
    ============================================================ */
 
@@ -122,7 +122,34 @@ body {
 .header-right {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 14px;
+}
+
+/* Auth Badge */
+.auth-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.auth-badge.unlocked {
+    color: var(--green);
+    border-color: rgba(52, 211, 153, 0.3);
+    background: var(--green-glow);
+}
+
+.auth-badge.locked {
+    color: var(--amber);
+    border-color: rgba(251, 191, 36, 0.3);
+    background: var(--amber-glow);
 }
 
 .connection-status {
@@ -300,7 +327,7 @@ body {
     font-family: var(--font-mono);
 }
 
-/* RAM Breakdown Bar (Module 1) */
+/* RAM Breakdown Bar */
 .ram-breakdown {
     width: 100%;
     margin-top: 4px;
@@ -343,7 +370,6 @@ body {
 .ram-label.standby b { color: var(--amber); }
 .ram-label.free b { color: var(--green); }
 
-/* Pulse animation for RAM warning */
 .metric-card.warning {
     border-color: var(--amber);
     animation: warningPulse 1.5s ease-in-out infinite;
@@ -454,12 +480,12 @@ body {
 }
 
 /* ============================================================
-   System Hardening Card (Module 2)
+   System Hardening Card (Module 2: 4/4 Complete)
    ============================================================ */
 
 .hardening-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 12px;
 }
 
@@ -494,17 +520,19 @@ body {
 }
 
 .hardening-name {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
     color: var(--text-primary);
+    text-align: center;
 }
 
 .hardening-status {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     font-family: var(--font-mono);
     color: var(--text-secondary);
+    text-align: center;
 }
 
 .hardening-item.ok .hardening-status { color: var(--green); }
@@ -602,7 +630,6 @@ body {
     color: var(--text-secondary);
 }
 
-/* Toggle Button */
 .toggle-btn {
     width: 48px;
     height: 26px;
@@ -635,7 +662,6 @@ body {
     transform: translateX(22px);
 }
 
-/* Threshold Control */
 .threshold-control {
     display: flex;
     align-items: center;
@@ -672,7 +698,6 @@ body {
     text-align: center;
 }
 
-/* Mode Select */
 .mode-select {
     background: var(--bg-input);
     border: 1px solid var(--border);
@@ -823,7 +848,6 @@ body {
     padding: 24px;
 }
 
-/* VM Disk Bar in MuMu Table (Module 3) */
 .vm-disk-cell {
     display: flex;
     align-items: center;
@@ -1231,6 +1255,123 @@ body {
 }
 
 /* ============================================================
+   PIN Security Modal Overlay
+   ============================================================ */
+
+.auth-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(16px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.3s ease;
+}
+
+.auth-modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glow);
+    border-radius: var(--radius);
+    padding: 32px;
+    max-width: 380px;
+    width: 100%;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 24px var(--accent-glow);
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.auth-modal-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.auth-modal-icon {
+    font-size: 36px;
+    animation: logoPulse 2s infinite;
+}
+
+.auth-modal-header h2 {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+}
+
+.auth-modal-header p {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.auth-pin-inputs input {
+    width: 100%;
+    padding: 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 24px;
+    text-align: center;
+    letter-spacing: 12px;
+    outline: none;
+    transition: var(--transition);
+}
+
+.auth-pin-inputs input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.auth-error-msg {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    min-height: 16px;
+}
+
+.auth-btn {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--accent), #FF6B3C);
+    color: white;
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.auth-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(255, 60, 60, 0.4);
+}
+
+.auth-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ============================================================
    Toast Notifications
    ============================================================ */
 
@@ -1309,7 +1450,7 @@ body {
     }
 
     .hardening-grid {
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .defender-grid {

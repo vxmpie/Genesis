@@ -1,7 +1,7 @@
 /**
- * Genesis Dashboard v2 — Frontend Application
+ * Genesis Dashboard v2.1 — Frontend Application
  * WebSocket client + real-time charts + gauge animations
- * Fable 5 Maintenance Engine UI
+ * Fable 5 Hardened Maintenance Engine UI & PIN Security
  */
 
 // ============================================================
@@ -16,6 +16,9 @@ const STATE = {
     startTime: Date.now(),
     historyLength: 60,
     deepCleanPreview: [],
+    token: localStorage.getItem('genesis_auth_token') || '',
+    authenticated: false,
+    authRequired: false,
 };
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 42; // ~263.9
@@ -30,6 +33,12 @@ const DOM = {
     connStatus: $('#connStatus'),
     connText: $('.conn-text'),
     uptime: $('#uptime'),
+    authBadge: $('#authBadge'),
+    authText: $('#authText'),
+    authModal: $('#authModal'),
+    pinInput: $('#pinInput'),
+    pinSubmitBtn: $('#pinSubmitBtn'),
+    authErrorMsg: $('#authErrorMsg'),
     cpuPercent: $('#cpuPercent'),
     cpuRing: $('#cpuRing'),
     cpuSub: $('#cpuSub'),
@@ -71,11 +80,12 @@ const DOM = {
     netTotalUp: $('#netTotalUp'),
     netTotalDown: $('#netTotalDown'),
     toastContainer: $('#toastContainer'),
-    // Module 2: Hardening
+    // Module 2: Hardening (4 items)
     hardeningRefreshBtn: $('#hardeningRefreshBtn'),
     hardenVBS: $('#hardenVBS'),
     hardenMPO: $('#hardenMPO'),
     hardenHypervisor: $('#hardenHypervisor'),
+    hardenExclusion: $('#hardenExclusion'),
     hardeningLastCheck: $('#hardeningLastCheck'),
     // Module 4: Deep Clean
     deepCleanScanBtn: $('#deepCleanScanBtn'),
@@ -93,11 +103,12 @@ const DOM = {
 };
 
 // ============================================================
-// WebSocket Connection
+// WebSocket Connection & Auth Handshake
 // ============================================================
 function connectWS() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws`;
+    const tokenQuery = STATE.token ? `?token=${encodeURIComponent(STATE.token)}` : '';
+    const url = `${proto}://${location.host}/ws${tokenQuery}`;
 
     STATE.ws = new WebSocket(url);
 
@@ -105,6 +116,9 @@ function connectWS() {
         STATE.connected = true;
         DOM.connStatus.className = 'connection-status connected';
         DOM.connText.textContent = 'Connected';
+        if (STATE.token) {
+            sendCommand('auth', { token: STATE.token });
+        }
     };
 
     STATE.ws.onclose = () => {
@@ -130,7 +144,7 @@ function connectWS() {
 
 function sendCommand(command, payload = {}) {
     if (STATE.ws && STATE.ws.readyState === WebSocket.OPEN) {
-        STATE.ws.send(JSON.stringify({ command, ...payload }));
+        STATE.ws.send(JSON.stringify({ command, token: STATE.token, ...payload }));
     }
 }
 
@@ -141,11 +155,22 @@ function handleMessage(data) {
     switch (data.type) {
         case 'init':
             STATE.config = data.config;
+            STATE.authRequired = data.auth_required;
+            setAuthState(data.authenticated);
             applyConfig(data.config);
             if (data.history) renderHistory(data.history);
             if (data.hardening) updateHardeningStatus(data.hardening);
             if (data.defender) updateDefenderStatus(data.defender);
             if (data.vm_disk) updateVmDiskData(data.vm_disk);
+            break;
+        case 'auth_success':
+            setAuthState(true);
+            showToast('system', '🔑 Dashboard control unlocked');
+            break;
+        case 'auth_failed':
+        case 'auth_required':
+            setAuthState(false);
+            showAuthModal(true);
             break;
         case 'metrics':
             updateMetrics(data.metrics);
@@ -166,31 +191,90 @@ function handleMessage(data) {
             STATE.config = data.config;
             applyConfig(data.config);
             break;
-        // Module 2: Hardening
         case 'hardening_status':
             updateHardeningStatus(data.data);
             break;
-        // Module 3: VM Disk
         case 'vm_disk_status':
             updateVmDiskData(data.data);
             break;
-        // Module 4: Deep Clean
         case 'deep_clean_preview':
             renderDeepCleanPreview(data.data);
             break;
         case 'deep_clean_result':
             onDeepCleanResult(data.data);
             break;
-        // Module 7: Defender
         case 'defender_status':
             updateDefenderStatus(data.data);
             break;
         case 'quick_scan_result':
-            showToast('system', data.success ? '🔒 Quick Scan started' : '❌ Quick Scan failed');
+            showToast('system', data.success ? '🔒 Quick Scan started in background' : '❌ Quick Scan failed');
             break;
         case 'vm_trim_result':
             showToast('system', data.success ? `📱 VM cache trimmed (port ${data.port})` : '❌ VM trim failed');
             break;
+    }
+}
+
+// ============================================================
+// Auth State Management
+// ============================================================
+function setAuthState(isAuthed) {
+    STATE.authenticated = isAuthed;
+    if (DOM.authBadge) {
+        if (!STATE.authRequired) {
+            DOM.authBadge.style.display = 'none';
+        } else {
+            DOM.authBadge.style.display = 'flex';
+            DOM.authBadge.className = `auth-badge ${isAuthed ? 'unlocked' : 'locked'}`;
+            DOM.authText.textContent = isAuthed ? 'Unlocked' : 'Locked';
+        }
+    }
+    if (isAuthed) {
+        showAuthModal(false);
+    }
+}
+
+function showAuthModal(show) {
+    if (DOM.authModal) {
+        DOM.authModal.style.display = show ? 'flex' : 'none';
+        if (show && DOM.pinInput) {
+            DOM.pinInput.value = '';
+            DOM.authErrorMsg.textContent = '';
+            DOM.pinInput.focus();
+        }
+    }
+}
+
+async function submitPin() {
+    const pin = DOM.pinInput.value.trim();
+    if (!pin) return;
+
+    try {
+        DOM.pinSubmitBtn.textContent = 'Verifying...';
+        DOM.pinSubmitBtn.disabled = true;
+
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.token) {
+            STATE.token = data.token;
+            localStorage.setItem('genesis_auth_token', data.token);
+            sendCommand('auth', { token: data.token });
+            setAuthState(true);
+        } else {
+            DOM.authErrorMsg.textContent = data.error || 'Invalid PIN code';
+            DOM.pinInput.value = '';
+            DOM.pinInput.focus();
+        }
+    } catch (err) {
+        DOM.authErrorMsg.textContent = 'Network error during verification';
+    } finally {
+        DOM.pinSubmitBtn.textContent = 'Unlock Dashboard';
+        DOM.pinSubmitBtn.disabled = false;
     }
 }
 
@@ -201,19 +285,12 @@ function applyConfig(cfg) {
     if (!cfg) return;
     const ab = cfg.auto_boost || {};
 
-    // Toggle
     DOM.boostToggle.classList.toggle('active', ab.enabled);
     DOM.boostStatus.textContent = ab.enabled ? 'ARMED' : 'DISABLED';
     DOM.boostStatus.classList.toggle('disabled', !ab.enabled);
-
-    // Threshold
     DOM.threshValue.textContent = ab.threshold_percent + '%';
-
-    // Mode
     DOM.boostMode.value = ab.mode || 'auto';
     DOM.intervalRow.style.display = ab.mode === 'scheduled' ? 'flex' : 'none';
-
-    // Interval
     DOM.boostInterval.value = String(ab.interval_minutes || 10);
 }
 
@@ -229,19 +306,16 @@ function setRing(ringEl, percent, max = 100) {
 function updateMetrics(m) {
     if (!m) return;
 
-    // CPU
     const cpuTotal = Math.round(m.cpu.total_percent);
     DOM.cpuPercent.textContent = cpuTotal;
     setRing(DOM.cpuRing, cpuTotal);
     DOM.cpuSub.textContent = `${m.cpu.core_count} Threads`;
 
-    // RAM
     const ramPct = Math.round(m.ram.percent);
     DOM.ramPercent.textContent = ramPct;
     setRing(DOM.ramRing, ramPct);
     DOM.ramSub.textContent = `${m.ram.used_gb} / ${m.ram.total_gb} GB`;
 
-    // RAM Breakdown (Module 1)
     if (m.ram.breakdown) {
         const b = m.ram.breakdown;
         const total = b.total_gb || 1;
@@ -254,12 +328,10 @@ function updateMetrics(m) {
         DOM.ramFreeVal.textContent = b.free_gb;
     }
 
-    // RAM warning state
     DOM.ramCard.classList.remove('warning', 'critical');
     if (ramPct >= 90) DOM.ramCard.classList.add('critical');
     else if (ramPct >= 80) DOM.ramCard.classList.add('warning');
 
-    // GPU
     if (m.gpu && m.gpu.available) {
         DOM.gpuTemp.textContent = m.gpu.temperature_c;
         setRing(DOM.gpuRing, m.gpu.utilization_percent);
@@ -270,7 +342,6 @@ function updateMetrics(m) {
         DOM.gpuSub.textContent = 'N/A';
     }
 
-    // Disk
     const diskRead = m.disk.read_speed_mbs || 0;
     const diskWrite = m.disk.write_speed_mbs || 0;
     const diskTotal = Math.round((diskRead + diskWrite) * 10) / 10;
@@ -278,16 +349,13 @@ function updateMetrics(m) {
     setRing(DOM.diskRing, Math.min(diskTotal, 100), 100);
     DOM.diskSub.textContent = `R: ${diskRead.toFixed(1)} / W: ${diskWrite.toFixed(1)}`;
 
-    // Network
     DOM.netUpSpeed.textContent = `${(m.network.sent_speed_mbs || 0).toFixed(2)} MB/s`;
     DOM.netDownSpeed.textContent = `${(m.network.recv_speed_mbs || 0).toFixed(2)} MB/s`;
     DOM.netTotalUp.textContent = `${m.network.sent_mb} MB`;
     DOM.netTotalDown.textContent = `${m.network.recv_mb} MB`;
 
-    // CPU Per-Core Bars
     updateCoreBars(m.cpu);
 
-    // History
     STATE.cpuHistory.push(cpuTotal);
     STATE.ramHistory.push(ramPct);
     if (STATE.cpuHistory.length > STATE.historyLength) STATE.cpuHistory.shift();
@@ -458,7 +526,6 @@ function updateMuMu(mumu) {
         const isDevice = inst.name.toLowerCase().includes('device');
         const type = isDevice ? 'Emulator' : 'Launcher';
 
-        // Match VM disk data by instance index
         let vmDiskHtml = '<span class="vm-disk-na">—</span>';
         if (isDevice && vmDisks.length > 0) {
             const vmIdx = devices.indexOf(inst);
@@ -542,7 +609,7 @@ function onBoostResult(result) {
 }
 
 // ============================================================
-// Module 2: Hardening Status
+// Module 2: Hardening Status (4/4 Complete)
 // ============================================================
 function updateHardeningStatus(data) {
     if (!data || !data.checks) return;
@@ -551,6 +618,7 @@ function updateHardeningStatus(data) {
         { el: DOM.hardenVBS, key: 'vbs', name: 'VBS' },
         { el: DOM.hardenMPO, key: 'mpo', name: 'MPO' },
         { el: DOM.hardenHypervisor, key: 'hypervisor', name: 'Hypervisor' },
+        { el: DOM.hardenExclusion, key: 'defender_exclusion', name: 'Defender Excl.' },
     ];
 
     items.forEach(({ el, key }) => {
@@ -562,7 +630,7 @@ function updateHardeningStatus(data) {
         el.className = 'hardening-item';
         if (status === 'ok') {
             icon.textContent = '✅';
-            statusEl.textContent = 'Disabled';
+            statusEl.textContent = 'Disabled / Set';
             el.classList.add('ok');
         } else if (status === 'drift') {
             icon.textContent = '⚠️';
@@ -605,7 +673,7 @@ function renderDeepCleanPreview(preview) {
         totalSize += item.size_mb;
         totalFiles += item.file_count;
         const serviceNote = item.requires_service_stop
-            ? `<span class="dc-service">⚠ Stops ${item.requires_service_stop}</span>`
+            ? `<span class="dc-service">⚠ Stops ${item.requires_service_stop} (Auto-restores)</span>`
             : '';
         return `
             <div class="dc-item">
@@ -629,10 +697,7 @@ function renderDeepCleanPreview(preview) {
 
 function onDeepCleanResult(result) {
     if (!result) return;
-
     showToast('boost', `🧹 Deep Clean: ${result.total_freed_mb} MB freed (${result.total_deleted} files)`);
-
-    // Reset preview
     DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">Clean complete! Click "Scan" to check again</div>';
     DOM.deepCleanExecBtn.disabled = true;
     DOM.deepCleanTotal.style.display = 'none';
@@ -651,17 +716,14 @@ function updateDefenderStatus(data) {
         return;
     }
 
-    // Signature age
     const sigAge = data.signature_age_days;
     DOM.defSigAge.textContent = sigAge >= 0 ? `${sigAge} day${sigAge !== 1 ? 's' : ''}` : '—';
     DOM.defSigAge.className = `defender-value ${data.signature_stale ? 'stale' : 'fresh'}`;
 
-    // Quick scan age
     const qAge = data.quick_scan_age_days;
     DOM.defQuickAge.textContent = qAge >= 0 ? `${qAge} day${qAge !== 1 ? 's' : ''} ago` : '—';
     DOM.defQuickAge.className = `defender-value ${qAge > 7 ? 'stale' : 'fresh'}`;
 
-    // Real-time
     DOM.defRealtime.textContent = data.realtime_enabled ? 'ON' : 'OFF';
     DOM.defRealtime.className = `defender-value ${data.realtime_enabled ? 'fresh' : 'stale'}`;
 }
@@ -724,6 +786,30 @@ function showToast(type, message) {
 // Event Handlers
 // ============================================================
 function setupEventHandlers() {
+    // Auth PIN Modal Handlers
+    if (DOM.pinSubmitBtn) {
+        DOM.pinSubmitBtn.addEventListener('click', submitPin);
+    }
+    if (DOM.pinInput) {
+        DOM.pinInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitPin();
+        });
+    }
+    if (DOM.authBadge) {
+        DOM.authBadge.addEventListener('click', () => {
+            if (STATE.authenticated) {
+                if (confirm('Lock Dashboard permissions?')) {
+                    localStorage.removeItem('genesis_auth_token');
+                    STATE.token = '';
+                    setAuthState(false);
+                    showAuthModal(true);
+                }
+            } else {
+                showAuthModal(true);
+            }
+        });
+    }
+
     // Boost Now
     DOM.boostNowBtn.addEventListener('click', () => {
         sendCommand('boost');
@@ -787,13 +873,13 @@ function setupEventHandlers() {
             setTimeout(() => {
                 DOM.deepCleanScanBtn.textContent = 'Scan';
                 DOM.deepCleanScanBtn.disabled = false;
-            }, 5000); // Fallback re-enable
+            }, 5000);
         });
     }
 
     if (DOM.deepCleanExecBtn) {
         DOM.deepCleanExecBtn.addEventListener('click', () => {
-            if (!confirm('Execute Deep Clean? This will delete all scanned files.')) return;
+            if (!confirm('Execute Deep Clean? This will safely clean all scanned targets.')) return;
             DOM.deepCleanExecBtn.textContent = 'Cleaning...';
             DOM.deepCleanExecBtn.disabled = true;
             sendCommand('deep_clean_execute');
@@ -825,9 +911,6 @@ function updateUptime() {
     DOM.uptime.textContent = `${h}:${m}:${s}`;
 }
 
-// ============================================================
-// Utilities
-// ============================================================
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -841,8 +924,6 @@ function init() {
     setupEventHandlers();
     connectWS();
     setInterval(updateUptime, 1000);
-
-    // Resize chart on window resize
     window.addEventListener('resize', drawHistoryChart);
 }
 

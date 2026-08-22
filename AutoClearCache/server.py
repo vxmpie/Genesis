@@ -1,15 +1,16 @@
 """
-Genesis Dashboard — Real-Time System Monitor & Auto-Boost Engine
+Genesis Dashboard v2.1 — Real-Time System Monitor & Auto-Boost Engine
 Backend: FastAPI + WebSocket + Win32 API (EmptyWorkingSet + NtSetSystemInformation)
 
-Fable 5 Maintenance Suite:
-  Module 1: Standby Memory Purge + RAM Breakdown
-  Module 2: Hardening Drift Detector (VBS / MPO / Hypervisor)
-  Module 3: In-VM Disk Sentinel (ADB → MuMu /data)
-  Module 4: Deep Clean Engine (extended targets + dry-run)
-  Module 5: Anti-EcoQoS + Background Hog Detector
-  Module 6: Growth Tracker (MuMu vms/ folder snapshots)
-  Module 7: Defender Maintenance (Definition age + Quick Scan + Downloads sweep)
+Fable 5 Maintenance Suite (Hardened):
+  Module 1: Standby Memory Purge (Gated) + RAM Breakdown
+  Module 2: Hardening Drift Detector (4/4: VBS / MPO / Hypervisor / Defender Exclusions)
+  Module 3: In-VM Disk Sentinel (ADB Multi-port df /data + Auto-Trim)
+  Module 4: Deep Clean Engine (Extended targets + Dry-run + Resilient wuauserv try/finally)
+  Module 5: Real-Time Anti-EcoQoS (<1s hook) + Background Hog Detector
+  Module 6: Growth Tracker (MuMu vms/ storage snapshots)
+  Module 7: Defender Maintenance (Non-blocking Popen Quick Scan + Downloads sweep)
+  Security: Optional PIN-based Session Authentication (Rate-limited)
 """
 
 import asyncio
@@ -17,6 +18,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 import time
@@ -26,7 +28,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 import psutil
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -46,6 +48,11 @@ def load_config() -> dict:
     if not CONFIG_PATH.exists():
         return {
             "server": {"host": "0.0.0.0", "port": 7700},
+            "auth": {
+                "enabled": True,
+                "pin": "770088",
+                "session_timeout_hours": 24,
+            },
             "auto_boost": {
                 "enabled": True,
                 "threshold_percent": 85,
@@ -73,6 +80,7 @@ def load_config() -> dict:
                 "downloads_sweep_minutes": 30,
                 "growth_snapshot_hours": 6,
                 "drift_check_hours": 6,
+                "standby_purge_min_gb": 2.0,
             },
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -86,7 +94,15 @@ def save_config(cfg: dict):
 
 CONFIG = load_config()
 
-# Ensure maintenance key exists for upgrades from older config
+# Upgrade older configs seamlessly
+if "auth" not in CONFIG:
+    CONFIG["auth"] = {
+        "enabled": True,
+        "pin": "770088",
+        "session_timeout_hours": 24,
+    }
+    save_config(CONFIG)
+
 if "maintenance" not in CONFIG:
     CONFIG["maintenance"] = {
         "deep_clean_on_boost": False,
@@ -97,8 +113,61 @@ if "maintenance" not in CONFIG:
         "downloads_sweep_minutes": 30,
         "growth_snapshot_hours": 6,
         "drift_check_hours": 6,
+        "standby_purge_min_gb": 2.0,
     }
     save_config(CONFIG)
+elif "standby_purge_min_gb" not in CONFIG["maintenance"]:
+    CONFIG["maintenance"]["standby_purge_min_gb"] = 2.0
+    save_config(CONFIG)
+
+# ---------------------------------------------------------------------------
+# Authentication & Security Manager
+# ---------------------------------------------------------------------------
+_valid_sessions: dict[str, float] = {}  # token -> expiry_timestamp
+_failed_attempts: dict[str, list[float]] = {}  # ip -> list of failed timestamps
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_SECONDS = 600  # 10 minutes
+
+
+def is_auth_enabled() -> bool:
+    return CONFIG.get("auth", {}).get("enabled", False)
+
+
+def is_ip_locked(ip: str) -> bool:
+    attempts = _failed_attempts.get(ip, [])
+    now = time.time()
+    # Filter attempts within lockout window
+    recent = [t for t in attempts if now - t < LOCKOUT_SECONDS]
+    _failed_attempts[ip] = recent
+    return len(recent) >= MAX_FAILED_ATTEMPTS
+
+
+def record_failed_attempt(ip: str):
+    now = time.time()
+    if ip not in _failed_attempts:
+        _failed_attempts[ip] = []
+    _failed_attempts[ip].append(now)
+
+
+def verify_session_token(token: str | None) -> bool:
+    if not is_auth_enabled():
+        return True
+    if not token:
+        return False
+    expiry = _valid_sessions.get(token)
+    if not expiry or time.time() > expiry:
+        if token in _valid_sessions:
+            del _valid_sessions[token]
+        return False
+    return True
+
+
+def create_session_token() -> str:
+    token = secrets.token_hex(24)
+    timeout_hours = CONFIG.get("auth", {}).get("session_timeout_hours", 24)
+    _valid_sessions[token] = time.time() + (timeout_hours * 3600)
+    return token
+
 
 # ---------------------------------------------------------------------------
 # Event History
@@ -137,6 +206,9 @@ def add_event(event_type: str, message: str):
     return entry
 
 
+# ===========================================================================
+# MODULE 1: Standby Memory Purge (Gated) + RAM Boost via Win32 API
+# ===========================================================================
 _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 _psapi = ctypes.WinDLL("psapi")
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -149,14 +221,18 @@ TOKEN_ADJUST_PRIVILEGES = 0x0020
 TOKEN_QUERY = 0x0008
 SE_PRIVILEGE_ENABLED = 0x00000002
 
+
 class LUID(ctypes.Structure):
     _fields_ = [("LowPart", ctypes.wintypes.DWORD), ("HighPart", ctypes.wintypes.LONG)]
+
 
 class LUID_AND_ATTRIBUTES(ctypes.Structure):
     _fields_ = [("Luid", LUID), ("Attributes", ctypes.wintypes.DWORD)]
 
+
 class TOKEN_PRIVILEGES(ctypes.Structure):
     _fields_ = [("PrivilegeCount", ctypes.wintypes.DWORD), ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+
 
 def _enable_privilege(privilege_name: str) -> bool:
     try:
@@ -186,6 +262,7 @@ def _enable_privilege(privilege_name: str) -> bool:
     except Exception:
         return False
 
+
 _kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
 _kernel32.OpenProcess.argtypes = [
     ctypes.wintypes.DWORD,
@@ -199,12 +276,7 @@ _psapi.EmptyWorkingSet.argtypes = [ctypes.wintypes.HANDLE]
 
 
 def purge_standby_list() -> bool:
-    """Purge the system Standby memory list via NtSetSystemInformation.
-    
-    SystemMemoryListInformation = 0x50 (80)
-    MemoryPurgeStandbyList = 4
-    Requires SeProfileSingleProcessPrivilege (Admin).
-    """
+    """Purge the system Standby memory list via NtSetSystemInformation."""
     try:
         _enable_privilege("SeProfileSingleProcessPrivilege")
         _enable_privilege("SeIncreaseQuotaPrivilege")
@@ -214,23 +286,17 @@ def purge_standby_list() -> bool:
             ctypes.byref(command),
             ctypes.sizeof(command),
         )
-        return status == 0  # STATUS_SUCCESS (NTSTATUS)
+        return status == 0  # STATUS_SUCCESS
     except Exception:
         return False
 
 
 def get_ram_breakdown() -> dict:
-    """Return RAM breakdown: Active (In Use), Standby, Free.
-    
-    Standby = Available - Free (the part Windows caches but can release)
-    Active = Total - Available
-    """
+    """Return RAM breakdown: Active (In Use), Standby, Free, Total."""
     mem = psutil.virtual_memory()
-    # psutil gives us: total, available, used, free
-    # Windows "Standby" = Available - Free
     total_gb = mem.total / (1024 ** 3)
     available_gb = mem.available / (1024 ** 3)
-    free_gb = mem.free / (1024 ** 3) if hasattr(mem, 'free') else 0
+    free_gb = mem.free / (1024 ** 3) if hasattr(mem, "free") else 0
     active_gb = (mem.total - mem.available) / (1024 ** 3)
     standby_gb = available_gb - free_gb
 
@@ -251,62 +317,20 @@ def _get_protected_names() -> set:
 
 
 # ===========================================================================
-# MODULE 4: Deep Clean Engine (extended targets + dry-run)
+# MODULE 4: Deep Clean Engine (Extended Targets + Resilient wuauserv)
 # ===========================================================================
 DEEP_CLEAN_TARGETS = [
-    {
-        "name": "User Temp",
-        "path": tempfile.gettempdir(),
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Windows Temp",
-        "path": os.path.expandvars(r"%WINDIR%\Temp"),
-        "requires_service_stop": None,
-    },
-    {
-        "name": "CrashDumps",
-        "path": os.path.expandvars(r"%LOCALAPPDATA%\CrashDumps"),
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Roblox Logs",
-        "path": os.path.expandvars(r"%LOCALAPPDATA%\Roblox\logs"),
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Windows Update Cache",
-        "path": r"C:\Windows\SoftwareDistribution\Download",
-        "requires_service_stop": "wuauserv",
-    },
-    {
-        "name": "Memory Dumps",
-        "path": r"C:\Windows\Minidump",
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Thumbnail Cache",
-        "path": os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Explorer"),
-        "file_pattern": "*.db",
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Chrome Cache",
-        "path": os.path.expandvars(
-            r"%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache"
-        ),
-        "requires_service_stop": None,
-    },
-    {
-        "name": "Edge Cache",
-        "path": os.path.expandvars(
-            r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache"
-        ),
-        "requires_service_stop": None,
-    },
+    {"name": "User Temp", "path": tempfile.gettempdir(), "requires_service_stop": None},
+    {"name": "Windows Temp", "path": os.path.expandvars(r"%WINDIR%\Temp"), "requires_service_stop": None},
+    {"name": "CrashDumps", "path": os.path.expandvars(r"%LOCALAPPDATA%\CrashDumps"), "requires_service_stop": None},
+    {"name": "Roblox Logs", "path": os.path.expandvars(r"%LOCALAPPDATA%\Roblox\logs"), "requires_service_stop": None},
+    {"name": "Windows Update Cache", "path": r"C:\Windows\SoftwareDistribution\Download", "requires_service_stop": "wuauserv"},
+    {"name": "Memory Dumps", "path": r"C:\Windows\Minidump", "requires_service_stop": None},
+    {"name": "Thumbnail Cache", "path": os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Explorer"), "file_pattern": "*.db", "requires_service_stop": None},
+    {"name": "Chrome Cache", "path": os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache"), "requires_service_stop": None},
+    {"name": "Edge Cache", "path": os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache"), "requires_service_stop": None},
 ]
 
-# Add MEMORY.DMP as a single file target
 _memory_dmp = r"C:\Windows\MEMORY.DMP"
 
 
@@ -342,7 +366,6 @@ def deep_clean_preview() -> list:
                 "requires_service_stop": target.get("requires_service_stop"),
             })
 
-    # Single file: MEMORY.DMP
     if os.path.exists(_memory_dmp):
         try:
             sz = os.path.getsize(_memory_dmp)
@@ -356,7 +379,6 @@ def deep_clean_preview() -> list:
         except OSError:
             pass
 
-    # MuMu logs
     mumu_path = Path(CONFIG.get("mumu", {}).get("install_path", ""))
     if mumu_path.exists():
         vms_dir = mumu_path / "vms"
@@ -382,7 +404,7 @@ def deep_clean_preview() -> list:
 
 
 def deep_clean_execute(targets: list | None = None) -> dict:
-    """Execute deep clean on specified targets (or all if None)."""
+    """Execute deep clean on targets with guaranteed try/finally service restoration."""
     preview = deep_clean_preview()
     if targets:
         preview = [p for p in preview if p["name"] in targets]
@@ -394,65 +416,58 @@ def deep_clean_execute(targets: list | None = None) -> dict:
     for item in preview:
         service = item.get("requires_service_stop")
         service_was_running = False
-
-        # Stop service if needed
-        if service:
-            try:
-                subprocess.run(
-                    ["net", "stop", service],
-                    capture_output=True, timeout=15
-                )
-                service_was_running = True
-            except Exception:
-                pass
-
         path = item["path"]
         freed = 0
         deleted = 0
 
-        if os.path.isfile(path):
-            # Single file (MEMORY.DMP)
+        # Stop service if needed
+        if service:
             try:
-                freed = os.path.getsize(path)
-                os.remove(path)
-                deleted = 1
-            except (PermissionError, OSError):
-                pass
-        else:
-            pattern = None
-            for t in DEEP_CLEAN_TARGETS:
-                if t["path"] == path:
-                    pattern = t.get("file_pattern")
-                    break
-
-            if os.path.exists(path):
-                for root, dirs, files in os.walk(path, topdown=False):
-                    for f in files:
-                        if pattern and not f.endswith(pattern.replace("*", "")):
-                            continue
-                        fp = os.path.join(root, f)
-                        try:
-                            sz = os.path.getsize(fp)
-                            os.remove(fp)
-                            freed += sz
-                            deleted += 1
-                        except (PermissionError, OSError):
-                            continue
-                    for d in dirs:
-                        try:
-                            os.rmdir(os.path.join(root, d))
-                        except (PermissionError, OSError):
-                            continue
-
-        # Restart service
-        if service and service_was_running:
-            try:
-                subprocess.run(
-                    ["net", "start", service],
-                    capture_output=True, timeout=15
-                )
+                subprocess.run(["net", "stop", service], capture_output=True, timeout=15)
+                service_was_running = True
             except Exception:
                 pass
+
+        try:
+            if os.path.isfile(path):
+                try:
+                    freed = os.path.getsize(path)
+                    os.remove(path)
+                    deleted = 1
+                except (PermissionError, OSError):
+                    pass
+            else:
+                pattern = None
+                for t in DEEP_CLEAN_TARGETS:
+                    if t["path"] == path:
+                        pattern = t.get("file_pattern")
+                        break
+
+                if os.path.exists(path):
+                    for root, dirs, files in os.walk(path, topdown=False):
+                        for f in files:
+                            if pattern and not f.endswith(pattern.replace("*", "")):
+                                continue
+                            fp = os.path.join(root, f)
+                            try:
+                                sz = os.path.getsize(fp)
+                                os.remove(fp)
+                                freed += sz
+                                deleted += 1
+                            except (PermissionError, OSError):
+                                continue
+                        for d in dirs:
+                            try:
+                                os.rmdir(os.path.join(root, d))
+                            except (PermissionError, OSError):
+                                continue
+        finally:
+            # Guaranteed service restart in finally block
+            if service and service_was_running:
+                try:
+                    subprocess.run(["net", "start", service], capture_output=True, timeout=15)
+                except Exception:
+                    pass
 
         freed_mb = round(freed / (1024 * 1024), 1)
         total_freed += freed
@@ -463,7 +478,6 @@ def deep_clean_execute(targets: list | None = None) -> dict:
             "freed_mb": freed_mb,
         })
 
-    # Also try Delivery Optimization cache via PowerShell
     try:
         subprocess.run(
             ["powershell", "-Command", "Delete-DeliveryOptimizationCache -Force"],
@@ -483,8 +497,8 @@ def deep_clean_execute(targets: list | None = None) -> dict:
     }
 
 
-def ram_boost() -> dict:
-    """Trim working sets, purge standby list, and clean temp files. Returns stats."""
+def ram_boost(force_standby: bool = True) -> dict:
+    """Trim working sets, conditionally purge standby list, and clean temp files."""
     protected = _get_protected_names()
     mem_before = psutil.virtual_memory()
     breakdown_before = get_ram_breakdown()
@@ -512,8 +526,14 @@ def ram_boost() -> dict:
         except Exception:
             errors += 1
 
-    # Purge Standby List (Module 1)
-    standby_purged = purge_standby_list()
+    # Intelligent Standby Purge Gating:
+    # Purge if explicitly forced (manual click) OR if Standby RAM exceeds threshold (>2.0 GB)
+    min_standby_gate = CONFIG.get("maintenance", {}).get("standby_purge_min_gb", 2.0)
+    should_purge_standby = force_standby or (breakdown_before.get("standby_gb", 0) >= min_standby_gate)
+    
+    standby_purged = False
+    if should_purge_standby:
+        standby_purged = purge_standby_list()
 
     mem_after = psutil.virtual_memory()
     breakdown_after = get_ram_breakdown()
@@ -521,7 +541,7 @@ def ram_boost() -> dict:
     if freed_mb < 0:
         freed_mb = 0.0
 
-    # Clean basic temp files (always runs with boost)
+    # Clean basic temp files
     temp_dirs = [
         tempfile.gettempdir(),
         os.path.expandvars(r"%WINDIR%\Temp"),
@@ -574,19 +594,19 @@ def ram_boost() -> dict:
 
 
 # ===========================================================================
-# MODULE 2: Hardening Drift Detector
+# MODULE 2: Hardening Drift Detector (4/4 Complete Checks)
 # ===========================================================================
 _last_drift_check = None
 _last_drift_result = {}
 
 
 def check_hardening_drift() -> dict:
-    """Check if system hardening settings have drifted from expected values."""
+    """Check all 4 hardening settings: VBS, MPO, Hypervisor, and Defender Exclusions."""
     global _last_drift_check, _last_drift_result
     drift = {}
     checks = {}
 
-    # VBS check
+    # 1. VBS check
     try:
         key = winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
@@ -600,11 +620,11 @@ def check_hardening_drift() -> dict:
         else:
             checks["vbs"] = "ok"
     except FileNotFoundError:
-        checks["vbs"] = "ok"  # Key doesn't exist = VBS not configured via policy (OK)
+        checks["vbs"] = "ok"
     except Exception as e:
         checks["vbs"] = f"error: {e}"
 
-    # MPO check
+    # 2. MPO check
     try:
         key = winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
@@ -618,12 +638,12 @@ def check_hardening_drift() -> dict:
         else:
             checks["mpo"] = "ok"
     except FileNotFoundError:
-        drift["MPO"] = "Key missing — MPO may be active"
+        drift["MPO"] = "Key missing — MPO is active (Default)"
         checks["mpo"] = "drift"
     except Exception as e:
         checks["mpo"] = f"error: {e}"
 
-    # Hypervisor check
+    # 3. Hypervisor check
     try:
         result = subprocess.run(
             ["bcdedit", "/enum", "{current}"],
@@ -638,11 +658,35 @@ def check_hardening_drift() -> dict:
                     drift["Hypervisor"] = "hypervisorlaunchtype is NOT off"
                     checks["hypervisor"] = "drift"
             else:
-                checks["hypervisor"] = "ok"  # Key not present = not enabled
+                checks["hypervisor"] = "ok"
         else:
-            checks["hypervisor"] = "error: bcdedit failed"
+            checks["hypervisor"] = "unknown (needs Admin)"
     except Exception as e:
         checks["hypervisor"] = f"error: {e}"
+
+    # 4. Defender Exclusion check
+    try:
+        mumu_dir = CONFIG.get("mumu", {}).get("install_path", "C:/Program Files/Netease/MuMuPlayer")
+        norm_mumu = os.path.normpath(mumu_dir).lower()
+        r = subprocess.run(
+            ["powershell", "-Command", "(Get-MpPreference).ExclusionPath"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            raw_out = r.stdout.strip()
+            if "must be an administrator" in raw_out.lower():
+                checks["defender_exclusion"] = "unknown (needs Admin)"
+            else:
+                exclusions = [os.path.normpath(line.strip()).lower() for line in raw_out.splitlines() if line.strip()]
+                if any(norm_mumu in exc or exc in norm_mumu for exc in exclusions):
+                    checks["defender_exclusion"] = "ok"
+                else:
+                    checks["defender_exclusion"] = "drift"
+                    drift["Defender Exclusion"] = "MuMu path missing from Defender exclusions"
+        else:
+            checks["defender_exclusion"] = "unknown"
+    except Exception as e:
+        checks["defender_exclusion"] = f"error: {e}"
 
     _last_drift_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _last_drift_result = {
@@ -660,14 +704,14 @@ def check_hardening_drift() -> dict:
 
 
 # ===========================================================================
-# MODULE 3: In-VM Disk Sentinel (ADB → MuMu /data)
+# MODULE 3: In-VM Disk Sentinel (ADB Multi-port → MuMu /data)
 # ===========================================================================
 _vm_disk_cache = []
 _last_vm_disk_check = None
 
 
 def _find_adb() -> str | None:
-    """Find adb executable — MuMu bundles one, or check system PATH."""
+    """Find adb executable dynamically across MuMu subdirectories."""
     mumu_path = Path(CONFIG.get("mumu", {}).get("install_path", ""))
     candidates = [
         mumu_path / "nx_main" / "adb.exe",
@@ -679,15 +723,11 @@ def _find_adb() -> str | None:
     for c in candidates:
         if c.exists():
             return str(c)
-    # Search recursively in mumu_path if not found in standard paths
     if mumu_path.exists():
         for found in mumu_path.rglob("adb.exe"):
             return str(found)
-    # Check system PATH
     try:
-        result = subprocess.run(
-            ["where", "adb"], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["where", "adb"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             return result.stdout.strip().split("\n")[0].strip()
     except Exception:
@@ -721,12 +761,10 @@ def get_vm_disk_status() -> list:
                 if len(lines) >= 2:
                     parts = lines[1].split()
                     if len(parts) >= 5:
-                        # df output: Filesystem 1K-blocks Used Available Use% Mounted
                         total_kb = int(parts[1])
                         used_kb = int(parts[2])
                         avail_kb = int(parts[3])
-                        use_pct_str = parts[4].replace("%", "")
-                        use_pct = int(use_pct_str)
+                        use_pct = int(parts[4].replace("%", ""))
                         results.append({
                             "port": port,
                             "instance": i + 1,
@@ -767,10 +805,8 @@ def trim_vm_caches(port: int) -> bool:
 
 
 # ===========================================================================
-# MODULE 5: Anti-EcoQoS + Background Hog Detector
+# MODULE 5: Real-Time Anti-EcoQoS (<1s hook) + Background Hog Detector
 # ===========================================================================
-
-# ProcessPowerThrottling state structure
 class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
     _fields_ = [
         ("Version", ctypes.c_ulong),
@@ -779,7 +815,6 @@ class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
     ]
 
 
-# Background hog targets — these get force-throttled + lowered priority
 HOG_TARGETS = {
     "compattelrunner.exe",
     "mousocoreworker.exe",
@@ -790,15 +825,12 @@ HOG_TARGETS = {
     "musnotification.exe",
 }
 
-_ecoqos_applied_pids = set()
+_ecoqos_applied_pids: set[int] = set()
 _hog_actions = []
 
 
 def disable_ecoqos_for_mumu() -> int:
-    """Disable Power Throttling (EcoQoS) for all MuMu device processes.
-    
-    Returns count of processes unthrottled.
-    """
+    """Disable Power Throttling (EcoQoS) for all running MuMu device processes."""
     global _ecoqos_applied_pids
     mumu_names = {n.lower() for n in CONFIG.get("mumu", {}).get("process_names", [])}
     count = 0
@@ -815,13 +847,10 @@ def disable_ecoqos_for_mumu() -> int:
                 False, pid,
             )
             if handle:
-                # Version=1, ControlMask=EXECUTION_SPEED(0x1), StateMask=0 → no throttle
-                state = PROCESS_POWER_THROTTLING_STATE(1, 1, 0)
+                state = PROCESS_POWER_THROTTLING_STATE(1, 1, 0)  # V1, Speed control, State=0 (no throttle)
                 try:
                     result = _kernel32.SetProcessInformation(
-                        handle, 4,  # ProcessPowerThrottling
-                        ctypes.byref(state),
-                        ctypes.sizeof(state),
+                        handle, 4, ctypes.byref(state), ctypes.sizeof(state)
                     )
                     if result:
                         _ecoqos_applied_pids.add(pid)
@@ -832,15 +861,13 @@ def disable_ecoqos_for_mumu() -> int:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    # Clean up dead PIDs
     alive_pids = {p.pid for p in psutil.process_iter(["pid"])}
     _ecoqos_applied_pids = _ecoqos_applied_pids & alive_pids
-
     return count
 
 
 def detect_and_throttle_hogs() -> list:
-    """Find background hog processes and lower their priority."""
+    """Find background hog processes and lower their priority to IDLE."""
     global _hog_actions
     actions = []
 
@@ -853,11 +880,9 @@ def detect_and_throttle_hogs() -> list:
             pid = proc.info["pid"]
             cpu = proc.info["cpu_percent"] or 0
 
-            # Lower priority to IDLE
             try:
                 p = psutil.Process(pid)
-                current_nice = p.nice()
-                if current_nice != psutil.IDLE_PRIORITY_CLASS:
+                if p.nice() != psutil.IDLE_PRIORITY_CLASS:
                     p.nice(psutil.IDLE_PRIORITY_CLASS)
                     action = f"Throttled {proc.info['name']} (PID {pid}, CPU {cpu}%)"
                     actions.append(action)
@@ -872,7 +897,7 @@ def detect_and_throttle_hogs() -> list:
 
 
 # ===========================================================================
-# MODULE 6: Growth Tracker (MuMu vms/ folder snapshots)
+# MODULE 6: Growth Tracker (MuMu vms/ storage snapshots)
 # ===========================================================================
 def _load_growth_data() -> list:
     if GROWTH_PATH.exists():
@@ -885,7 +910,6 @@ def _load_growth_data() -> list:
 
 
 def _save_growth_data(data: list):
-    # Keep last 30 days of snapshots (max ~120 entries at 6h intervals)
     with open(GROWTH_PATH, "w", encoding="utf-8") as f:
         json.dump(data[-120:], f, indent=2, ensure_ascii=False)
 
@@ -903,7 +927,6 @@ def snapshot_folder_sizes() -> dict:
         "disks": {},
     }
 
-    # MuMu vms/ subfolders
     mumu_path = Path(CONFIG.get("mumu", {}).get("install_path", ""))
     vms_dir = mumu_path / "vms"
     if vms_dir.exists():
@@ -915,7 +938,6 @@ def snapshot_folder_sizes() -> dict:
                 except Exception:
                     continue
 
-    # Disk partition usage
     for part in psutil.disk_partitions():
         try:
             usage = psutil.disk_usage(part.mountpoint)
@@ -931,12 +953,11 @@ def snapshot_folder_sizes() -> dict:
     _growth_data.append(snapshot)
     _save_growth_data(_growth_data)
     add_event("system", f"📊 Growth snapshot: {len(snapshot['folders'])} VM folders tracked")
-
     return snapshot
 
 
 # ===========================================================================
-# MODULE 7: Defender Maintenance
+# MODULE 7: Defender Maintenance (Non-blocking Popen)
 # ===========================================================================
 _last_scan_date = None
 _defender_status = {}
@@ -979,7 +1000,7 @@ def get_defender_status() -> dict:
 
 
 def run_quick_scan() -> bool:
-    """Start a Windows Defender Quick Scan."""
+    """Start an asynchronous, non-blocking Defender Quick Scan."""
     global _last_scan_date
     try:
         subprocess.Popen(
@@ -987,14 +1008,14 @@ def run_quick_scan() -> bool:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _last_scan_date = date.today()
-        add_event("system", "🔒 Defender Quick Scan started")
+        add_event("system", "🔒 Defender Quick Scan started (Background)")
         return True
     except Exception:
         return False
 
 
 def scan_downloads_folder() -> int:
-    """Scan new files in Downloads folder (modified in last 30 min)."""
+    """Scan newly written files in Downloads folder."""
     downloads = Path.home() / "Downloads"
     if not downloads.exists():
         return 0
@@ -1007,8 +1028,7 @@ def scan_downloads_folder() -> int:
         if f.is_file() and f.stat().st_mtime > cutoff:
             try:
                 subprocess.Popen(
-                    ["powershell", "-Command",
-                     f'Start-MpScan -ScanType 3 -ScanPath "{f}"'],
+                    ["powershell", "-Command", f'Start-MpScan -ScanType 3 -ScanPath "{f}"'],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 scanned += 1
@@ -1107,7 +1127,6 @@ def get_system_metrics() -> dict:
     }
 
 
-# State for computing per-second rates
 _prev_disk_io = None
 _prev_net_io = None
 _prev_time = None
@@ -1150,9 +1169,15 @@ def get_metrics_with_rates() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# MuMu Instance Monitor
+# MuMu Instance Monitor (With Fast Anti-EcoQoS Hook)
 # ---------------------------------------------------------------------------
 def get_mumu_instances() -> list:
+    # Real-Time Hook: Unthrottle new MuMu instances as soon as they appear (<1 second)
+    try:
+        disable_ecoqos_for_mumu()
+    except Exception:
+        pass
+
     mumu_names = {n.lower() for n in CONFIG.get("mumu", {}).get("process_names", [])}
     instances = []
     for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "create_time"]):
@@ -1254,7 +1279,8 @@ async def auto_boost_loop():
                     should_boost = True
 
             if should_boost:
-                _last_boost_result = ram_boost()
+                # In auto/scheduled mode, apply intelligent gating on standby purge
+                _last_boost_result = ram_boost(force_standby=False)
                 _last_boost_time = time.time()
                 await broadcast_event({
                     "type": "boost_triggered",
@@ -1268,34 +1294,26 @@ async def auto_boost_loop():
 
 
 # ---------------------------------------------------------------------------
-# Maintenance Background Task (Modules 2, 3, 5, 6, 7)
+# Maintenance Background Task
 # ---------------------------------------------------------------------------
 _maintenance_task = None
 
 
 async def maintenance_loop():
-    """Background loop handling periodic maintenance tasks."""
-    # Track intervals
     last_drift_check = 0
     last_vm_disk_check = 0
-    last_ecoqos_check = 0
     last_hog_check = 0
     last_growth_snapshot = 0
     last_defender_check = 0
     last_downloads_sweep = 0
 
-    maint_cfg = CONFIG.get("maintenance", {})
+    await asyncio.sleep(5)
 
-    # Initial checks on startup
-    await asyncio.sleep(5)  # Let server stabilize
-
-    # Startup drift check
     try:
         check_hardening_drift()
     except Exception as e:
         add_event("error", f"Drift check failed: {e}")
 
-    # Startup EcoQoS
     try:
         count = disable_ecoqos_for_mumu()
         if count > 0:
@@ -1303,7 +1321,6 @@ async def maintenance_loop():
     except Exception:
         pass
 
-    # Startup Defender status
     try:
         get_defender_status()
     except Exception:
@@ -1314,7 +1331,7 @@ async def maintenance_loop():
             now = time.time()
             maint_cfg = CONFIG.get("maintenance", {})
 
-            # Module 2: Hardening Drift Detector (every N hours)
+            # Module 2: Hardening Drift Detector
             drift_interval = maint_cfg.get("drift_check_hours", 6) * 3600
             if now - last_drift_check >= drift_interval:
                 try:
@@ -1324,17 +1341,15 @@ async def maintenance_loop():
                     pass
                 last_drift_check = now
 
-            # Module 3: VM Disk Sentinel (every 15 min)
-            if now - last_vm_disk_check >= 900:  # 15 minutes
+            # Module 3: VM Disk Sentinel
+            if now - last_vm_disk_check >= 900:
                 try:
                     vm_data = get_vm_disk_status()
-                    # Auto-trim if enabled and any VM over threshold
                     if maint_cfg.get("vm_auto_trim", True):
                         for vm in vm_data:
                             if vm["used_pct"] >= maint_cfg.get("vm_disk_warn_pct", 85):
                                 trim_vm_caches(vm["port"])
                                 await asyncio.sleep(2)
-                                # Re-check after trim
                                 updated = get_vm_disk_status()
                                 for u in updated:
                                     if u["port"] == vm["port"] and u["used_pct"] >= maint_cfg.get("vm_disk_critical_pct", 90):
@@ -1344,17 +1359,7 @@ async def maintenance_loop():
                     pass
                 last_vm_disk_check = now
 
-            # Module 5: Anti-EcoQoS (every 30 seconds — fast, catches new MuMu launches)
-            if now - last_ecoqos_check >= 30:
-                try:
-                    count = disable_ecoqos_for_mumu()
-                    if count > 0:
-                        add_event("system", f"🛡️ Anti-EcoQoS applied to {count} new MuMu process(es)")
-                except Exception:
-                    pass
-                last_ecoqos_check = now
-
-            # Module 5: Hog Detector (every 60 seconds)
+            # Module 5: Hog Detector
             if now - last_hog_check >= 60:
                 try:
                     detect_and_throttle_hogs()
@@ -1362,7 +1367,7 @@ async def maintenance_loop():
                     pass
                 last_hog_check = now
 
-            # Module 6: Growth Tracker (every N hours)
+            # Module 6: Growth Tracker
             growth_interval = maint_cfg.get("growth_snapshot_hours", 6) * 3600
             if now - last_growth_snapshot >= growth_interval:
                 try:
@@ -1371,7 +1376,7 @@ async def maintenance_loop():
                     pass
                 last_growth_snapshot = now
 
-            # Module 7: Defender (check status every hour)
+            # Module 7: Defender Check
             if now - last_defender_check >= 3600:
                 try:
                     status = get_defender_status()
@@ -1380,7 +1385,7 @@ async def maintenance_loop():
                     pass
                 last_defender_check = now
 
-            # Module 7: Quick Scan at configured hour (once per day)
+            # Module 7: Quick Scan at 04:00 (Non-blocking Popen)
             current_hour = datetime.now().hour
             scan_hour = maint_cfg.get("defender_scan_hour", 4)
             if current_hour == scan_hour and _last_scan_date != date.today():
@@ -1389,7 +1394,7 @@ async def maintenance_loop():
                 except Exception:
                     pass
 
-            # Module 7: Downloads sweep
+            # Module 7: Downloads Sweep
             sweep_interval = maint_cfg.get("downloads_sweep_minutes", 30) * 60
             if now - last_downloads_sweep >= sweep_interval:
                 try:
@@ -1398,30 +1403,43 @@ async def maintenance_loop():
                     pass
                 last_downloads_sweep = now
 
-            await asyncio.sleep(10)  # Check every 10 seconds
+            await asyncio.sleep(10)
         except Exception as e:
             add_event("error", f"Maintenance loop error: {str(e)}")
             await asyncio.sleep(30)
 
 
 # ---------------------------------------------------------------------------
-# WebSocket Manager
+# WebSocket Connection Manager
 # ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self.active_connections: list[tuple[WebSocket, bool]] = []  # (ws, is_authenticated)
 
-    async def connect(self, ws: WebSocket):
+    async def connect(self, ws: WebSocket, is_auth: bool):
         await ws.accept()
-        self.active_connections.append(ws)
+        self.active_connections.append((ws, is_auth))
+
+    def set_auth(self, ws: WebSocket, is_auth: bool):
+        for i, (conn, _) in enumerate(self.active_connections):
+            if conn == ws:
+                self.active_connections[i] = (ws, is_auth)
+                break
+
+    def is_auth(self, ws: WebSocket) -> bool:
+        if not is_auth_enabled():
+            return True
+        for conn, auth_val in self.active_connections:
+            if conn == ws:
+                return auth_val
+        return False
 
     def disconnect(self, ws: WebSocket):
-        if ws in self.active_connections:
-            self.active_connections.remove(ws)
+        self.active_connections = [c for c in self.active_connections if c[0] != ws]
 
     async def broadcast(self, data: dict):
         dead = []
-        for conn in self.active_connections:
+        for conn, _ in self.active_connections:
             try:
                 await conn.send_json(data)
             except Exception:
@@ -1438,16 +1456,15 @@ async def broadcast_event(data: dict):
 
 
 # ---------------------------------------------------------------------------
-# FastAPI App with Lifespan
+# FastAPI App
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _auto_boost_task, _maintenance_task
-    # Prime CPU percent
     psutil.cpu_percent(interval=0, percpu=True)
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
-    add_event("system", "Genesis Dashboard started (Fable 5 Engine)")
+    add_event("system", "Genesis Dashboard started (v2.1 Hardened Engine)")
     yield
     if _auto_boost_task:
         _auto_boost_task.cancel()
@@ -1456,7 +1473,7 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Dashboard stopped")
 
 
-app = FastAPI(title="Genesis Dashboard", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Genesis Dashboard", version="2.1.0", lifespan=lifespan)
 
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
@@ -1468,12 +1485,54 @@ async def serve_dashboard():
     return FileResponse(str(static_dir / "index.html"))
 
 
+# ---------------------------------------------------------------------------
+# Authentication Endpoints
+# ---------------------------------------------------------------------------
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request, payload: dict):
+    client_ip = request.client.host if request.client else "unknown"
+    if is_ip_locked(client_ip):
+        return JSONResponse(
+            {"error": "Too many failed attempts. Locked for 10 minutes."},
+            status_code=429,
+        )
+
+    pin = str(payload.get("pin", "")).strip()
+    correct_pin = str(CONFIG.get("auth", {}).get("pin", "770088")).strip()
+
+    if pin == correct_pin:
+        token = create_session_token()
+        add_event("system", f"🔑 Session unlocked (IP: {client_ip})")
+        return JSONResponse({"ok": True, "token": token})
+    else:
+        record_failed_attempt(client_ip)
+        add_event("warning", f"🚫 Failed PIN attempt from IP: {client_ip}")
+        return JSONResponse({"error": "Invalid PIN"}, status_code=401)
+
+
+@app.get("/api/auth/status")
+async def api_auth_status(request: Request):
+    token = request.headers.get("X-Auth-Token") or request.query_params.get("token")
+    return JSONResponse({
+        "auth_required": is_auth_enabled(),
+        "authenticated": verify_session_token(token),
+    })
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Endpoint with Guarded Commands
+# ---------------------------------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    await manager.connect(ws)
+    initial_token = ws.query_params.get("token")
+    is_authed = verify_session_token(initial_token)
+    await manager.connect(ws, is_authed)
+
     try:
         await ws.send_json({
             "type": "init",
+            "auth_required": is_auth_enabled(),
+            "authenticated": is_authed,
             "config": CONFIG,
             "history": event_history[-50:],
             "hardening": _last_drift_result,
@@ -1519,8 +1578,24 @@ async def websocket_endpoint(ws: WebSocket):
 async def handle_ws_command(ws: WebSocket, data: dict):
     cmd = data.get("command")
 
+    # Handle client auth handshake
+    if cmd == "auth":
+        token = data.get("token")
+        if verify_session_token(token):
+            manager.set_auth(ws, True)
+            await ws.send_json({"type": "auth_success"})
+        else:
+            manager.set_auth(ws, False)
+            await ws.send_json({"type": "auth_failed"})
+        return
+
+    # Guard all active/destructive actions behind authentication
+    if is_auth_enabled() and not manager.is_auth(ws):
+        await ws.send_json({"type": "auth_required", "error": "Authentication required for this command."})
+        return
+
     if cmd == "boost":
-        result = ram_boost()
+        result = ram_boost(force_standby=True)
         await ws.send_json({"type": "boost_result", "result": result})
 
     elif cmd == "update_config":
@@ -1536,17 +1611,15 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         save_config(CONFIG)
         await ws.send_json({"type": "config_updated", "config": CONFIG})
 
-    # Module 4: Deep Clean commands
     elif cmd == "deep_clean_preview":
         preview = deep_clean_preview()
         await ws.send_json({"type": "deep_clean_preview", "data": preview})
 
     elif cmd == "deep_clean_execute":
-        targets = data.get("targets")  # list of target names, or None for all
+        targets = data.get("targets")
         result = deep_clean_execute(targets)
         await ws.send_json({"type": "deep_clean_result", "data": result})
 
-    # Module 3: VM Disk commands
     elif cmd == "vm_disk_refresh":
         vm_data = get_vm_disk_status()
         await ws.send_json({"type": "vm_disk_status", "data": vm_data})
@@ -1557,12 +1630,10 @@ async def handle_ws_command(ws: WebSocket, data: dict):
             success = trim_vm_caches(port)
             await ws.send_json({"type": "vm_trim_result", "port": port, "success": success})
 
-    # Module 2: Hardening check on-demand
     elif cmd == "check_hardening":
         result = check_hardening_drift()
         await ws.send_json({"type": "hardening_status", "data": result})
 
-    # Module 7: Defender commands
     elif cmd == "defender_status":
         status = get_defender_status()
         await ws.send_json({"type": "defender_status", "data": status})
@@ -1571,7 +1642,6 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         success = run_quick_scan()
         await ws.send_json({"type": "quick_scan_result", "success": success})
 
-    # Module 6: Growth data
     elif cmd == "growth_data":
         await ws.send_json({"type": "growth_data", "data": _growth_data[-24:]})
 
@@ -1580,8 +1650,10 @@ async def handle_ws_command(ws: WebSocket, data: dict):
 # REST API Endpoints
 # ---------------------------------------------------------------------------
 @app.post("/api/boost")
-async def api_boost():
-    result = ram_boost()
+async def api_boost(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    result = ram_boost(force_standby=True)
     return JSONResponse(result)
 
 
@@ -1591,7 +1663,9 @@ async def api_get_config():
 
 
 @app.put("/api/config")
-async def api_put_config(payload: dict):
+async def api_put_config(request: Request, payload: dict):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     ab = payload.get("auto_boost", {})
     if "threshold_percent" in ab:
         CONFIG["auto_boost"]["threshold_percent"] = int(ab["threshold_percent"])
@@ -1616,7 +1690,9 @@ async def api_processes():
 
 
 @app.post("/api/kill/{pid}")
-async def api_kill(pid: int):
+async def api_kill(request: Request, pid: int):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     try:
         proc = psutil.Process(pid)
         name = proc.name()
@@ -1638,7 +1714,9 @@ async def api_deep_clean_preview():
 
 
 @app.post("/api/deep-clean/execute")
-async def api_deep_clean_execute():
+async def api_deep_clean_execute(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     result = deep_clean_execute()
     return JSONResponse(result)
 
@@ -1669,7 +1747,7 @@ if __name__ == "__main__":
     host = CONFIG.get("server", {}).get("host", "0.0.0.0")
     port = CONFIG.get("server", {}).get("port", 7700)
     print(f"\n{'='*50}")
-    print(f"  GENESIS DASHBOARD v2.0 — Fable 5 Engine")
+    print(f"  GENESIS DASHBOARD v2.1 — Fable 5 Hardened Engine")
     print(f"  http://localhost:{port}")
     print(f"  http://0.0.0.0:{port} (LAN access)")
     print(f"{'='*50}\n")
