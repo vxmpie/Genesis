@@ -137,9 +137,7 @@ def add_event(event_type: str, message: str):
     return entry
 
 
-# ===========================================================================
-# MODULE 1: Standby Memory Purge + RAM Boost via Win32 API
-# ===========================================================================
+_advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 _psapi = ctypes.WinDLL("psapi")
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _ntdll = ctypes.WinDLL("ntdll")
@@ -147,6 +145,46 @@ _ntdll = ctypes.WinDLL("ntdll")
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_SET_QUOTA = 0x0100
 PROCESS_SET_INFORMATION = 0x0200
+TOKEN_ADJUST_PRIVILEGES = 0x0020
+TOKEN_QUERY = 0x0008
+SE_PRIVILEGE_ENABLED = 0x00000002
+
+class LUID(ctypes.Structure):
+    _fields_ = [("LowPart", ctypes.wintypes.DWORD), ("HighPart", ctypes.wintypes.LONG)]
+
+class LUID_AND_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [("Luid", LUID), ("Attributes", ctypes.wintypes.DWORD)]
+
+class TOKEN_PRIVILEGES(ctypes.Structure):
+    _fields_ = [("PrivilegeCount", ctypes.wintypes.DWORD), ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+
+def _enable_privilege(privilege_name: str) -> bool:
+    try:
+        h_token = ctypes.wintypes.HANDLE()
+        if not _advapi32.OpenProcessToken(
+            _kernel32.GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            ctypes.byref(h_token),
+        ):
+            return False
+
+        luid = LUID()
+        if not _advapi32.LookupPrivilegeValueW(None, privilege_name, ctypes.byref(luid)):
+            _kernel32.CloseHandle(h_token)
+            return False
+
+        tp = TOKEN_PRIVILEGES()
+        tp.PrivilegeCount = 1
+        tp.Privileges[0].Luid = luid
+        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
+
+        res = _advapi32.AdjustTokenPrivileges(
+            h_token, False, ctypes.byref(tp), ctypes.sizeof(tp), None, None
+        )
+        _kernel32.CloseHandle(h_token)
+        return bool(res)
+    except Exception:
+        return False
 
 _kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
 _kernel32.OpenProcess.argtypes = [
@@ -168,6 +206,8 @@ def purge_standby_list() -> bool:
     Requires SeProfileSingleProcessPrivilege (Admin).
     """
     try:
+        _enable_privilege("SeProfileSingleProcessPrivilege")
+        _enable_privilege("SeIncreaseQuotaPrivilege")
         command = ctypes.c_ulong(4)  # MemoryPurgeStandbyList
         status = _ntdll.NtSetSystemInformation(
             0x50,  # SystemMemoryListInformation
@@ -630,12 +670,19 @@ def _find_adb() -> str | None:
     """Find adb executable — MuMu bundles one, or check system PATH."""
     mumu_path = Path(CONFIG.get("mumu", {}).get("install_path", ""))
     candidates = [
+        mumu_path / "nx_main" / "adb.exe",
+        mumu_path / "nx_device" / "15.0" / "shell" / "adb.exe",
+        mumu_path / "nx_device" / "12.0" / "shell" / "adb.exe",
         mumu_path / "shell" / "adb.exe",
         mumu_path / "adb.exe",
     ]
     for c in candidates:
         if c.exists():
             return str(c)
+    # Search recursively in mumu_path if not found in standard paths
+    if mumu_path.exists():
+        for found in mumu_path.rglob("adb.exe"):
+            return str(found)
     # Check system PATH
     try:
         result = subprocess.run(
