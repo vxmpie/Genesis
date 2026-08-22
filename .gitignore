@@ -43,6 +43,8 @@ AutoClearCache/config.json
 !AutoClearCache/config.example.json
 .env
 .env.*
+*.xml
+*.key
 
 # Data & Runtime Logs
 AutoClearCache/data/

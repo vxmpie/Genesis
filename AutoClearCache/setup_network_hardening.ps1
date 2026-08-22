@@ -1,5 +1,5 @@
 # ===========================================================================
-# Genesis Network Hardening & Watchdog Installer
+# Genesis Network Hardening & Watchdog Installer v2.0
 # Execute with Administrator Privileges
 # ===========================================================================
 
@@ -72,7 +72,7 @@ if (-not $targetKey) {
     $desc = (Get-ItemProperty -Path $targetKey).DriverDesc
     Write-Host "  [FOUND] Target Driver: $desc ($targetKey)" -ForegroundColor Cyan
     
-    # Apply driver performance properties
+    # Apply driver performance properties with explicit types
     Set-ItemProperty -Path $targetKey -Name "LpsEn" -Value "0" -Type String
     Set-ItemProperty -Path $targetKey -Name "Dot11dEnable" -Value "0" -Type String
     Set-ItemProperty -Path $targetKey -Name "PnPCapabilities" -Value 24 -Type DWord
@@ -83,20 +83,33 @@ if (-not $targetKey) {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Install Standalone Scheduled Task Watchdog (Runs under SYSTEM at Boot)
+# 5. Install Standalone Scheduled Task Watchdog (Isolated in C:\Genesis)
 # ---------------------------------------------------------------------------
-Write-Host "[5/6] Registering Standalone Network Watchdog (SYSTEM Scheduled Task)..." -ForegroundColor Yellow
-$scriptPath = "C:\Users\rocke\OneDrive\Documents\GitHub\Genesis\AutoClearCache\net_watchdog.ps1"
+Write-Host "[5/6] Deploying Watchdog Runtime to Local SSD (C:\Genesis)..." -ForegroundColor Yellow
+$sourceScript = Join-Path $PSScriptRoot "net_watchdog.ps1"
+$runtimeDir = "C:\Genesis"
+$destScript = Join-Path $runtimeDir "net_watchdog.ps1"
 
-if (-not (Test-Path $scriptPath)) {
-    Write-Host "  [ERROR] Watchdog script not found at $scriptPath!" -ForegroundColor Red
+if (-not (Test-Path $sourceScript)) {
+    # Fallback to current directory
+    $sourceScript = ".\net_watchdog.ps1"
+}
+
+if (-not (Test-Path $sourceScript)) {
+    Write-Host "  [ERROR] Source watchdog script not found at $sourceScript!" -ForegroundColor Red
 } else {
+    if (-not (Test-Path $runtimeDir)) {
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    }
+    Copy-Item -Path $sourceScript -Destination $destScript -Force
+    Write-Host "  [OK] Deployed net_watchdog.ps1 to $destScript (Independent of OneDrive)" -ForegroundColor Green
+
     $taskName = "Genesis-NetworkWatchdog"
     
-    # Remove older task version if exists
+    # Unregister previous task if exists
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destScript`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 0)
