@@ -1,16 +1,18 @@
 # ===========================================================================
-# Genesis Network Hardening & Watchdog Installer v2.1
+# Genesis Network Hardening and Watchdog Installer
 # Execute with Administrator Privileges
 # ===========================================================================
 
-Write-Host "`n========================================================" -ForegroundColor Cyan
-Write-Host "  GENESIS NETWORK HARDENING & SELF-HEALING WATCHDOG" -ForegroundColor Cyan
-Write-Host "========================================================`n" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "========================================================" -ForegroundColor Cyan
+Write-Host "  GENESIS NETWORK HARDENING AND SELF-HEALING WATCHDOG" -ForegroundColor Cyan
+Write-Host "========================================================" -ForegroundColor Cyan
+Write-Host ""
 
 # ---------------------------------------------------------------------------
 # 1. Wi-Fi Profile Optimizations
 # ---------------------------------------------------------------------------
-Write-Host "[1/6] Optimizing Wi-Fi Profile Priority & Randomization..." -ForegroundColor Yellow
+Write-Host "[1/6] Optimizing Wi-Fi Profile Priority and Randomization..." -ForegroundColor Yellow
 netsh wlan set profileorder name="KMITL-HiSpeed" interface="Wi-Fi" priority=1 | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  [OK] KMITL-HiSpeed set to Priority #1" -ForegroundColor Green
@@ -18,9 +20,9 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  [WARN] Failed to set profile order (Exit code: $LASTEXITCODE)" -ForegroundColor DarkYellow
 }
 
-netsh wlan set profileparameter name="KMITL-HiSpeed" Randomization=disable | Out-Null
+netsh wlan set profileparameter name="KMITL-HiSpeed" Randomization=no authMode=machineOrUser | Out-Null
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "  [OK] MAC Randomization set to Disabled" -ForegroundColor Green
+    Write-Host "  [OK] MAC Randomization set to Disabled (authMode: machineOrUser)" -ForegroundColor Green
 } else {
     Write-Host "  [WARN] Failed to set randomization (Exit code: $LASTEXITCODE)" -ForegroundColor DarkYellow
 }
@@ -123,11 +125,14 @@ if (-not (Test-Path $sourceScript)) {
 # ---------------------------------------------------------------------------
 # 6. Soft-Restart Wi-Fi Adapter (Kept at the very end)
 # ---------------------------------------------------------------------------
-Write-Host "`n[6/6] Reloading Wi-Fi Adapter Parameters (Adapter Bounce)..." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "[6/6] Reloading Wi-Fi Adapter Parameters (Adapter Bounce)..." -ForegroundColor Yellow
 Write-Host "  Note: Brief 2-3s reconnection may occur..." -ForegroundColor DarkYellow
 Restart-NetAdapter -Name "Wi-Fi" -Confirm:$false -ErrorAction SilentlyContinue
-Write-Host "  [OK] Wi-Fi Adapter reloaded successfully!`n" -ForegroundColor Green
+Write-Host "  [OK] Wi-Fi Adapter reloaded successfully!" -ForegroundColor Green
+Write-Host ""
 
 Write-Host "========================================================" -ForegroundColor Green
-Write-Host "  SETUP COMPLETE — Network is now Hardened & Self-Healing" -ForegroundColor Green
-Write-Host "========================================================`n" -ForegroundColor Green
+Write-Host "  SETUP COMPLETE - Network is now Hardened and Self-Healing" -ForegroundColor Green
+Write-Host "========================================================" -ForegroundColor Green
+Write-Host ""

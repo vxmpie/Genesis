@@ -1,5 +1,5 @@
 # ===========================================================================
-# Genesis Autonomous Network Watchdog v2.1
+# Genesis Autonomous Network Watchdog v2.2
 # Execution Environment: SYSTEM Task (Isolated in C:\Genesis)
 # Independent of OneDrive, User Sessions, and server.py
 # Compatible with Windows PowerShell 5.1 & PowerShell Core

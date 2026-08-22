@@ -33,6 +33,7 @@ AutoClearCache/env/
 
 # Binaries & Executables
 AutoClearCache/cloudflared.exe
+cloudflared.exe
 *.exe
 !*.lua
 
@@ -48,6 +49,7 @@ AutoClearCache/config.json
 
 # Data & Runtime Logs
 AutoClearCache/data/
+data/
 AutoClearCache/*.log
 *.log
 
