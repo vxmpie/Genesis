@@ -728,10 +728,12 @@ body {
 }
 
 .boost-last {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
     font-family: var(--font-mono);
-    padding: 8px 0;
+    padding: 6px 0;
+    line-height: 1.4;
+    word-break: break-word;
 }
 
 .boost-now-btn {
@@ -1669,103 +1671,376 @@ body {
 }
 
 /* ============================================================
-   Responsive
+   Responsive Design & Mobile UI Polish
    ============================================================ */
 
 @media (max-width: 900px) {
     .metrics-row {
         grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
     }
 
     .two-col {
         grid-template-columns: 1fr;
+        gap: 12px;
     }
 
     .cores-chart {
         grid-template-columns: repeat(8, 1fr);
-        height: 120px;
-    }
-
-    .net-stats {
-        grid-template-columns: repeat(2, 1fr);
+        height: 100px;
     }
 
     .hardening-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 
     .defender-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 
     .observatory-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 580px) {
+    /* Top Header Bar */
     .header {
-        padding: 12px 16px;
+        padding: 10px 14px;
+        gap: 8px;
+        flex-wrap: wrap;
     }
 
-    .header h1 {
+    .header-left {
+        gap: 8px;
+    }
+
+    .logo {
+        width: 30px;
+        height: 30px;
         font-size: 15px;
     }
 
-    .dashboard {
-        padding: 12px;
-        gap: 12px;
+    .header h1 {
+        font-size: 14px;
+        letter-spacing: 0.5px;
     }
 
-    .metrics-row {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
+    .header-right {
+        gap: 6px;
     }
 
-    .metric-card {
-        padding: 14px;
+    .connection-status {
+        padding: 4px 10px;
+        font-size: 11px;
+        gap: 6px;
     }
 
-    .metric-ring-container {
-        width: 72px;
-        height: 72px;
+    .conn-dot {
+        width: 6px;
+        height: 6px;
     }
 
-    .ring-number {
-        font-size: 18px;
-    }
-
-    .card {
-        padding: 14px;
-    }
-
-    .cores-chart {
-        grid-template-columns: repeat(8, 1fr);
-        height: 80px;
-    }
-
-    .core-label {
-        font-size: 7px;
-    }
-
-    .net-stats {
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
+    .auth-badge {
+        padding: 4px 10px;
+        font-size: 11px;
+        gap: 4px;
     }
 
     .uptime {
         display: none;
     }
 
+    /* Main Container */
+    .dashboard {
+        padding: 10px;
+        gap: 10px;
+    }
+
+    .card {
+        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        gap: 10px;
+    }
+
+    .card-header {
+        margin-bottom: 2px;
+    }
+
+    .card-header h2 {
+        font-size: 13px;
+        letter-spacing: 0.3px;
+    }
+
+    /* 4 Primary Metric Rings (2x2 Balanced Grid) */
+    .metrics-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .metric-card {
+        padding: 12px 10px;
+        gap: 6px;
+        min-height: 140px;
+        justify-content: center;
+    }
+
+    .metric-ring-container {
+        width: 62px;
+        height: 62px;
+    }
+
+    .metric-ring-container svg {
+        width: 62px;
+        height: 62px;
+    }
+
+    .ring-number {
+        font-size: 16px;
+        font-weight: 800;
+    }
+
+    .ring-unit {
+        font-size: 10px;
+    }
+
+    .metric-name {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-sub {
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    .ram-breakdown-bar {
+        height: 3px;
+        margin: 2px 0;
+        width: 85%;
+    }
+
+    .ram-breakdown-text {
+        font-size: 8.5px;
+        gap: 4px;
+    }
+
+    /* Per-Core Bars */
+    .cores-chart {
+        grid-template-columns: repeat(8, 1fr);
+        height: 70px;
+        gap: 4px;
+    }
+
+    .core-label {
+        font-size: 7px;
+    }
+
+    /* Hardening Status (Clean 2x2 Grid) */
     .hardening-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    .hardening-item {
+        padding: 8px 10px;
+        gap: 4px;
+        border-radius: 6px;
+    }
+
+    .hardening-icon {
+        font-size: 16px;
+    }
+
+    .hardening-name {
+        font-size: 10px;
+        letter-spacing: 0.2px;
+    }
+
+    .hardening-status {
+        font-size: 9.5px;
+    }
+
+    .hardening-last-check {
+        font-size: 9.5px;
+        margin-top: 6px;
+    }
+
+    /* Auto-Boost Card */
+    .boost-controls {
+        gap: 8px;
+    }
+
+    .boost-row {
+        font-size: 12px;
+    }
+
+    .threshold-control {
+        gap: 4px;
+    }
+
+    .threshold-btn {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+    }
+
+    .threshold-value {
+        font-size: 13px;
+        min-width: 44px;
+    }
+
+    .mode-select {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    .boost-now-btn {
+        padding: 10px;
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    /* MuMu & Processes Tables (Scrollable Card Wrappers) */
+    .mumu-table-wrap, .procs-table-wrap {
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mumu-table th, .mumu-table td,
+    .procs-table th, .procs-table td {
+        padding: 6px 8px;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    /* Deep Clean & Defender */
+    .deep-clean-preview {
+        max-height: 180px;
     }
 
     .defender-grid {
         grid-template-columns: 1fr 1fr;
+        gap: 6px;
     }
 
+    .defender-item {
+        padding: 8px 10px;
+        border-radius: 6px;
+    }
+
+    .defender-label {
+        font-size: 9.5px;
+    }
+
+    .defender-value {
+        font-size: 11px;
+    }
+
+    .scan-btn, .execute-btn {
+        padding: 6px 12px;
+        font-size: 11px;
+    }
+
+    /* Module 8: Network Observatory (Clean 2x2 Balanced Grid on Mobile) */
     .observatory-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 6px;
+    }
+
+    .observatory-item {
+        padding: 10px 12px;
+        min-height: 105px;
+        border-radius: 8px;
+    }
+
+    .obs-header {
+        margin-bottom: 4px;
+    }
+
+    .obs-title {
+        font-size: 9.5px;
+        letter-spacing: 0.2px;
+    }
+
+    .obs-badge {
+        font-size: 8.5px;
+        padding: 1px 6px;
+    }
+
+    .obs-main-val {
+        margin-bottom: 4px;
+        gap: 2px;
+    }
+
+    .obs-number {
+        font-size: 18px;
+    }
+
+    .obs-unit {
+        font-size: 10px;
+    }
+
+    .obs-ssid {
+        font-size: 12px;
+    }
+
+    .obs-text {
+        font-size: 11px;
+    }
+
+    .obs-sub-stats {
+        font-size: 9.5px;
+    }
+
+    .obs-traffic-rates {
+        gap: 4px;
+        margin-bottom: 4px;
+    }
+
+    .traffic-col {
+        padding: 2px 4px;
+        gap: 2px;
+    }
+
+    .traffic-speed {
+        font-size: 9.5px;
+    }
+
+    .traffic-label {
+        font-size: 7.5px;
+    }
+
+    .watchdog-log-panel {
+        margin-top: 8px;
+        padding: 8px;
+    }
+
+    .watchdog-log-console {
+        font-size: 9.5px;
+        max-height: 110px;
+    }
+
+    /* Toast Container */
+    .toast-container {
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
+    }
+
+    .toast {
+        max-width: 100%;
+        padding: 10px 14px;
+        font-size: 12px;
     }
 }
