@@ -129,7 +129,8 @@ function handleMessage(data) {
             break;
         case 'boost_triggered':
             onBoostResult(data.result);
-            showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB`);
+            const tempStr = data.result && data.result.freed_temp_mb > 0 ? ` + ${data.result.freed_temp_mb}MB Temp` : '';
+            showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB RAM${tempStr}`);
             break;
         case 'config_updated':
             STATE.config = data.config;
@@ -425,7 +426,14 @@ function updateAutoBoostStatus(ab) {
 
     if (ab.last_boost_time) {
         const res = ab.last_boost_result;
-        DOM.boostLast.textContent = `Last boost: ${ab.last_boost_time}${res ? ` — freed ${res.freed_mb} MB` : ''}`;
+        let details = '';
+        if (res) {
+            details = ` — freed ${res.freed_mb} MB RAM`;
+            if (res.freed_temp_mb > 0) {
+                details += ` + ${res.freed_temp_mb} MB Temp`;
+            }
+        }
+        DOM.boostLast.textContent = `Last boost: ${ab.last_boost_time}${details}`;
     }
 }
 
@@ -437,7 +445,10 @@ function onBoostResult(result) {
     DOM.boostNowBtn.classList.add('boosting');
     setTimeout(() => DOM.boostNowBtn.classList.remove('boosting'), 600);
 
-    const msg = `Freed ${result.freed_mb} MB (${result.processes_trimmed} processes trimmed)`;
+    let msg = `Freed ${result.freed_mb} MB RAM (${result.processes_trimmed} procs)`;
+    if (result.freed_temp_mb > 0 || result.deleted_temp_files > 0) {
+        msg += ` + ${result.freed_temp_mb} MB Temp (${result.deleted_temp_files} files)`;
+    }
     DOM.boostLast.textContent = `Last boost: now — ${msg}`;
     addLogEntry({ time: new Date().toLocaleTimeString(), type: 'boost', message: msg });
 }

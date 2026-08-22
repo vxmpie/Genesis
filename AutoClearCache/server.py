@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import tempfile
 import psutil
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -117,8 +118,45 @@ def _get_protected_names() -> set:
     return names
 
 
+def clean_temp_files() -> dict:
+    """Safely removes temporary files, crash dumps, and Roblox logs."""
+    temp_dirs = [
+        tempfile.gettempdir(),
+        os.path.expandvars(r"%WINDIR%\Temp"),
+        os.path.expandvars(r"%LOCALAPPDATA%\CrashDumps"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Roblox\logs"),
+    ]
+    deleted_files = 0
+    freed_bytes = 0
+
+    for folder in temp_dirs:
+        if not os.path.exists(folder):
+            continue
+        for root, dirs, files in os.walk(folder, topdown=False):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    size = os.path.getsize(file_path)
+                    os.remove(file_path)
+                    deleted_files += 1
+                    freed_bytes += size
+                except (PermissionError, OSError):
+                    continue
+            for d in dirs:
+                try:
+                    os.rmdir(os.path.join(root, d))
+                except (PermissionError, OSError):
+                    continue
+
+    freed_mb = round(freed_bytes / (1024 * 1024), 1)
+    return {
+        "deleted_files": deleted_files,
+        "freed_temp_mb": freed_mb,
+    }
+
+
 def ram_boost() -> dict:
-    """Trim working sets of non-protected processes. Returns stats."""
+    """Trim working sets of non-protected processes and clean temp files. Returns stats."""
     protected = _get_protected_names()
     mem_before = psutil.virtual_memory()
     freed_count = 0
@@ -150,15 +188,25 @@ def ram_boost() -> dict:
     if freed_mb < 0:
         freed_mb = 0.0
 
+    # Clean Temp Files
+    temp_res = clean_temp_files()
+    freed_temp_mb = temp_res["freed_temp_mb"]
+    deleted_temp_files = temp_res["deleted_files"]
+
     result = {
         "freed_mb": freed_mb,
+        "freed_temp_mb": freed_temp_mb,
+        "deleted_temp_files": deleted_temp_files,
         "processes_trimmed": freed_count,
         "skipped": skipped,
         "errors": errors,
         "ram_before_percent": mem_before.percent,
         "ram_after_percent": mem_after.percent,
     }
-    add_event("boost", f"RAM Boost — freed {freed_mb} MB ({freed_count} processes trimmed)")
+    msg_parts = [f"Boost: freed {freed_mb} MB RAM ({freed_count} procs)"]
+    if freed_temp_mb > 0 or deleted_temp_files > 0:
+        msg_parts.append(f"+ cleaned {freed_temp_mb} MB Temp ({deleted_temp_files} files)")
+    add_event("boost", " ".join(msg_parts))
     return result
 
 
