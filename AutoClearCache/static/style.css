@@ -1,5 +1,5 @@
 /* ============================================================
-   Genesis Dashboard — Dark Cyberpunk Theme
+   Genesis Dashboard v2 — Dark Cyberpunk Theme + Fable 5 Modules
    Primary: #FF3C3C (Genesis Red)  Background: #0A0A0F
    ============================================================ */
 
@@ -31,6 +31,8 @@
     --blue-glow: rgba(96, 165, 250, 0.15);
     --purple: #A78BFA;
     --purple-glow: rgba(167, 139, 250, 0.15);
+    --cyan: #22D3EE;
+    --cyan-glow: rgba(34, 211, 238, 0.15);
     --ring-cpu: var(--accent);
     --ring-ram: var(--blue);
     --ring-gpu: var(--purple);
@@ -298,6 +300,49 @@ body {
     font-family: var(--font-mono);
 }
 
+/* RAM Breakdown Bar (Module 1) */
+.ram-breakdown {
+    width: 100%;
+    margin-top: 4px;
+}
+
+.ram-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-elevated);
+    border-radius: 3px;
+    display: flex;
+    overflow: hidden;
+}
+
+.ram-bar-active {
+    height: 100%;
+    background: linear-gradient(90deg, #FF6B3C, var(--accent));
+    transition: width 0.6s ease;
+}
+
+.ram-bar-standby {
+    height: 100%;
+    background: linear-gradient(90deg, var(--amber), #F59E0B);
+    transition: width 0.6s ease;
+}
+
+.ram-breakdown-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 9px;
+}
+
+.ram-label {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
+.ram-label.active b { color: var(--accent); }
+.ram-label.standby b { color: var(--amber); }
+.ram-label.free b { color: var(--green); }
+
 /* Pulse animation for RAM warning */
 .metric-card.warning {
     border-color: var(--amber);
@@ -406,6 +451,100 @@ body {
     font-family: var(--font-mono);
     color: var(--text-muted);
     font-weight: 600;
+}
+
+/* ============================================================
+   System Hardening Card (Module 2)
+   ============================================================ */
+
+.hardening-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.hardening-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 12px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    transition: var(--transition);
+}
+
+.hardening-item.ok {
+    border-color: rgba(52, 211, 153, 0.3);
+}
+
+.hardening-item.drift {
+    border-color: var(--amber);
+    background: var(--amber-glow);
+    animation: warningPulse 2s ease-in-out infinite;
+}
+
+.hardening-item.unknown {
+    border-color: var(--text-muted);
+}
+
+.hardening-icon {
+    font-size: 24px;
+}
+
+.hardening-name {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+}
+
+.hardening-status {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.hardening-item.ok .hardening-status { color: var(--green); }
+.hardening-item.drift .hardening-status { color: var(--amber); font-weight: 800; }
+
+.hardening-last-check {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    text-align: right;
+}
+
+.refresh-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.refresh-btn.spinning {
+    animation: spin 0.8s linear;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 /* ============================================================
@@ -684,6 +823,222 @@ body {
     padding: 24px;
 }
 
+/* VM Disk Bar in MuMu Table (Module 3) */
+.vm-disk-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vm-disk-bar {
+    width: 50px;
+    height: 6px;
+    background: var(--bg-elevated);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.vm-disk-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.vm-disk-fill.ok { background: var(--green); }
+.vm-disk-fill.warning { background: var(--amber); }
+.vm-disk-fill.critical { background: var(--accent); animation: criticalPulse 1s ease-in-out infinite; }
+
+.vm-disk-pct {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 28px;
+}
+
+.vm-disk-na {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* ============================================================
+   Deep Clean Card (Module 4)
+   ============================================================ */
+
+.deep-clean-card .card-header {
+    margin-bottom: 12px;
+}
+
+.deep-clean-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.scan-btn, .execute-btn {
+    padding: 6px 16px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+    border: 1px solid var(--border);
+}
+
+.scan-btn {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.scan-btn:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+
+.scan-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.execute-btn {
+    background: linear-gradient(135deg, rgba(255, 60, 60, 0.1), rgba(255, 60, 60, 0.05));
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.execute-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(255, 60, 60, 0.2), rgba(255, 60, 60, 0.1));
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.execute-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.deep-clean-preview {
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+.deep-clean-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 12px;
+}
+
+.dc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border-radius: 6px;
+    transition: var(--transition);
+}
+
+.dc-item:hover {
+    background: var(--bg-elevated);
+}
+
+.dc-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dc-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.dc-service {
+    font-size: 10px;
+    color: var(--amber);
+    font-weight: 600;
+}
+
+.dc-stats {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.dc-size {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.dc-files {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.deep-clean-total {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.deep-clean-total b {
+    color: var(--accent);
+    font-weight: 800;
+}
+
+/* ============================================================
+   Defender Card (Module 7)
+   ============================================================ */
+
+.defender-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.defender-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.defender-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.defender-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.defender-value.fresh { color: var(--green); }
+.defender-value.stale { color: var(--accent); }
+
 /* ============================================================
    History Chart
    ============================================================ */
@@ -903,7 +1258,7 @@ body {
     font-weight: 600;
     animation: toastIn 0.4s ease;
     pointer-events: auto;
-    max-width: 360px;
+    max-width: 400px;
     backdrop-filter: blur(20px);
 }
 
@@ -950,6 +1305,14 @@ body {
     }
 
     .net-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .hardening-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .defender-grid {
         grid-template-columns: repeat(2, 1fr);
     }
 }
@@ -1006,5 +1369,13 @@ body {
 
     .uptime {
         display: none;
+    }
+
+    .hardening-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .defender-grid {
+        grid-template-columns: 1fr 1fr;
     }
 }

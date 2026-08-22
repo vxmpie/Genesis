@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Genesis Dashboard</title>
-    <meta name="description" content="Genesis — Real-Time System Monitor & Auto-Boost Engine for MuMu Player farming">
+    <title>Genesis Dashboard v2</title>
+    <meta name="description" content="Genesis — Real-Time System Monitor & Auto-Boost Engine with Fable 5 Maintenance Suite">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
             <div class="logo">G</div>
             <div class="header-text">
                 <h1>GENESIS</h1>
-                <span class="subtitle">System Monitor & Auto-Boost</span>
+                <span class="subtitle">Fable 5 Maintenance Engine</span>
             </div>
         </div>
         <div class="header-right">
@@ -62,6 +62,18 @@
                 </div>
                 <div class="metric-label">RAM</div>
                 <div class="metric-sub" id="ramSub">0 / 32 GB</div>
+                <!-- RAM Breakdown bar -->
+                <div class="ram-breakdown" id="ramBreakdown">
+                    <div class="ram-bar">
+                        <div class="ram-bar-active" id="ramBarActive"></div>
+                        <div class="ram-bar-standby" id="ramBarStandby"></div>
+                    </div>
+                    <div class="ram-breakdown-labels">
+                        <span class="ram-label active">Active: <b id="ramActiveVal">0</b>G</span>
+                        <span class="ram-label standby">Standby: <b id="ramStandbyVal">0</b>G</span>
+                        <span class="ram-label free">Free: <b id="ramFreeVal">0</b>G</span>
+                    </div>
+                </div>
             </div>
 
             <div class="metric-card" id="gpuCard">
@@ -107,6 +119,32 @@
                 </div>
             </div>
             <div class="cores-chart" id="coresChart"></div>
+        </section>
+
+        <!-- System Hardening Status (Module 2) -->
+        <section class="card hardening-card">
+            <div class="card-header">
+                <h2>🛡️ System Hardening</h2>
+                <button class="refresh-btn" id="hardeningRefreshBtn" title="Re-check now">↻</button>
+            </div>
+            <div class="hardening-grid" id="hardeningGrid">
+                <div class="hardening-item" id="hardenVBS">
+                    <span class="hardening-icon">⏳</span>
+                    <span class="hardening-name">VBS</span>
+                    <span class="hardening-status">Checking...</span>
+                </div>
+                <div class="hardening-item" id="hardenMPO">
+                    <span class="hardening-icon">⏳</span>
+                    <span class="hardening-name">MPO</span>
+                    <span class="hardening-status">Checking...</span>
+                </div>
+                <div class="hardening-item" id="hardenHypervisor">
+                    <span class="hardening-icon">⏳</span>
+                    <span class="hardening-name">Hypervisor</span>
+                    <span class="hardening-status">Checking...</span>
+                </div>
+            </div>
+            <div class="hardening-last-check" id="hardeningLastCheck">Last check: —</div>
         </section>
 
         <!-- Two Column Layout -->
@@ -173,16 +211,60 @@
                                 <th>CPU%</th>
                                 <th>RAM</th>
                                 <th>Uptime</th>
+                                <th>VM Disk</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="mumuBody">
-                            <tr class="mumu-empty"><td colspan="6">No instances detected</td></tr>
+                            <tr class="mumu-empty"><td colspan="7">No instances detected</td></tr>
                         </tbody>
                     </table>
                 </div>
             </section>
         </div>
+
+        <!-- Deep Clean Panel (Module 4) -->
+        <section class="card deep-clean-card">
+            <div class="card-header">
+                <h2>🧹 Deep Clean Engine</h2>
+                <div class="deep-clean-actions">
+                    <button class="scan-btn" id="deepCleanScanBtn">Scan</button>
+                    <button class="execute-btn" id="deepCleanExecBtn" disabled>Clean All</button>
+                </div>
+            </div>
+            <div class="deep-clean-preview" id="deepCleanPreview">
+                <div class="deep-clean-empty">Click "Scan" to preview cleanable files</div>
+            </div>
+            <div class="deep-clean-total" id="deepCleanTotal" style="display:none;">
+                <span>Total: <b id="deepCleanTotalSize">0</b> MB in <b id="deepCleanTotalFiles">0</b> files</span>
+            </div>
+        </section>
+
+        <!-- Defender Status (Module 7) -->
+        <section class="card defender-card">
+            <div class="card-header">
+                <h2>🔒 Defender Status</h2>
+                <button class="scan-btn" id="quickScanBtn">Quick Scan</button>
+            </div>
+            <div class="defender-grid" id="defenderGrid">
+                <div class="defender-item">
+                    <span class="defender-label">Signatures</span>
+                    <span class="defender-value" id="defSigAge">—</span>
+                </div>
+                <div class="defender-item">
+                    <span class="defender-label">Last Quick Scan</span>
+                    <span class="defender-value" id="defQuickAge">—</span>
+                </div>
+                <div class="defender-item">
+                    <span class="defender-label">Real-Time</span>
+                    <span class="defender-value" id="defRealtime">—</span>
+                </div>
+                <div class="defender-item">
+                    <span class="defender-label">Downloads Sweep</span>
+                    <span class="defender-value" id="defSweep">Auto (30m)</span>
+                </div>
+            </div>
+        </section>
 
         <!-- RAM History Chart -->
         <section class="card chart-card">

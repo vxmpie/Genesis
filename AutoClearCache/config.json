@@ -29,5 +29,15 @@
   "metrics": {
     "update_interval_ms": 1000,
     "history_length": 60
+  },
+  "maintenance": {
+    "deep_clean_on_boost": false,
+    "vm_disk_warn_pct": 85,
+    "vm_disk_critical_pct": 90,
+    "vm_auto_trim": true,
+    "defender_scan_hour": 4,
+    "downloads_sweep_minutes": 30,
+    "growth_snapshot_hours": 6,
+    "drift_check_hours": 6
   }
 }

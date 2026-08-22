@@ -1,6 +1,7 @@
 /**
- * Genesis Dashboard — Frontend Application
+ * Genesis Dashboard v2 — Frontend Application
  * WebSocket client + real-time charts + gauge animations
+ * Fable 5 Maintenance Engine UI
  */
 
 // ============================================================
@@ -14,6 +15,7 @@ const STATE = {
     ramHistory: [],
     startTime: Date.now(),
     historyLength: 60,
+    deepCleanPreview: [],
 };
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 42; // ~263.9
@@ -36,6 +38,11 @@ const DOM = {
     ramRing: $('#ramRing'),
     ramSub: $('#ramSub'),
     ramCard: $('#ramCard'),
+    ramBarActive: $('#ramBarActive'),
+    ramBarStandby: $('#ramBarStandby'),
+    ramActiveVal: $('#ramActiveVal'),
+    ramStandbyVal: $('#ramStandbyVal'),
+    ramFreeVal: $('#ramFreeVal'),
     gpuTemp: $('#gpuTemp'),
     gpuRing: $('#gpuRing'),
     gpuSub: $('#gpuSub'),
@@ -64,6 +71,25 @@ const DOM = {
     netTotalUp: $('#netTotalUp'),
     netTotalDown: $('#netTotalDown'),
     toastContainer: $('#toastContainer'),
+    // Module 2: Hardening
+    hardeningRefreshBtn: $('#hardeningRefreshBtn'),
+    hardenVBS: $('#hardenVBS'),
+    hardenMPO: $('#hardenMPO'),
+    hardenHypervisor: $('#hardenHypervisor'),
+    hardeningLastCheck: $('#hardeningLastCheck'),
+    // Module 4: Deep Clean
+    deepCleanScanBtn: $('#deepCleanScanBtn'),
+    deepCleanExecBtn: $('#deepCleanExecBtn'),
+    deepCleanPreview: $('#deepCleanPreview'),
+    deepCleanTotal: $('#deepCleanTotal'),
+    deepCleanTotalSize: $('#deepCleanTotalSize'),
+    deepCleanTotalFiles: $('#deepCleanTotalFiles'),
+    // Module 7: Defender
+    quickScanBtn: $('#quickScanBtn'),
+    defSigAge: $('#defSigAge'),
+    defQuickAge: $('#defQuickAge'),
+    defRealtime: $('#defRealtime'),
+    defSweep: $('#defSweep'),
 };
 
 // ============================================================
@@ -117,6 +143,9 @@ function handleMessage(data) {
             STATE.config = data.config;
             applyConfig(data.config);
             if (data.history) renderHistory(data.history);
+            if (data.hardening) updateHardeningStatus(data.hardening);
+            if (data.defender) updateDefenderStatus(data.defender);
+            if (data.vm_disk) updateVmDiskData(data.vm_disk);
             break;
         case 'metrics':
             updateMetrics(data.metrics);
@@ -130,11 +159,37 @@ function handleMessage(data) {
         case 'boost_triggered':
             onBoostResult(data.result);
             const tempStr = data.result && data.result.freed_temp_mb > 0 ? ` + ${data.result.freed_temp_mb}MB Temp` : '';
-            showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB RAM${tempStr}`);
+            const standbyStr = data.result && data.result.standby_purged ? ' + Standby Purged' : '';
+            showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB RAM${standbyStr}${tempStr}`);
             break;
         case 'config_updated':
             STATE.config = data.config;
             applyConfig(data.config);
+            break;
+        // Module 2: Hardening
+        case 'hardening_status':
+            updateHardeningStatus(data.data);
+            break;
+        // Module 3: VM Disk
+        case 'vm_disk_status':
+            updateVmDiskData(data.data);
+            break;
+        // Module 4: Deep Clean
+        case 'deep_clean_preview':
+            renderDeepCleanPreview(data.data);
+            break;
+        case 'deep_clean_result':
+            onDeepCleanResult(data.data);
+            break;
+        // Module 7: Defender
+        case 'defender_status':
+            updateDefenderStatus(data.data);
+            break;
+        case 'quick_scan_result':
+            showToast('system', data.success ? '🔒 Quick Scan started' : '❌ Quick Scan failed');
+            break;
+        case 'vm_trim_result':
+            showToast('system', data.success ? `📱 VM cache trimmed (port ${data.port})` : '❌ VM trim failed');
             break;
     }
 }
@@ -185,6 +240,19 @@ function updateMetrics(m) {
     DOM.ramPercent.textContent = ramPct;
     setRing(DOM.ramRing, ramPct);
     DOM.ramSub.textContent = `${m.ram.used_gb} / ${m.ram.total_gb} GB`;
+
+    // RAM Breakdown (Module 1)
+    if (m.ram.breakdown) {
+        const b = m.ram.breakdown;
+        const total = b.total_gb || 1;
+        const activePct = (b.active_gb / total) * 100;
+        const standbyPct = (b.standby_gb / total) * 100;
+        DOM.ramBarActive.style.width = `${activePct}%`;
+        DOM.ramBarStandby.style.width = `${standbyPct}%`;
+        DOM.ramActiveVal.textContent = b.active_gb;
+        DOM.ramStandbyVal.textContent = b.standby_gb;
+        DOM.ramFreeVal.textContent = b.free_gb;
+    }
 
     // RAM warning state
     DOM.ramCard.classList.remove('warning', 'critical');
@@ -288,11 +356,9 @@ function drawHistoryChart() {
     const padBot = 20;
     const plotH = h - padTop - padBot;
 
-    // Background
     ctx.fillStyle = '#0D0D14';
     ctx.fillRect(0, 0, w, h);
 
-    // Grid lines
     ctx.strokeStyle = '#1A1A24';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
@@ -307,12 +373,10 @@ function drawHistoryChart() {
         ctx.fillText(`${100 - i * 25}%`, 4, y - 3);
     }
 
-    // Draw line helper
     function drawLine(data, color, glowColor) {
         if (data.length < 2) return;
         const step = w / (STATE.historyLength - 1);
 
-        // Glow
         ctx.beginPath();
         ctx.strokeStyle = glowColor;
         ctx.lineWidth = 6;
@@ -325,7 +389,6 @@ function drawHistoryChart() {
         }
         ctx.stroke();
 
-        // Line
         ctx.beginPath();
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
@@ -338,7 +401,6 @@ function drawHistoryChart() {
         }
         ctx.stroke();
 
-        // Fill gradient
         ctx.beginPath();
         for (let i = 0; i < data.length; i++) {
             const x = i * step;
@@ -360,7 +422,6 @@ function drawHistoryChart() {
     drawLine(STATE.cpuHistory, '#FF3C3C', 'rgba(255,60,60,0.12)');
     drawLine(STATE.ramHistory, '#60A5FA', 'rgba(96,165,250,0.12)');
 
-    // Legend
     const legendY = h - 6;
     ctx.font = '11px "Inter", sans-serif';
     ctx.fillStyle = '#FF3C3C';
@@ -370,25 +431,51 @@ function drawHistoryChart() {
 }
 
 // ============================================================
-// MuMu Instances
+// MuMu Instances (with VM Disk - Module 3)
 // ============================================================
+let vmDiskData = [];
+
+function updateVmDiskData(data) {
+    if (Array.isArray(data)) vmDiskData = data;
+}
+
 function updateMuMu(mumu) {
     if (!mumu) return;
 
     const devices = mumu.devices || [];
     const launchers = mumu.launchers || [];
     const all = [...devices, ...launchers];
+    const vmDisks = mumu.vm_disk || vmDiskData;
 
     DOM.mumuCount.textContent = `${devices.length} instance${devices.length !== 1 ? 's' : ''} running`;
 
     if (all.length === 0) {
-        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="6">No instances detected</td></tr>';
+        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="7">No instances detected</td></tr>';
         return;
     }
 
     DOM.mumuBody.innerHTML = all.map((inst, i) => {
         const isDevice = inst.name.toLowerCase().includes('device');
         const type = isDevice ? 'Emulator' : 'Launcher';
+
+        // Match VM disk data by instance index
+        let vmDiskHtml = '<span class="vm-disk-na">—</span>';
+        if (isDevice && vmDisks.length > 0) {
+            const vmIdx = devices.indexOf(inst);
+            const vm = vmDisks[vmIdx] || vmDisks.find(v => v.instance === vmIdx + 1);
+            if (vm) {
+                const statusClass = vm.status === 'critical' ? 'critical' : vm.status === 'warning' ? 'warning' : 'ok';
+                vmDiskHtml = `
+                    <div class="vm-disk-cell">
+                        <div class="vm-disk-bar">
+                            <div class="vm-disk-fill ${statusClass}" style="width:${vm.used_pct}%"></div>
+                        </div>
+                        <span class="vm-disk-pct">${vm.used_pct}%</span>
+                    </div>
+                `;
+            }
+        }
+
         return `
             <tr>
                 <td>${i + 1}</td>
@@ -396,6 +483,7 @@ function updateMuMu(mumu) {
                 <td>${inst.cpu_percent}%</td>
                 <td>${inst.ram_mb} MB</td>
                 <td>${inst.uptime}</td>
+                <td>${vmDiskHtml}</td>
                 <td><span class="status-dot running"></span>OK</td>
             </tr>
         `;
@@ -429,9 +517,8 @@ function updateAutoBoostStatus(ab) {
         let details = '';
         if (res) {
             details = ` — freed ${res.freed_mb} MB RAM`;
-            if (res.freed_temp_mb > 0) {
-                details += ` + ${res.freed_temp_mb} MB Temp`;
-            }
+            if (res.standby_purged) details += ' + Standby';
+            if (res.freed_temp_mb > 0) details += ` + ${res.freed_temp_mb} MB Temp`;
         }
         DOM.boostLast.textContent = `Last boost: ${ab.last_boost_time}${details}`;
     }
@@ -446,11 +533,137 @@ function onBoostResult(result) {
     setTimeout(() => DOM.boostNowBtn.classList.remove('boosting'), 600);
 
     let msg = `Freed ${result.freed_mb} MB RAM (${result.processes_trimmed} procs)`;
+    if (result.standby_purged) msg += ' + Standby Purged';
     if (result.freed_temp_mb > 0 || result.deleted_temp_files > 0) {
         msg += ` + ${result.freed_temp_mb} MB Temp (${result.deleted_temp_files} files)`;
     }
     DOM.boostLast.textContent = `Last boost: now — ${msg}`;
     addLogEntry({ time: new Date().toLocaleTimeString(), type: 'boost', message: msg });
+}
+
+// ============================================================
+// Module 2: Hardening Status
+// ============================================================
+function updateHardeningStatus(data) {
+    if (!data || !data.checks) return;
+
+    const items = [
+        { el: DOM.hardenVBS, key: 'vbs', name: 'VBS' },
+        { el: DOM.hardenMPO, key: 'mpo', name: 'MPO' },
+        { el: DOM.hardenHypervisor, key: 'hypervisor', name: 'Hypervisor' },
+    ];
+
+    items.forEach(({ el, key }) => {
+        if (!el) return;
+        const status = data.checks[key];
+        const icon = el.querySelector('.hardening-icon');
+        const statusEl = el.querySelector('.hardening-status');
+
+        el.className = 'hardening-item';
+        if (status === 'ok') {
+            icon.textContent = '✅';
+            statusEl.textContent = 'Disabled';
+            el.classList.add('ok');
+        } else if (status === 'drift') {
+            icon.textContent = '⚠️';
+            statusEl.textContent = 'DRIFT!';
+            el.classList.add('drift');
+        } else {
+            icon.textContent = '❓';
+            statusEl.textContent = status || 'Unknown';
+            el.classList.add('unknown');
+        }
+    });
+
+    if (data.last_check) {
+        DOM.hardeningLastCheck.textContent = `Last check: ${data.last_check}`;
+    }
+
+    if (data.has_drift) {
+        const driftItems = Object.keys(data.drift).join(', ');
+        showToast('warning', `⚠️ Hardening drift: ${driftItems}`);
+    }
+}
+
+// ============================================================
+// Module 4: Deep Clean
+// ============================================================
+function renderDeepCleanPreview(preview) {
+    STATE.deepCleanPreview = preview;
+
+    if (!preview || preview.length === 0) {
+        DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">No cleanable files found</div>';
+        DOM.deepCleanExecBtn.disabled = true;
+        DOM.deepCleanTotal.style.display = 'none';
+        return;
+    }
+
+    let totalSize = 0;
+    let totalFiles = 0;
+
+    DOM.deepCleanPreview.innerHTML = preview.map(item => {
+        totalSize += item.size_mb;
+        totalFiles += item.file_count;
+        const serviceNote = item.requires_service_stop
+            ? `<span class="dc-service">⚠ Stops ${item.requires_service_stop}</span>`
+            : '';
+        return `
+            <div class="dc-item">
+                <div class="dc-info">
+                    <span class="dc-name">${escapeHtml(item.name)}</span>
+                    ${serviceNote}
+                </div>
+                <div class="dc-stats">
+                    <span class="dc-size">${item.size_mb} MB</span>
+                    <span class="dc-files">${item.file_count} files</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    DOM.deepCleanTotalSize.textContent = totalSize.toFixed(1);
+    DOM.deepCleanTotalFiles.textContent = totalFiles;
+    DOM.deepCleanTotal.style.display = 'flex';
+    DOM.deepCleanExecBtn.disabled = false;
+}
+
+function onDeepCleanResult(result) {
+    if (!result) return;
+
+    showToast('boost', `🧹 Deep Clean: ${result.total_freed_mb} MB freed (${result.total_deleted} files)`);
+
+    // Reset preview
+    DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">Clean complete! Click "Scan" to check again</div>';
+    DOM.deepCleanExecBtn.disabled = true;
+    DOM.deepCleanTotal.style.display = 'none';
+    DOM.deepCleanScanBtn.textContent = 'Scan';
+    DOM.deepCleanScanBtn.disabled = false;
+}
+
+// ============================================================
+// Module 7: Defender Status
+// ============================================================
+function updateDefenderStatus(data) {
+    if (!data || !data.available) {
+        DOM.defSigAge.textContent = 'N/A';
+        DOM.defQuickAge.textContent = 'N/A';
+        DOM.defRealtime.textContent = 'N/A';
+        return;
+    }
+
+    // Signature age
+    const sigAge = data.signature_age_days;
+    DOM.defSigAge.textContent = sigAge >= 0 ? `${sigAge} day${sigAge !== 1 ? 's' : ''}` : '—';
+    DOM.defSigAge.className = `defender-value ${data.signature_stale ? 'stale' : 'fresh'}`;
+
+    // Quick scan age
+    const qAge = data.quick_scan_age_days;
+    DOM.defQuickAge.textContent = qAge >= 0 ? `${qAge} day${qAge !== 1 ? 's' : ''} ago` : '—';
+    DOM.defQuickAge.className = `defender-value ${qAge > 7 ? 'stale' : 'fresh'}`;
+
+    // Real-time
+    DOM.defRealtime.textContent = data.realtime_enabled ? 'ON' : 'OFF';
+    DOM.defRealtime.className = `defender-value ${data.realtime_enabled ? 'fresh' : 'stale'}`;
 }
 
 // ============================================================
@@ -484,7 +697,6 @@ function addLogEntry(entry) {
 
     DOM.logEntries.prepend(div);
 
-    // Limit DOM entries
     while (DOM.logEntries.children.length > 100) {
         DOM.logEntries.lastChild.remove();
     }
@@ -556,6 +768,50 @@ function setupEventHandlers() {
     DOM.clearLogBtn.addEventListener('click', () => {
         DOM.logEntries.innerHTML = '<div class="log-empty">No events yet</div>';
     });
+
+    // Module 2: Hardening refresh
+    if (DOM.hardeningRefreshBtn) {
+        DOM.hardeningRefreshBtn.addEventListener('click', () => {
+            sendCommand('check_hardening');
+            DOM.hardeningRefreshBtn.classList.add('spinning');
+            setTimeout(() => DOM.hardeningRefreshBtn.classList.remove('spinning'), 1000);
+        });
+    }
+
+    // Module 4: Deep Clean
+    if (DOM.deepCleanScanBtn) {
+        DOM.deepCleanScanBtn.addEventListener('click', () => {
+            DOM.deepCleanScanBtn.textContent = 'Scanning...';
+            DOM.deepCleanScanBtn.disabled = true;
+            sendCommand('deep_clean_preview');
+            setTimeout(() => {
+                DOM.deepCleanScanBtn.textContent = 'Scan';
+                DOM.deepCleanScanBtn.disabled = false;
+            }, 5000); // Fallback re-enable
+        });
+    }
+
+    if (DOM.deepCleanExecBtn) {
+        DOM.deepCleanExecBtn.addEventListener('click', () => {
+            if (!confirm('Execute Deep Clean? This will delete all scanned files.')) return;
+            DOM.deepCleanExecBtn.textContent = 'Cleaning...';
+            DOM.deepCleanExecBtn.disabled = true;
+            sendCommand('deep_clean_execute');
+        });
+    }
+
+    // Module 7: Quick Scan
+    if (DOM.quickScanBtn) {
+        DOM.quickScanBtn.addEventListener('click', () => {
+            sendCommand('quick_scan');
+            DOM.quickScanBtn.textContent = 'Starting...';
+            DOM.quickScanBtn.disabled = true;
+            setTimeout(() => {
+                DOM.quickScanBtn.textContent = 'Quick Scan';
+                DOM.quickScanBtn.disabled = false;
+            }, 5000);
+        });
+    }
 }
 
 // ============================================================
