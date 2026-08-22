@@ -100,6 +100,24 @@ const DOM = {
     defQuickAge: $('#defQuickAge'),
     defRealtime: $('#defRealtime'),
     defSweep: $('#defSweep'),
+    // Module 8: Network Observatory
+    flushDnsBtn: $('#flushDnsBtn'),
+    netQualityBadge: $('#netQualityBadge'),
+    netLatencyVal: $('#netLatencyVal'),
+    netJitterVal: $('#netJitterVal'),
+    netLossVal: $('#netLossVal'),
+    wifiBand: $('#wifiBand'),
+    wifiSsid: $('#wifiSsid'),
+    wifiSignalVal: $('#wifiSignalVal'),
+    wifiDbmVal: $('#wifiDbmVal'),
+    wifiRateVal: $('#wifiRateVal'),
+    watchdogBadge: $('#watchdogBadge'),
+    watchdogStatusText: $('#watchdogStatusText'),
+    watchdogRecoveriesVal: $('#watchdogRecoveriesVal'),
+    toggleWatchdogLogs: $('#toggleWatchdogLogs'),
+    watchdogLogPanel: $('#watchdogLogPanel'),
+    watchdogHeartbeat: $('#watchdogHeartbeat'),
+    watchdogLogConsole: $('#watchdogLogConsole'),
 };
 
 // ============================================================
@@ -162,6 +180,7 @@ function handleMessage(data) {
             if (data.hardening) updateHardeningStatus(data.hardening);
             if (data.defender) updateDefenderStatus(data.defender);
             if (data.vm_disk) updateVmDiskData(data.vm_disk);
+            if (data.observatory) updateNetworkObservatory(data.observatory);
             break;
         case 'auth_success':
             setAuthState(true);
@@ -177,6 +196,7 @@ function handleMessage(data) {
             updateMuMu(data.mumu);
             updateTopProcesses(data.top_processes);
             updateAutoBoostStatus(data.auto_boost);
+            if (data.observatory) updateNetworkObservatory(data.observatory);
             break;
         case 'boost_result':
         case 'boost_triggered':
@@ -221,6 +241,16 @@ function handleMessage(data) {
             break;
         case 'vm_trim_result':
             showToast('system', data.success ? `📱 VM cache trimmed (port ${data.port})` : '❌ VM trim failed');
+            break;
+        case 'flush_dns_result':
+            if (DOM.flushDnsBtn) {
+                DOM.flushDnsBtn.textContent = 'Flush DNS';
+                DOM.flushDnsBtn.disabled = false;
+            }
+            showToast('system', data.success ? '🧹 DNS Resolver cache flushed' : '❌ Failed to flush DNS');
+            break;
+        case 'observatory_update':
+            updateNetworkObservatory(data.data);
             break;
     }
 }
@@ -741,6 +771,52 @@ function updateDefenderStatus(data) {
 }
 
 // ============================================================
+// Module 8: Network Observatory & Telemetry
+// ============================================================
+function updateNetworkObservatory(obs) {
+    if (!obs) return;
+
+    // 1. Latency & Loss
+    if (obs.latency) {
+        const lat = obs.latency;
+        if (DOM.netLatencyVal) DOM.netLatencyVal.textContent = lat.current_ms > 0 ? lat.current_ms : '—';
+        if (DOM.netJitterVal) DOM.netJitterVal.textContent = lat.jitter_ms;
+        if (DOM.netLossVal) DOM.netLossVal.textContent = `${lat.loss_percent.toFixed(1)}%`;
+        if (DOM.netQualityBadge) {
+            DOM.netQualityBadge.className = `obs-badge quality-${lat.quality || 'excellent'}`;
+            DOM.netQualityBadge.textContent = (lat.quality || 'excellent').toUpperCase();
+        }
+    }
+
+    // 2. Wi-Fi RF Quality
+    if (obs.wifi) {
+        const w = obs.wifi;
+        if (DOM.wifiSsid) DOM.wifiSsid.textContent = w.ssid || 'Disconnected';
+        if (DOM.wifiBand) DOM.wifiBand.textContent = w.band || '5 GHz';
+        if (DOM.wifiSignalVal) DOM.wifiSignalVal.textContent = `${w.signal_percent}%`;
+        if (DOM.wifiDbmVal) DOM.wifiDbmVal.textContent = `${w.rssi_dbm} dBm`;
+        if (DOM.wifiRateVal) DOM.wifiRateVal.textContent = `${w.rx_rate_mbps}/${w.tx_rate_mbps}`;
+    }
+
+    // 3. Standalone Watchdog Status
+    if (obs.watchdog) {
+        const wd = obs.watchdog;
+        if (DOM.watchdogBadge) {
+            DOM.watchdogBadge.className = `obs-badge status-${wd.state || 'armed'}`;
+            DOM.watchdogBadge.textContent = (wd.state || 'armed').toUpperCase();
+        }
+        if (DOM.watchdogStatusText) DOM.watchdogStatusText.textContent = wd.status || 'Active Monitoring';
+        if (DOM.watchdogRecoveriesVal) DOM.watchdogRecoveriesVal.textContent = wd.recoveries_today || 0;
+        if (DOM.watchdogHeartbeat) {
+            DOM.watchdogHeartbeat.textContent = wd.heartbeat_seconds >= 0 ? `Heartbeat: ${wd.heartbeat_seconds}s ago` : 'Heartbeat: —';
+        }
+        if (DOM.watchdogLogConsole && wd.recent_logs) {
+            DOM.watchdogLogConsole.textContent = wd.recent_logs.length > 0 ? wd.recent_logs.join('\n') : 'No log entries recorded yet.';
+        }
+    }
+}
+
+// ============================================================
 // Event Log
 // ============================================================
 const EVENT_ICONS = {
@@ -914,6 +990,28 @@ function setupEventHandlers() {
                 DOM.quickScanBtn.textContent = 'Quick Scan';
                 DOM.quickScanBtn.disabled = false;
             }, 8000);
+        });
+    }
+
+    // Module 8: Flush DNS
+    if (DOM.flushDnsBtn) {
+        DOM.flushDnsBtn.addEventListener('click', () => {
+            DOM.flushDnsBtn.textContent = 'Flushing...';
+            DOM.flushDnsBtn.disabled = true;
+            sendCommand('flush_dns');
+            setTimeout(() => {
+                DOM.flushDnsBtn.textContent = 'Flush DNS';
+                DOM.flushDnsBtn.disabled = false;
+            }, 6000);
+        });
+    }
+
+    // Module 8: Toggle Watchdog Log Feed
+    if (DOM.toggleWatchdogLogs && DOM.watchdogLogPanel) {
+        DOM.toggleWatchdogLogs.addEventListener('click', () => {
+            const isHidden = DOM.watchdogLogPanel.style.display === 'none';
+            DOM.watchdogLogPanel.style.display = isHidden ? 'block' : 'none';
+            DOM.toggleWatchdogLogs.textContent = isHidden ? 'Hide Logs ▴' : 'View Logs ▾';
         });
     }
 }

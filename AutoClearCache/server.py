@@ -1121,6 +1121,251 @@ def scan_downloads_folder() -> int:
     return scanned
 
 
+# ===========================================================================
+# MODULE 8: Network Observatory (Watchdog Tail, Wi-Fi RF & Latency Engine)
+# ===========================================================================
+WATCHDOG_LOG_PATH = Path(r"C:\Genesis\watchdog.log")
+_ping_history = []  # rolling last 30 measurements [(latency_ms, success_bool, timestamp)]
+_wifi_telemetry_cache = {}
+_wifi_telemetry_time = 0
+
+
+def get_watchdog_status() -> dict:
+    r"""Parse C:\Genesis\watchdog.log to monitor the standalone watchdog health."""
+    if not WATCHDOG_LOG_PATH.exists():
+        return {
+            "installed": False,
+            "status": "Not Installed",
+            "state": "offline",
+            "heartbeat_seconds": -1,
+            "recoveries_today": 0,
+            "level1_today": 0,
+            "level2_today": 0,
+            "recent_logs": [],
+        }
+
+    try:
+        with open(WATCHDOG_LOG_PATH, "r", encoding="utf-8", errors="ignore") as f:
+            lines = [l.strip().lstrip('\ufeff') for l in f.readlines() if l.strip()]
+    except Exception:
+        lines = []
+
+    if not lines:
+        return {
+            "installed": True,
+            "status": "Initializing",
+            "state": "unknown",
+            "heartbeat_seconds": -1,
+            "recoveries_today": 0,
+            "level1_today": 0,
+            "level2_today": 0,
+            "recent_logs": [],
+        }
+
+    last_line = lines[-1]
+    heartbeat_sec = -1
+    state = "active"
+    status_text = "Armed & Monitoring"
+
+    try:
+        if last_line.startswith("["):
+            ts_str = last_line[1:20]
+            last_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            heartbeat_sec = max(0, int((datetime.now() - last_dt).total_seconds()))
+    except Exception:
+        pass
+
+    if "Entering 120s grace period" in last_line:
+        state = "grace"
+        status_text = "Grace Period (Boot Settlement)"
+    elif heartbeat_sec > 180 and heartbeat_sec != -1:
+        state = "stale"
+        status_text = "Heartbeat Stale"
+    elif "[SUSPENDED]" in last_line:
+        state = "suspended"
+        status_text = "Suspended (Max Outage)"
+    elif "[LEVEL 1]" in last_line or "[LEVEL 2]" in last_line:
+        state = "recovering"
+        status_text = "Recovering Connection"
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_lines = [l for l in lines if l.startswith(f"[{today_str}")]
+    l1_count = sum(1 for l in today_lines if "[LEVEL 1]" in l)
+    l2_count = sum(1 for l in today_lines if "[LEVEL 2]" in l)
+    rec_count = sum(1 for l in today_lines if "[RECOVERED]" in l)
+
+    return {
+        "installed": True,
+        "status": status_text,
+        "state": state,
+        "heartbeat_seconds": heartbeat_sec,
+        "recoveries_today": rec_count,
+        "level1_today": l1_count,
+        "level2_today": l2_count,
+        "recent_logs": lines[-6:],
+    }
+
+
+def get_wifi_telemetry() -> dict:
+    """Get real-time Wi-Fi RF details (SSID, Band, Signal dBm, Link Speed) via netsh."""
+    global _wifi_telemetry_cache, _wifi_telemetry_time
+    now = time.time()
+    if now - _wifi_telemetry_time < 3 and _wifi_telemetry_cache:
+        return _wifi_telemetry_cache
+
+    try:
+        r = subprocess.run(
+            ["netsh", "wlan", "show", "interfaces"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if r.returncode == 0:
+            out = r.stdout
+            ssid = "Disconnected"
+            signal_pct = 0
+            rssi_dbm = -100
+            band = "Unknown"
+            channel = "Unknown"
+            rx_rate = 0
+            tx_rate = 0
+            radio = "802.11"
+            state = "disconnected"
+
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("State") and ":" in line:
+                    state = line.split(":", 1)[1].strip()
+                elif line.startswith("SSID") and not line.startswith("BSSID") and ":" in line:
+                    ssid = line.split(":", 1)[1].strip()
+                elif line.startswith("Signal") and ":" in line:
+                    val = line.split(":", 1)[1].strip().replace("%", "")
+                    signal_pct = int(val) if val.isdigit() else 0
+                elif line.startswith("Rssi") and ":" in line:
+                    val = line.split(":", 1)[1].strip()
+                    try:
+                        rssi_dbm = int(val)
+                    except ValueError:
+                        pass
+                elif line.startswith("Band") and ":" in line:
+                    band = line.split(":", 1)[1].strip()
+                elif line.startswith("Channel") and ":" in line:
+                    channel = line.split(":", 1)[1].strip()
+                elif line.startswith("Receive rate (Mbps)") and ":" in line:
+                    rx_rate = int(line.split(":", 1)[1].strip())
+                elif line.startswith("Transmit rate (Mbps)") and ":" in line:
+                    tx_rate = int(line.split(":", 1)[1].strip())
+                elif line.startswith("Radio type") and ":" in line:
+                    radio = line.split(":", 1)[1].strip()
+
+            if rssi_dbm == -100 and signal_pct > 0:
+                rssi_dbm = int((signal_pct / 2) - 100)
+
+            _wifi_telemetry_cache = {
+                "connected": state.lower() == "connected",
+                "ssid": ssid,
+                "signal_percent": signal_pct,
+                "rssi_dbm": rssi_dbm,
+                "band": band,
+                "channel": channel,
+                "radio_type": radio,
+                "rx_rate_mbps": rx_rate,
+                "tx_rate_mbps": tx_rate,
+            }
+            _wifi_telemetry_time = now
+            return _wifi_telemetry_cache
+    except Exception:
+        pass
+
+    return {
+        "connected": False,
+        "ssid": "N/A",
+        "signal_percent": 0,
+        "rssi_dbm": 0,
+        "band": "N/A",
+        "channel": "N/A",
+        "radio_type": "N/A",
+        "rx_rate_mbps": 0,
+        "tx_rate_mbps": 0,
+    }
+
+
+def measure_ping_latency(target: str = "1.1.1.1", port: int = 443, timeout_sec: float = 1.0) -> float | None:
+    """Measure round-trip TCP connection latency in milliseconds."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout_sec)
+    start = time.perf_counter()
+    try:
+        s.connect((target, port))
+        latency = (time.perf_counter() - start) * 1000.0
+        s.close()
+        return round(latency, 1)
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+        return None
+
+
+def get_network_observatory() -> dict:
+    """Synthesize Watchdog health, Wi-Fi RF telemetry, and rolling Latency/Loss."""
+    global _ping_history
+    lat = measure_ping_latency("1.1.1.1", 443, 1.0)
+    now_ts = time.time()
+
+    if lat is not None:
+        _ping_history.append((lat, True, now_ts))
+    else:
+        _ping_history.append((0.0, False, now_ts))
+
+    if len(_ping_history) > 30:
+        _ping_history = _ping_history[-30:]
+
+    success_pings = [p[0] for p in _ping_history if p[1]]
+    total_samples = len(_ping_history)
+    loss_pct = round(((total_samples - len(success_pings)) / total_samples * 100.0), 1) if total_samples > 0 else 0.0
+
+    avg_lat = round(sum(success_pings) / len(success_pings), 1) if success_pings else 0.0
+    current_lat = success_pings[-1] if success_pings else 0.0
+
+    jitter = 0.0
+    if len(success_pings) >= 2:
+        diffs = [abs(success_pings[i] - success_pings[i - 1]) for i in range(1, len(success_pings))]
+        jitter = round(sum(diffs) / len(diffs), 1)
+
+    if loss_pct > 5.0 or current_lat > 200:
+        quality = "poor"
+    elif loss_pct > 0.0 or current_lat > 80 or jitter > 15:
+        quality = "fair"
+    else:
+        quality = "excellent"
+
+    return {
+        "watchdog": get_watchdog_status(),
+        "wifi": get_wifi_telemetry(),
+        "latency": {
+            "current_ms": current_lat,
+            "avg_ms": avg_lat,
+            "jitter_ms": jitter,
+            "loss_percent": loss_pct,
+            "quality": quality,
+            "target": "1.1.1.1 (Cloudflare)",
+        },
+    }
+
+
+def flush_dns_cache() -> bool:
+    """Safely flush Windows DNS resolver cache."""
+    try:
+        r = subprocess.run(["ipconfig", "/flushdns"], capture_output=True, text=True, timeout=5)
+        success = r.returncode == 0
+        if success:
+            add_event("system", "🧹 DNS Resolver Cache flushed successfully")
+        return success
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Metrics collection
 # ---------------------------------------------------------------------------
@@ -1627,14 +1872,17 @@ async def websocket_endpoint(ws: WebSocket):
             "defender": _defender_status,
             "vm_disk": _vm_disk_cache,
             "growth": _growth_data[-24:] if _growth_data else [],
+            "observatory": get_network_observatory(),
         })
 
+        _obs_counter = 0
         while True:
             metrics = get_metrics_with_rates()
             mumu = check_mumu_health()
             top_procs = get_top_processes(10)
 
-            await ws.send_json({
+            _obs_counter += 1
+            payload = {
                 "type": "metrics",
                 "metrics": metrics,
                 "mumu": mumu,
@@ -1649,7 +1897,13 @@ async def websocket_endpoint(ws: WebSocket):
                     ),
                     "last_boost_result": _last_boost_result,
                 },
-            })
+            }
+
+            # Push network observatory telemetry every 2 cycles (~2s)
+            if _obs_counter % 2 == 0:
+                payload["observatory"] = get_network_observatory()
+
+            await ws.send_json(payload)
 
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=CONFIG["metrics"]["update_interval_ms"] / 1000)
@@ -1730,6 +1984,14 @@ async def handle_ws_command(ws: WebSocket, data: dict):
 
     elif cmd == "growth_data":
         await ws.send_json({"type": "growth_data", "data": _growth_data[-24:]})
+
+    elif cmd == "flush_dns":
+        success = flush_dns_cache()
+        await ws.send_json({"type": "flush_dns_result", "success": success})
+
+    elif cmd == "observatory_refresh":
+        obs = get_network_observatory()
+        await ws.send_json({"type": "observatory_update", "data": obs})
 
 
 # ---------------------------------------------------------------------------
@@ -1831,6 +2093,18 @@ async def api_growth():
 @app.get("/api/vm-disk")
 async def api_vm_disk():
     return JSONResponse(get_vm_disk_status())
+
+
+@app.get("/api/network/observatory")
+async def api_network_observatory():
+    return JSONResponse(get_network_observatory())
+
+
+@app.post("/api/network/flush-dns")
+async def api_network_flush_dns(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"success": flush_dns_cache()})
 
 
 if __name__ == "__main__":

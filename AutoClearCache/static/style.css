@@ -1428,6 +1428,247 @@ body {
 }
 
 /* ============================================================
+   Module 8: Network Observatory & Telemetry
+   ============================================================ */
+
+.observatory-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-top: 10px;
+}
+
+.observatory-item {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.observatory-item:hover {
+    border-color: rgba(6, 182, 212, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.obs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.obs-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.obs-badge {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+}
+
+.obs-badge.quality-excellent {
+    background: var(--green-glow);
+    color: var(--green);
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.obs-badge.quality-fair {
+    background: var(--amber-glow);
+    color: var(--amber);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.obs-badge.quality-poor {
+    background: var(--accent-glow);
+    color: var(--accent);
+    border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.obs-badge.status-armed {
+    background: rgba(6, 182, 212, 0.15);
+    color: var(--blue);
+    border: 1px solid rgba(6, 182, 212, 0.4);
+    animation: armedPulse 2.5s ease-in-out infinite;
+}
+
+.obs-badge.status-grace {
+    background: var(--amber-glow);
+    color: var(--amber);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.obs-badge.status-offline {
+    background: var(--accent-glow);
+    color: var(--accent);
+    border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+@keyframes armedPulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(6, 182, 212, 0); }
+    50% { box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
+}
+
+.obs-sub-tag {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--bg-card);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.obs-main-val {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.obs-number {
+    font-size: 24px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.obs-unit {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.obs-ssid {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    max-width: 100%;
+}
+
+.obs-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.obs-sub-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.obs-sub-stats b {
+    color: var(--text-secondary);
+}
+
+.obs-toggle-link {
+    color: var(--blue);
+    cursor: pointer;
+    text-decoration: underline;
+    font-size: 10px;
+    font-weight: 600;
+    transition: var(--transition);
+}
+
+.obs-toggle-link:hover {
+    color: var(--text-primary);
+}
+
+.obs-traffic-rates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.traffic-col {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-card);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.traffic-speed {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.traffic-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+/* Watchdog Live Terminal Log */
+.watchdog-log-panel {
+    margin-top: 14px;
+    background: #0a0e17;
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    animation: fadeIn 0.3s ease;
+}
+
+.watchdog-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--blue);
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 6px;
+}
+
+.watchdog-heartbeat {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: normal;
+}
+
+.watchdog-log-console {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: #94a3b8;
+    max-height: 140px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 
@@ -1454,6 +1695,10 @@ body {
     }
 
     .defender-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .observatory-grid {
         grid-template-columns: repeat(2, 1fr);
     }
 }
@@ -1518,5 +1763,9 @@ body {
 
     .defender-grid {
         grid-template-columns: 1fr 1fr;
+    }
+
+    .observatory-grid {
+        grid-template-columns: 1fr;
     }
 }

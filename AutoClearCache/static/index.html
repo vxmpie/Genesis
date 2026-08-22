@@ -316,38 +316,94 @@
             </div>
         </section>
 
-        <!-- Network -->
+        <!-- Module 8: Network Observatory & Telemetry -->
         <section class="card network-card">
             <div class="card-header">
-                <h2>🌐 Network</h2>
+                <h2>🌐 Network Observatory</h2>
+                <div class="net-actions">
+                    <button class="scan-btn" id="flushDnsBtn" title="Safely flush Windows DNS resolver cache">Flush DNS</button>
+                </div>
             </div>
-            <div class="net-stats">
-                <div class="net-stat">
-                    <span class="net-arrow up">▲</span>
-                    <div>
-                        <div class="net-speed" id="netUpSpeed">0 MB/s</div>
-                        <div class="net-label">Upload</div>
+
+            <!-- Observatory Telemetry Grid -->
+            <div class="observatory-grid">
+                <!-- 1. Latency & Quality -->
+                <div class="observatory-item">
+                    <div class="obs-header">
+                        <span class="obs-title">⚡ Latency & Loss</span>
+                        <span class="obs-badge quality-excellent" id="netQualityBadge">EXCELLENT</span>
+                    </div>
+                    <div class="obs-main-val">
+                        <span class="obs-number" id="netLatencyVal">—</span>
+                        <span class="obs-unit">ms</span>
+                    </div>
+                    <div class="obs-sub-stats">
+                        <span>Jitter: <b id="netJitterVal">—</b> ms</span>
+                        <span>Loss: <b id="netLossVal">0.0%</b></span>
                     </div>
                 </div>
-                <div class="net-stat">
-                    <span class="net-arrow down">▼</span>
-                    <div>
-                        <div class="net-speed" id="netDownSpeed">0 MB/s</div>
-                        <div class="net-label">Download</div>
+
+                <!-- 2. Wi-Fi RF Quality -->
+                <div class="observatory-item">
+                    <div class="obs-header">
+                        <span class="obs-title">📡 Wi-Fi RF Link</span>
+                        <span class="obs-sub-tag" id="wifiBand">5 GHz</span>
+                    </div>
+                    <div class="obs-main-val">
+                        <span class="obs-ssid" id="wifiSsid">KMITL-HiSpeed</span>
+                    </div>
+                    <div class="obs-sub-stats">
+                        <span>Signal: <b id="wifiSignalVal">100%</b> (<b id="wifiDbmVal">-49 dBm</b>)</span>
+                        <span>Speed: <b id="wifiRateVal">400/400</b> M</span>
                     </div>
                 </div>
-                <div class="net-stat">
-                    <div>
-                        <div class="net-speed" id="netTotalUp">0 MB</div>
-                        <div class="net-label">Total Sent</div>
+
+                <!-- 3. Autonomous Watchdog -->
+                <div class="observatory-item">
+                    <div class="obs-header">
+                        <span class="obs-title">🐕 Self-Healing Watchdog</span>
+                        <span class="obs-badge status-armed" id="watchdogBadge">ARMED</span>
+                    </div>
+                    <div class="obs-main-val">
+                        <span class="obs-text" id="watchdogStatusText">Active Monitoring</span>
+                    </div>
+                    <div class="obs-sub-stats">
+                        <span>Recoveries: <b id="watchdogRecoveriesVal">0</b> today</span>
+                        <span class="obs-toggle-link" id="toggleWatchdogLogs">View Logs ▾</span>
                     </div>
                 </div>
-                <div class="net-stat">
-                    <div>
-                        <div class="net-speed" id="netTotalDown">0 MB</div>
-                        <div class="net-label">Total Recv</div>
+
+                <!-- 4. Bandwidth Rates -->
+                <div class="observatory-item">
+                    <div class="obs-header">
+                        <span class="obs-title">📊 Bandwidth Traffic</span>
+                    </div>
+                    <div class="obs-traffic-rates">
+                        <div class="traffic-col">
+                            <span class="net-arrow up">▲</span>
+                            <span class="traffic-speed" id="netUpSpeed">0.0 MB/s</span>
+                            <span class="traffic-label">UP</span>
+                        </div>
+                        <div class="traffic-col">
+                            <span class="net-arrow down">▼</span>
+                            <span class="traffic-speed" id="netDownSpeed">0.0 MB/s</span>
+                            <span class="traffic-label">DOWN</span>
+                        </div>
+                    </div>
+                    <div class="obs-sub-stats">
+                        <span>Sent: <b id="netTotalUp">0 MB</b></span>
+                        <span>Recv: <b id="netTotalDown">0 MB</b></span>
                     </div>
                 </div>
+            </div>
+
+            <!-- Watchdog Live Mini Terminal Log (Collapsible) -->
+            <div class="watchdog-log-panel" id="watchdogLogPanel" style="display: none;">
+                <div class="watchdog-log-header">
+                    <span>📜 C:\Genesis\watchdog.log (Live Feed)</span>
+                    <span class="watchdog-heartbeat" id="watchdogHeartbeat">Heartbeat: —</span>
+                </div>
+                <pre class="watchdog-log-console" id="watchdogLogConsole">Waiting for watchdog telemetry...</pre>
             </div>
         </section>
     </main>
