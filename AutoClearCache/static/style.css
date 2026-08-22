@@ -400,6 +400,10 @@ body {
     border-radius: var(--radius);
     padding: 20px;
     transition: var(--transition);
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
 .card:hover {
@@ -581,8 +585,11 @@ body {
 
 .two-col {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 20px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 /* ============================================================
@@ -1873,13 +1880,35 @@ body {
         margin-top: 6px;
     }
 
+    /* Two Column Container (Auto-Boost + MuMu) */
+    .two-col {
+        grid-template-columns: 1fr;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .boost-card, .mumu-card {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
     /* Auto-Boost Card */
     .boost-controls {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
         gap: 8px;
     }
 
     .boost-row {
+        width: 100%;
+        max-width: 100%;
         font-size: 12px;
+        padding: 6px 0;
     }
 
     .threshold-control {
@@ -1898,14 +1927,18 @@ body {
     }
 
     .mode-select {
-        padding: 6px 10px;
+        padding: 6px 8px;
         font-size: 11px;
+        max-width: 140px;
     }
 
     .boost-now-btn {
+        width: 100%;
+        max-width: 100%;
         padding: 10px;
         font-size: 12px;
         margin-top: 4px;
+        box-sizing: border-box;
     }
 
     /* MuMu & Processes Tables (Scrollable Card Wrappers) */
