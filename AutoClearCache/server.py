@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
+CONFIG_EXAMPLE_PATH = BASE_DIR / "config.example.json"
 DATA_DIR = BASE_DIR / "data"
 HISTORY_PATH = DATA_DIR / "history.json"
 GROWTH_PATH = DATA_DIR / "growth.json"
@@ -46,11 +47,19 @@ DATA_DIR.mkdir(exist_ok=True)
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
+        if CONFIG_EXAMPLE_PATH.exists():
+            try:
+                with open(CONFIG_EXAMPLE_PATH, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                save_config(cfg)
+                return cfg
+            except Exception:
+                pass
         return {
             "server": {"host": "0.0.0.0", "port": 7700},
             "auth": {
                 "enabled": True,
-                "pin": "770088",
+                "pin": "000000",
                 "session_timeout_hours": 24,
             },
             "auto_boost": {

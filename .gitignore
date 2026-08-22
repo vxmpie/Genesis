@@ -36,6 +36,14 @@ AutoClearCache/cloudflared.exe
 *.exe
 !*.lua
 
+# Sensitive Configuration & Credentials
+config.json
+AutoClearCache/config.json
+!config.example.json
+!AutoClearCache/config.example.json
+.env
+.env.*
+
 # Data & Runtime Logs
 AutoClearCache/data/
 AutoClearCache/*.log
