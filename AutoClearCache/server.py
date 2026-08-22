@@ -1,21 +1,22 @@
 """
-Genesis Dashboard v2.1 — Real-Time System Monitor & Auto-Boost Engine
+Genesis Dashboard v2.2 — Real-Time System Monitor & Auto-Boost Engine
 Backend: FastAPI + WebSocket + Win32 API (EmptyWorkingSet + NtSetSystemInformation)
 
-Fable 5 Maintenance Suite (Hardened):
-  Module 1: Standby Memory Purge (Gated) + RAM Breakdown
-  Module 2: Hardening Drift Detector (4/4: VBS / MPO / Hypervisor / Defender Exclusions)
-  Module 3: In-VM Disk Sentinel (ADB Multi-port df /data + Auto-Trim)
+Fable 5 Production Suite (Hardened & Polished):
+  Module 1: Dual-Gated Standby Memory Purge (Available < 4GB AND Standby > 4GB) + RAM Breakdown
+  Module 2: Continuous Hardening Drift Detector (1-hour cadence for MPO / Exclusions + VBS / Hypervisor)
+  Module 3: In-VM Disk Sentinel (ADB Multi-port 16384+32 df /data + Auto-Trim)
   Module 4: Deep Clean Engine (Extended targets + Dry-run + Resilient wuauserv try/finally)
-  Module 5: Real-Time Anti-EcoQoS (<1s hook) + Background Hog Detector
+  Module 5: Real-Time Anti-EcoQoS (<1s hook on spawn) + Background Hog Detector
   Module 6: Growth Tracker (MuMu vms/ storage snapshots)
-  Module 7: Defender Maintenance (Non-blocking Popen Quick Scan + Downloads sweep)
-  Security: Optional PIN-based Session Authentication (Rate-limited)
+  Module 7: Defender Maintenance (Non-blocking Popen + Duplicate Guard + 04:30 Completion Verification)
+  Security: SHA-256 Salted PIN Authentication + Cloudflare IP Rate Limiting + WebSocket Guard
 """
 
 import asyncio
 import ctypes
 import ctypes.wintypes
+import hashlib
 import json
 import os
 import secrets
@@ -88,8 +89,9 @@ def load_config() -> dict:
                 "defender_scan_hour": 4,
                 "downloads_sweep_minutes": 30,
                 "growth_snapshot_hours": 6,
-                "drift_check_hours": 6,
-                "standby_purge_min_gb": 2.0,
+                "drift_check_hours": 1,
+                "standby_purge_min_available_gb": 4.0,
+                "standby_purge_min_standby_gb": 4.0,
             },
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -107,7 +109,7 @@ CONFIG = load_config()
 if "auth" not in CONFIG:
     CONFIG["auth"] = {
         "enabled": True,
-        "pin": "770088",
+        "pin": "000000",
         "session_timeout_hours": 24,
     }
     save_config(CONFIG)
@@ -121,21 +123,73 @@ if "maintenance" not in CONFIG:
         "defender_scan_hour": 4,
         "downloads_sweep_minutes": 30,
         "growth_snapshot_hours": 6,
-        "drift_check_hours": 6,
-        "standby_purge_min_gb": 2.0,
+        "drift_check_hours": 1,
+        "standby_purge_min_available_gb": 4.0,
+        "standby_purge_min_standby_gb": 4.0,
     }
     save_config(CONFIG)
-elif "standby_purge_min_gb" not in CONFIG["maintenance"]:
-    CONFIG["maintenance"]["standby_purge_min_gb"] = 2.0
-    save_config(CONFIG)
+else:
+    updated = False
+    if "standby_purge_min_available_gb" not in CONFIG["maintenance"]:
+        CONFIG["maintenance"]["standby_purge_min_available_gb"] = 4.0
+        updated = True
+    if "standby_purge_min_standby_gb" not in CONFIG["maintenance"]:
+        CONFIG["maintenance"]["standby_purge_min_standby_gb"] = 4.0
+        updated = True
+    if CONFIG["maintenance"].get("drift_check_hours", 6) > 1:
+        CONFIG["maintenance"]["drift_check_hours"] = 1
+        updated = True
+    if updated:
+        save_config(CONFIG)
+
 
 # ---------------------------------------------------------------------------
-# Authentication & Security Manager
+# Authentication & Cryptographic Security
 # ---------------------------------------------------------------------------
 _valid_sessions: dict[str, float] = {}  # token -> expiry_timestamp
 _failed_attempts: dict[str, list[float]] = {}  # ip -> list of failed timestamps
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_SECONDS = 600  # 10 minutes
+
+
+def hash_pin(pin: str, salt: str) -> str:
+    """Compute SHA-256 digest of salt + pin."""
+    return hashlib.sha256((salt + pin).encode("utf-8")).hexdigest()
+
+
+def verify_pin_input(input_pin: str) -> bool:
+    """Constant-time verification of PIN with transparent salt migration."""
+    auth_cfg = CONFIG.get("auth", {})
+    clean_input = input_pin.strip()
+    if not clean_input:
+        return False
+
+    if "pin_hash" in auth_cfg and "salt" in auth_cfg:
+        computed = hash_pin(clean_input, auth_cfg["salt"])
+        return secrets.compare_digest(computed, auth_cfg["pin_hash"])
+    elif "pin" in auth_cfg:
+        stored_pin = str(auth_cfg["pin"]).strip()
+        is_valid = secrets.compare_digest(clean_input, stored_pin)
+        if is_valid:
+            # Auto-migrate plaintext PIN to SHA-256 + Salt
+            salt = secrets.token_hex(8)
+            auth_cfg["salt"] = salt
+            auth_cfg["pin_hash"] = hash_pin(clean_input, salt)
+            del auth_cfg["pin"]
+            save_config(CONFIG)
+        return is_valid
+    return False
+
+
+def get_client_ip(request: Request) -> str:
+    """Extract real client IP from Cloudflare header or fall back to client host."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+    x_fwd = request.headers.get("X-Forwarded-For")
+    if x_fwd:
+        return x_fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def is_auth_enabled() -> bool:
@@ -145,7 +199,6 @@ def is_auth_enabled() -> bool:
 def is_ip_locked(ip: str) -> bool:
     attempts = _failed_attempts.get(ip, [])
     now = time.time()
-    # Filter attempts within lockout window
     recent = [t for t in attempts if now - t < LOCKOUT_SECONDS]
     _failed_attempts[ip] = recent
     return len(recent) >= MAX_FAILED_ATTEMPTS
@@ -216,7 +269,7 @@ def add_event(event_type: str, message: str):
 
 
 # ===========================================================================
-# MODULE 1: Standby Memory Purge (Gated) + RAM Boost via Win32 API
+# MODULE 1: Standby Memory Purge (Dual-Gated) + RAM Boost via Win32 API
 # ===========================================================================
 _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 _psapi = ctypes.WinDLL("psapi")
@@ -316,6 +369,13 @@ def get_ram_breakdown() -> dict:
         "free_gb": round(free_gb, 2),
         "available_gb": round(available_gb, 2),
     }
+
+
+def should_purge_standby_gate(available_gb: float, standby_gb: float) -> bool:
+    """Purge Standby only when RAM is starved (Available < 4GB) AND Standby is large (> 4GB)."""
+    min_avail = CONFIG.get("maintenance", {}).get("standby_purge_min_available_gb", 4.0)
+    min_standby = CONFIG.get("maintenance", {}).get("standby_purge_min_standby_gb", 4.0)
+    return available_gb < min_avail and standby_gb > min_standby
 
 
 def _get_protected_names() -> set:
@@ -471,7 +531,6 @@ def deep_clean_execute(targets: list | None = None) -> dict:
                             except (PermissionError, OSError):
                                 continue
         finally:
-            # Guaranteed service restart in finally block
             if service and service_was_running:
                 try:
                     subprocess.run(["net", "start", service], capture_output=True, timeout=15)
@@ -535,11 +594,12 @@ def ram_boost(force_standby: bool = True) -> dict:
         except Exception:
             errors += 1
 
-    # Intelligent Standby Purge Gating:
-    # Purge if explicitly forced (manual click) OR if Standby RAM exceeds threshold (>2.0 GB)
-    min_standby_gate = CONFIG.get("maintenance", {}).get("standby_purge_min_gb", 2.0)
-    should_purge_standby = force_standby or (breakdown_before.get("standby_gb", 0) >= min_standby_gate)
-    
+    # Intelligent Dual-Condition Standby Gating (Available < 4GB AND Standby > 4GB)
+    should_purge_standby = force_standby or should_purge_standby_gate(
+        breakdown_before.get("available_gb", 0),
+        breakdown_before.get("standby_gb", 0),
+    )
+
     standby_purged = False
     if should_purge_standby:
         standby_purged = purge_standby_list()
@@ -856,7 +916,7 @@ def disable_ecoqos_for_mumu() -> int:
                 False, pid,
             )
             if handle:
-                state = PROCESS_POWER_THROTTLING_STATE(1, 1, 0)  # V1, Speed control, State=0 (no throttle)
+                state = PROCESS_POWER_THROTTLING_STATE(1, 1, 0)
                 try:
                     result = _kernel32.SetProcessInformation(
                         handle, 4, ctypes.byref(state), ctypes.sizeof(state)
@@ -966,9 +1026,10 @@ def snapshot_folder_sizes() -> dict:
 
 
 # ===========================================================================
-# MODULE 7: Defender Maintenance (Non-blocking Popen)
+# MODULE 7: Defender Maintenance (Non-blocking Popen + Duplicate Guard)
 # ===========================================================================
 _last_scan_date = None
+_last_scan_verified = None
 _defender_status = {}
 
 
@@ -1009,15 +1070,25 @@ def get_defender_status() -> dict:
 
 
 def run_quick_scan() -> bool:
-    """Start an asynchronous, non-blocking Defender Quick Scan."""
+    """Start an asynchronous, non-blocking Defender Quick Scan with duplicate guard."""
     global _last_scan_date
+
+    # Prevent duplicate / overlapping scans
+    for proc in psutil.process_iter(["name"]):
+        try:
+            if proc.info["name"] and "mpcmdrun" in proc.info["name"].lower():
+                add_event("warning", "🔒 Defender Scan already in progress — skipped duplicate launch")
+                return False
+        except Exception:
+            continue
+
     try:
         subprocess.Popen(
             ["powershell", "-Command", "Start-MpScan -ScanType 1"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _last_scan_date = date.today()
-        add_event("system", "🔒 Defender Quick Scan started (Background)")
+        add_event("system", "🔒 Defender Quick Scan started in background")
         return True
     except Exception:
         return False
@@ -1181,7 +1252,6 @@ def get_metrics_with_rates() -> dict:
 # MuMu Instance Monitor (With Fast Anti-EcoQoS Hook)
 # ---------------------------------------------------------------------------
 def get_mumu_instances() -> list:
-    # Real-Time Hook: Unthrottle new MuMu instances as soon as they appear (<1 second)
     try:
         disable_ecoqos_for_mumu()
     except Exception:
@@ -1309,6 +1379,7 @@ _maintenance_task = None
 
 
 async def maintenance_loop():
+    global _last_scan_verified
     last_drift_check = 0
     last_vm_disk_check = 0
     last_hog_check = 0
@@ -1340,8 +1411,8 @@ async def maintenance_loop():
             now = time.time()
             maint_cfg = CONFIG.get("maintenance", {})
 
-            # Module 2: Hardening Drift Detector
-            drift_interval = maint_cfg.get("drift_check_hours", 6) * 3600
+            # Module 2: Hardening Drift Detector (Hourly Cadence)
+            drift_interval = maint_cfg.get("drift_check_hours", 1) * 3600
             if now - last_drift_check >= drift_interval:
                 try:
                     result = check_hardening_drift()
@@ -1350,7 +1421,7 @@ async def maintenance_loop():
                     pass
                 last_drift_check = now
 
-            # Module 3: VM Disk Sentinel
+            # Module 3: VM Disk Sentinel (15 min)
             if now - last_vm_disk_check >= 900:
                 try:
                     vm_data = get_vm_disk_status()
@@ -1368,7 +1439,7 @@ async def maintenance_loop():
                     pass
                 last_vm_disk_check = now
 
-            # Module 5: Hog Detector
+            # Module 5: Hog Detector (60s)
             if now - last_hog_check >= 60:
                 try:
                     detect_and_throttle_hogs()
@@ -1376,7 +1447,7 @@ async def maintenance_loop():
                     pass
                 last_hog_check = now
 
-            # Module 6: Growth Tracker
+            # Module 6: Growth Tracker (6h)
             growth_interval = maint_cfg.get("growth_snapshot_hours", 6) * 3600
             if now - last_growth_snapshot >= growth_interval:
                 try:
@@ -1385,7 +1456,7 @@ async def maintenance_loop():
                     pass
                 last_growth_snapshot = now
 
-            # Module 7: Defender Check
+            # Module 7: Defender Check (Hourly)
             if now - last_defender_check >= 3600:
                 try:
                     status = get_defender_status()
@@ -1396,12 +1467,20 @@ async def maintenance_loop():
 
             # Module 7: Quick Scan at 04:00 (Non-blocking Popen)
             current_hour = datetime.now().hour
+            current_minute = datetime.now().minute
             scan_hour = maint_cfg.get("defender_scan_hour", 4)
             if current_hour == scan_hour and _last_scan_date != date.today():
                 try:
                     run_quick_scan()
                 except Exception:
                     pass
+
+            # Module 7: Scan Completion Verification at 04:30
+            if current_hour == scan_hour and current_minute >= 30 and _last_scan_verified != date.today():
+                status = get_defender_status()
+                if status.get("quick_scan_age_days", -1) == 0:
+                    add_event("system", "✅ Defender Quick Scan completed & verified")
+                    _last_scan_verified = date.today()
 
             # Module 7: Downloads Sweep
             sweep_interval = maint_cfg.get("downloads_sweep_minutes", 30) * 60
@@ -1423,7 +1502,7 @@ async def maintenance_loop():
 # ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: list[tuple[WebSocket, bool]] = []  # (ws, is_authenticated)
+        self.active_connections: list[tuple[WebSocket, bool]] = []
 
     async def connect(self, ws: WebSocket, is_auth: bool):
         await ws.accept()
@@ -1473,7 +1552,7 @@ async def lifespan(app: FastAPI):
     psutil.cpu_percent(interval=0, percpu=True)
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
-    add_event("system", "Genesis Dashboard started (v2.1 Hardened Engine)")
+    add_event("system", "Genesis Dashboard started (v2.2 Production Engine)")
     yield
     if _auto_boost_task:
         _auto_boost_task.cancel()
@@ -1482,7 +1561,7 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Dashboard stopped")
 
 
-app = FastAPI(title="Genesis Dashboard", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="Genesis Dashboard", version="2.2.0", lifespan=lifespan)
 
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
@@ -1499,7 +1578,7 @@ async def serve_dashboard():
 # ---------------------------------------------------------------------------
 @app.post("/api/auth/login")
 async def api_auth_login(request: Request, payload: dict):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     if is_ip_locked(client_ip):
         return JSONResponse(
             {"error": "Too many failed attempts. Locked for 10 minutes."},
@@ -1507,9 +1586,8 @@ async def api_auth_login(request: Request, payload: dict):
         )
 
     pin = str(payload.get("pin", "")).strip()
-    correct_pin = str(CONFIG.get("auth", {}).get("pin", "770088")).strip()
 
-    if pin == correct_pin:
+    if verify_pin_input(pin):
         token = create_session_token()
         add_event("system", f"🔑 Session unlocked (IP: {client_ip})")
         return JSONResponse({"ok": True, "token": token})
@@ -1587,7 +1665,6 @@ async def websocket_endpoint(ws: WebSocket):
 async def handle_ws_command(ws: WebSocket, data: dict):
     cmd = data.get("command")
 
-    # Handle client auth handshake
     if cmd == "auth":
         token = data.get("token")
         if verify_session_token(token):
@@ -1598,7 +1675,6 @@ async def handle_ws_command(ws: WebSocket, data: dict):
             await ws.send_json({"type": "auth_failed"})
         return
 
-    # Guard all active/destructive actions behind authentication
     if is_auth_enabled() and not manager.is_auth(ws):
         await ws.send_json({"type": "auth_required", "error": "Authentication required for this command."})
         return
@@ -1668,7 +1744,13 @@ async def api_boost(request: Request):
 
 @app.get("/api/config")
 async def api_get_config():
-    return JSONResponse(CONFIG)
+    # Return config with pin_hash stripped for privacy
+    safe_cfg = json.loads(json.dumps(CONFIG))
+    if "auth" in safe_cfg:
+        safe_cfg["auth"].pop("pin_hash", None)
+        safe_cfg["auth"].pop("salt", None)
+        safe_cfg["auth"].pop("pin", None)
+    return JSONResponse(safe_cfg)
 
 
 @app.put("/api/config")
@@ -1756,7 +1838,7 @@ if __name__ == "__main__":
     host = CONFIG.get("server", {}).get("host", "0.0.0.0")
     port = CONFIG.get("server", {}).get("port", 7700)
     print(f"\n{'='*50}")
-    print(f"  GENESIS DASHBOARD v2.1 — Fable 5 Hardened Engine")
+    print(f"  GENESIS DASHBOARD v2.2 — Fable 5 Production Engine")
     print(f"  http://localhost:{port}")
     print(f"  http://0.0.0.0:{port} (LAN access)")
     print(f"{'='*50}\n")
