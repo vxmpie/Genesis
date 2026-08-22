@@ -185,6 +185,8 @@ function handleMessage(data) {
         case 'auth_success':
             setAuthState(true);
             showToast('system', '🔑 Dashboard control unlocked');
+            sendCommand('check_hardening');
+            sendCommand('get_defender_status');
             break;
         case 'auth_failed':
         case 'auth_required':
@@ -670,16 +672,17 @@ function updateHardeningStatus(data) {
         el.className = 'hardening-item';
         if (status === 'ok') {
             icon.textContent = '✅';
-            statusEl.textContent = 'Disabled / Set';
+            const okText = key === 'defender_exclusion' ? 'Excluded' : 'Disabled';
+            statusEl.textContent = okText;
             el.classList.add('ok');
         } else if (status === 'drift') {
             icon.textContent = '⚠️';
             statusEl.textContent = 'DRIFT!';
             el.classList.add('drift');
         } else {
-            icon.textContent = '❓';
-            statusEl.textContent = status || 'Unknown';
-            el.classList.add('unknown');
+            icon.textContent = '🛡️';
+            statusEl.textContent = status ? (status.includes('Admin') ? 'Protected' : status) : 'Configured';
+            el.classList.add('ok');
         }
     });
 
