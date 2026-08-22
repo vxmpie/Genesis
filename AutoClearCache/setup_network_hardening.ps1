@@ -1,5 +1,5 @@
 # ===========================================================================
-# Genesis Network Hardening & Watchdog Installer v2.0
+# Genesis Network Hardening & Watchdog Installer v2.1
 # Execute with Administrator Privileges
 # ===========================================================================
 
@@ -11,18 +11,18 @@ Write-Host "========================================================`n" -Foregro
 # 1. Wi-Fi Profile Optimizations
 # ---------------------------------------------------------------------------
 Write-Host "[1/6] Optimizing Wi-Fi Profile Priority & Randomization..." -ForegroundColor Yellow
-try {
-    netsh wlan set profileorder name="KMITL-HiSpeed" interface="Wi-Fi" priority=1 | Out-Null
+netsh wlan set profileorder name="KMITL-HiSpeed" interface="Wi-Fi" priority=1 | Out-Null
+if ($LASTEXITCODE -eq 0) {
     Write-Host "  [OK] KMITL-HiSpeed set to Priority #1" -ForegroundColor Green
-} catch {
-    Write-Host "  [WARN] Failed to set profile order: $_" -ForegroundColor DarkYellow
+} else {
+    Write-Host "  [WARN] Failed to set profile order (Exit code: $LASTEXITCODE)" -ForegroundColor DarkYellow
 }
 
-try {
-    netsh wlan set profileparameter name="KMITL-HiSpeed" Randomization=disable | Out-Null
+netsh wlan set profileparameter name="KMITL-HiSpeed" Randomization=disable | Out-Null
+if ($LASTEXITCODE -eq 0) {
     Write-Host "  [OK] MAC Randomization set to Disabled" -ForegroundColor Green
-} catch {
-    Write-Host "  [WARN] Failed to set randomization: $_" -ForegroundColor DarkYellow
+} else {
+    Write-Host "  [WARN] Failed to set randomization (Exit code: $LASTEXITCODE)" -ForegroundColor DarkYellow
 }
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,6 @@ $runtimeDir = "C:\Genesis"
 $destScript = Join-Path $runtimeDir "net_watchdog.ps1"
 
 if (-not (Test-Path $sourceScript)) {
-    # Fallback to current directory
     $sourceScript = ".\net_watchdog.ps1"
 }
 

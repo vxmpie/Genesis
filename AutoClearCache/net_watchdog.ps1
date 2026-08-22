@@ -1,7 +1,8 @@
 # ===========================================================================
-# Genesis Autonomous Network Watchdog v2.0
+# Genesis Autonomous Network Watchdog v2.1
 # Execution Environment: SYSTEM Task (Isolated in C:\Genesis)
 # Independent of OneDrive, User Sessions, and server.py
+# Compatible with Windows PowerShell 5.1 & PowerShell Core
 # ===========================================================================
 
 param (
@@ -11,68 +12,60 @@ param (
     [string]$RuntimeDir = "C:\Genesis"
 )
 
-# Ensure runtime directory exists
+# Ensure isolated runtime directory exists
 if (-not (Test-Path $RuntimeDir)) {
     New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null
 }
 
-$TextLogPath = Join-Path $RuntimeDir "watchdog.log"
-$GenesisHistoryPath = "C:\Users\rocke\OneDrive\Documents\GitHub\Genesis\AutoClearCache\data\history.json"
+$LogPath = Join-Path $RuntimeDir "watchdog.log"
+$LogOldPath = Join-Path $RuntimeDir "watchdog.log.old"
+
+# Log Rotation: Cap at 5MB
+function Rotate-LogIfNeeded {
+    try {
+        if (Test-Path $LogPath) {
+            $item = Get-Item $LogPath -ErrorAction SilentlyContinue
+            if ($item -and $item.Length -gt 5242880) {
+                Move-Item -Path $LogPath -Destination $LogOldPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {}
+}
 
 function Write-WatchdogLog([string]$level, [string]$message) {
     $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     $logLine = "[$timestamp] [$level] $message"
     
-    # 1. Always write to standalone local text log (Reliable, no sync conflict)
+    Rotate-LogIfNeeded
     try {
-        Add-Content -Path $TextLogPath -Value $logLine -Encoding utf8 -ErrorAction SilentlyContinue
-    } catch {}
-
-    # 2. Best-effort append to Genesis Dashboard history.json
-    try {
-        if (Test-Path $GenesisHistoryPath) {
-            $raw = Get-Content -Raw $GenesisHistoryPath -ErrorAction SilentlyContinue
-            $events = @()
-            if ($raw) {
-                $parsed = ConvertFrom-Json $raw -ErrorAction SilentlyContinue
-                if ($parsed) { $events = @($parsed) }
-            }
-            $newEntry = [PSCustomObject]@{
-                time = $timestamp
-                type = if ($level -eq "ERROR" -or $level -eq "CRITICAL") { "crash" } elseif ($level -eq "WARN") { "warning" } else { "system" }
-                message = "🐕 [Watchdog] $message"
-            }
-            $events += $newEntry
-            if ($events.Count -gt 500) {
-                $events = $events[($events.Count - 500)..($events.Count - 1)]
-            }
-            $json = ConvertTo-Json $events -Depth 4
-            Set-Content -Path $GenesisHistoryPath -Value $json -Encoding utf8 -Force -ErrorAction SilentlyContinue
-        }
+        Add-Content -Path $LogPath -Value $logLine -Encoding utf8 -ErrorAction SilentlyContinue
     } catch {}
 }
 
 function Test-InternetConnectivity {
-    # Check 1: ICMP Ping to Cloudflare DNS
-    if (Test-Connection -ComputerName "1.1.1.1" -Count 1 -Quiet -TimeoutSeconds 2 -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    # Check 2: ICMP Ping to Google DNS
-    if (Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -TimeoutSeconds 2 -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    # Check 3: TCP Port 443 Fallback (Bypasses ICMP filtering on campus networks)
+    # Check 1 & 2: ICMP via .NET Ping (Pure .NET - 100% compatible with PowerShell 5.1)
+    $pinger = New-Object System.Net.NetworkInformation.Ping
     foreach ($ip in @("1.1.1.1", "8.8.8.8")) {
         try {
-            $tcp = New-Object System.Net.Sockets.TcpClient
+            $reply = $pinger.Send($ip, 2000)
+            if ($reply -and $reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+                return $true
+            }
+        } catch {}
+    }
+
+    # Check 3: TCP Port 443 Fallback (Bypasses ICMP filtering on campus firewalls)
+    foreach ($ip in @("1.1.1.1", "8.8.8.8")) {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        try {
             $async = $tcp.BeginConnect($ip, 443, $null, $null)
             $wait = $async.AsyncWaitHandle.WaitOne(2000, $false)
             if ($wait -and $tcp.Connected) {
-                $tcp.Close()
                 return $true
             }
+        } catch {} finally {
             $tcp.Close()
-        } catch {}
+        }
     }
 
     return $false
@@ -89,7 +82,6 @@ Write-WatchdogLog "INFO" "Grace period ended. Active monitoring started (Target:
 $ConsecutiveFails = 0
 $RestartAttempts = 0
 $MaxRestartAttempts = 3
-$LastRestartTime = [DateTime]::MinValue
 $WasOffline = $false
 
 while ($true) {
@@ -98,7 +90,7 @@ while ($true) {
         
         if ($isOnline) {
             if ($WasOffline) {
-                Write-WatchdogLog "INFO" "✅ Internet connectivity restored (after $ConsecutiveFails consecutive fails, $RestartAttempts adapter restarts)."
+                Write-WatchdogLog "INFO" "[RECOVERED] Internet connectivity restored (after $ConsecutiveFails consecutive fails, $RestartAttempts adapter restarts)."
                 $WasOffline = $false
                 $ConsecutiveFails = 0
                 $RestartAttempts = 0
@@ -109,7 +101,7 @@ while ($true) {
 
             # Level 1: Re-issue connection request after 3 consecutive failures (~90s)
             if ($ConsecutiveFails -eq 3) {
-                Write-WatchdogLog "WARN" "⚠️ Offline for 90s. Level 1 recovery: Sending netsh connect to '$TargetSSID' on interface '$AdapterName'..."
+                Write-WatchdogLog "WARN" "[LEVEL 1] Offline for 90s. Reconnecting to '$TargetSSID' on interface '$AdapterName'..."
                 netsh wlan connect name="$TargetSSID" interface="$AdapterName" | Out-Null
             }
             
@@ -119,17 +111,16 @@ while ($true) {
             
             if ($shouldRestart) {
                 $RestartAttempts++
-                Write-WatchdogLog "CRITICAL" "🚨 Offline for $($ConsecutiveFails * 30)s. Level 2 recovery (Attempt $RestartAttempts/$MaxRestartAttempts): Soft-restarting adapter '$AdapterName'..."
+                Write-WatchdogLog "CRITICAL" "[LEVEL 2] Offline for $($ConsecutiveFails * 30)s. Soft-restarting adapter '$AdapterName' (Attempt $RestartAttempts/$MaxRestartAttempts)..."
                 
                 Restart-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 10
                 netsh wlan connect name="$TargetSSID" interface="$AdapterName" | Out-Null
-                $LastRestartTime = Get-Date
             }
             
             # Outage Exhaustion: Reached max restarts (e.g. campus-wide AP outage)
             if ($RestartAttempts -ge $MaxRestartAttempts -and ($ConsecutiveFails % 20 -eq 0)) {
-                Write-WatchdogLog "WARN" "⏳ Max adapter restarts reached ($MaxRestartAttempts/$MaxRestartAttempts). Campus network likely down. Passive polling continues..."
+                Write-WatchdogLog "WARN" "[SUSPENDED] Max adapter restarts reached ($MaxRestartAttempts/$MaxRestartAttempts). Campus network likely down. Passive polling continues..."
             }
         }
     } catch {
