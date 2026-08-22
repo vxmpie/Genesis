@@ -36,7 +36,7 @@ if not exist "data" mkdir data
 
 echo.
 echo [START] Starting Genesis Dashboard server...
-start /B "" python server.py
+start /B "" venv\Scripts\python.exe server.py
 
 REM Wait for server to start
 timeout /t 3 /nobreak >nul
