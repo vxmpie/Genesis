@@ -179,25 +179,31 @@ function handleMessage(data) {
             updateAutoBoostStatus(data.auto_boost);
             break;
         case 'boost_result':
-            onBoostResult(data.result);
-            break;
         case 'boost_triggered':
+            if (DOM.boostNowBtn) DOM.boostNowBtn.classList.remove('boosting');
             onBoostResult(data.result);
-            const tempStr = data.result && data.result.freed_temp_mb > 0 ? ` + ${data.result.freed_temp_mb}MB Temp` : '';
-            const standbyStr = data.result && data.result.standby_purged ? ' + Standby Purged' : '';
-            showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB RAM${standbyStr}${tempStr}`);
+            if (data.type === 'boost_triggered') {
+                const tempStr = data.result && data.result.freed_temp_mb > 0 ? ` + ${data.result.freed_temp_mb}MB Temp` : '';
+                const standbyStr = data.result && data.result.standby_purged ? ' + Standby Purged' : '';
+                showToast('boost', `⚡ Auto-Boost — freed ${data.result.freed_mb} MB RAM${standbyStr}${tempStr}`);
+            }
             break;
         case 'config_updated':
             STATE.config = data.config;
             applyConfig(data.config);
             break;
         case 'hardening_status':
+            if (DOM.hardeningRefreshBtn) DOM.hardeningRefreshBtn.classList.remove('spinning');
             updateHardeningStatus(data.data);
             break;
         case 'vm_disk_status':
             updateVmDiskData(data.data);
             break;
         case 'deep_clean_preview':
+            if (DOM.deepCleanScanBtn) {
+                DOM.deepCleanScanBtn.textContent = 'Scan';
+                DOM.deepCleanScanBtn.disabled = false;
+            }
             renderDeepCleanPreview(data.data);
             break;
         case 'deep_clean_result':
@@ -207,6 +213,10 @@ function handleMessage(data) {
             updateDefenderStatus(data.data);
             break;
         case 'quick_scan_result':
+            if (DOM.quickScanBtn) {
+                DOM.quickScanBtn.textContent = 'Quick Scan';
+                DOM.quickScanBtn.disabled = false;
+            }
             showToast('system', data.success ? '🔒 Quick Scan started in background' : '❌ Quick Scan failed');
             break;
         case 'vm_trim_result':
@@ -692,6 +702,7 @@ function renderDeepCleanPreview(preview) {
     DOM.deepCleanTotalSize.textContent = totalSize.toFixed(1);
     DOM.deepCleanTotalFiles.textContent = totalFiles;
     DOM.deepCleanTotal.style.display = 'flex';
+    DOM.deepCleanExecBtn.textContent = 'Clean All';
     DOM.deepCleanExecBtn.disabled = false;
 }
 
@@ -699,6 +710,7 @@ function onDeepCleanResult(result) {
     if (!result) return;
     showToast('boost', `🧹 Deep Clean: ${result.total_freed_mb} MB freed (${result.total_deleted} files)`);
     DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">Clean complete! Click "Scan" to check again</div>';
+    DOM.deepCleanExecBtn.textContent = 'Clean All';
     DOM.deepCleanExecBtn.disabled = true;
     DOM.deepCleanTotal.style.display = 'none';
     DOM.deepCleanScanBtn.textContent = 'Scan';
@@ -873,7 +885,7 @@ function setupEventHandlers() {
             setTimeout(() => {
                 DOM.deepCleanScanBtn.textContent = 'Scan';
                 DOM.deepCleanScanBtn.disabled = false;
-            }, 5000);
+            }, 10000);
         });
     }
 
@@ -883,6 +895,12 @@ function setupEventHandlers() {
             DOM.deepCleanExecBtn.textContent = 'Cleaning...';
             DOM.deepCleanExecBtn.disabled = true;
             sendCommand('deep_clean_execute');
+            setTimeout(() => {
+                if (DOM.deepCleanExecBtn.textContent === 'Cleaning...') {
+                    DOM.deepCleanExecBtn.textContent = 'Clean All';
+                    DOM.deepCleanExecBtn.disabled = false;
+                }
+            }, 15000);
         });
     }
 
@@ -895,7 +913,7 @@ function setupEventHandlers() {
             setTimeout(() => {
                 DOM.quickScanBtn.textContent = 'Quick Scan';
                 DOM.quickScanBtn.disabled = false;
-            }, 5000);
+            }, 8000);
         });
     }
 }
