@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+AutoClearCache/venv/
+AutoClearCache/env/
+
+# Binaries & Executables
+AutoClearCache/cloudflared.exe
+*.exe
+!*.lua
+
+# Data & Runtime Logs
+AutoClearCache/data/
+AutoClearCache/*.log
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store

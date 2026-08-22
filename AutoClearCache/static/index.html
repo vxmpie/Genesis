@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genesis Dashboard</title>
+    <meta name="description" content="Genesis — Real-Time System Monitor & Auto-Boost Engine for MuMu Player farming">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">G</div>
+            <div class="header-text">
+                <h1>GENESIS</h1>
+                <span class="subtitle">System Monitor & Auto-Boost</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="connection-status" id="connStatus">
+                <span class="conn-dot"></span>
+                <span class="conn-text">Connecting...</span>
+            </div>
+            <div class="uptime" id="uptime">00:00:00</div>
+        </div>
+    </header>
+
+    <main class="dashboard">
+        <!-- Metric Cards Row -->
+        <section class="metrics-row">
+            <div class="metric-card" id="cpuCard">
+                <div class="metric-ring-container">
+                    <svg class="metric-ring" viewBox="0 0 100 100">
+                        <circle class="ring-bg" cx="50" cy="50" r="42" />
+                        <circle class="ring-fill" id="cpuRing" cx="50" cy="50" r="42"
+                            stroke-dasharray="263.9" stroke-dashoffset="263.9" />
+                    </svg>
+                    <div class="ring-value">
+                        <span class="ring-number" id="cpuPercent">0</span>
+                        <span class="ring-unit">%</span>
+                    </div>
+                </div>
+                <div class="metric-label">CPU</div>
+                <div class="metric-sub" id="cpuSub">16 Threads</div>
+            </div>
+
+            <div class="metric-card" id="ramCard">
+                <div class="metric-ring-container">
+                    <svg class="metric-ring" viewBox="0 0 100 100">
+                        <circle class="ring-bg" cx="50" cy="50" r="42" />
+                        <circle class="ring-fill ring-ram" id="ramRing" cx="50" cy="50" r="42"
+                            stroke-dasharray="263.9" stroke-dashoffset="263.9" />
+                    </svg>
+                    <div class="ring-value">
+                        <span class="ring-number" id="ramPercent">0</span>
+                        <span class="ring-unit">%</span>
+                    </div>
+                </div>
+                <div class="metric-label">RAM</div>
+                <div class="metric-sub" id="ramSub">0 / 32 GB</div>
+            </div>
+
+            <div class="metric-card" id="gpuCard">
+                <div class="metric-ring-container">
+                    <svg class="metric-ring" viewBox="0 0 100 100">
+                        <circle class="ring-bg" cx="50" cy="50" r="42" />
+                        <circle class="ring-fill ring-gpu" id="gpuRing" cx="50" cy="50" r="42"
+                            stroke-dasharray="263.9" stroke-dashoffset="263.9" />
+                    </svg>
+                    <div class="ring-value">
+                        <span class="ring-number" id="gpuTemp">--</span>
+                        <span class="ring-unit">°C</span>
+                    </div>
+                </div>
+                <div class="metric-label">GPU</div>
+                <div class="metric-sub" id="gpuSub">RTX 3050</div>
+            </div>
+
+            <div class="metric-card" id="diskCard">
+                <div class="metric-ring-container">
+                    <svg class="metric-ring" viewBox="0 0 100 100">
+                        <circle class="ring-bg" cx="50" cy="50" r="42" />
+                        <circle class="ring-fill ring-disk" id="diskRing" cx="50" cy="50" r="42"
+                            stroke-dasharray="263.9" stroke-dashoffset="263.9" />
+                    </svg>
+                    <div class="ring-value">
+                        <span class="ring-number" id="diskSpeed">0</span>
+                        <span class="ring-unit">MB/s</span>
+                    </div>
+                </div>
+                <div class="metric-label">DISK I/O</div>
+                <div class="metric-sub" id="diskSub">R: 0 / W: 0</div>
+            </div>
+        </section>
+
+        <!-- CPU Per-Core Chart -->
+        <section class="card cpu-cores-card">
+            <div class="card-header">
+                <h2>CPU Per-Core Usage</h2>
+                <div class="core-legend">
+                    <span class="legend-p">● P-Cores (0-7)</span>
+                    <span class="legend-e">● E-Cores (8-15)</span>
+                </div>
+            </div>
+            <div class="cores-chart" id="coresChart"></div>
+        </section>
+
+        <!-- Two Column Layout -->
+        <div class="two-col">
+            <!-- Auto-Boost Engine -->
+            <section class="card boost-card">
+                <div class="card-header">
+                    <h2>⚡ Auto-Boost Engine</h2>
+                    <div class="boost-status" id="boostStatus">ARMED</div>
+                </div>
+                <div class="boost-controls">
+                    <div class="boost-row">
+                        <label>Status</label>
+                        <button class="toggle-btn" id="boostToggle">
+                            <span class="toggle-knob"></span>
+                        </button>
+                    </div>
+                    <div class="boost-row">
+                        <label>Threshold</label>
+                        <div class="threshold-control">
+                            <button class="threshold-btn" id="threshDown">−</button>
+                            <span class="threshold-value" id="threshValue">85%</span>
+                            <button class="threshold-btn" id="threshUp">+</button>
+                        </div>
+                    </div>
+                    <div class="boost-row">
+                        <label>Mode</label>
+                        <select class="mode-select" id="boostMode">
+                            <option value="auto">Auto (Threshold)</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="manual">Manual Only</option>
+                        </select>
+                    </div>
+                    <div class="boost-row" id="intervalRow">
+                        <label>Interval</label>
+                        <select class="mode-select" id="boostInterval">
+                            <option value="5">5 min</option>
+                            <option value="10" selected>10 min</option>
+                            <option value="15">15 min</option>
+                            <option value="30">30 min</option>
+                        </select>
+                    </div>
+                    <div class="boost-last" id="boostLast">
+                        Last boost: Never
+                    </div>
+                    <button class="boost-now-btn" id="boostNowBtn">
+                        <span class="boost-icon">⚡</span> BOOST NOW
+                    </button>
+                </div>
+            </section>
+
+            <!-- MuMu Instances -->
+            <section class="card mumu-card">
+                <div class="card-header">
+                    <h2>🎮 MuMu Instances</h2>
+                    <div class="mumu-count" id="mumuCount">0 running</div>
+                </div>
+                <div class="mumu-table-wrap">
+                    <table class="mumu-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Type</th>
+                                <th>CPU%</th>
+                                <th>RAM</th>
+                                <th>Uptime</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mumuBody">
+                            <tr class="mumu-empty"><td colspan="6">No instances detected</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- RAM History Chart -->
+        <section class="card chart-card">
+            <div class="card-header">
+                <h2>📊 RAM & CPU History</h2>
+                <span class="chart-time">Last 60 seconds</span>
+            </div>
+            <canvas id="historyChart" width="800" height="200"></canvas>
+        </section>
+
+        <!-- Event Log -->
+        <section class="card log-card">
+            <div class="card-header">
+                <h2>📋 Event Log</h2>
+                <button class="clear-log-btn" id="clearLogBtn">Clear</button>
+            </div>
+            <div class="log-entries" id="logEntries">
+                <div class="log-empty">No events yet</div>
+            </div>
+        </section>
+
+        <!-- Top Processes -->
+        <section class="card procs-card">
+            <div class="card-header">
+                <h2>📊 Top Processes</h2>
+                <span class="procs-sub">By Memory</span>
+            </div>
+            <div class="procs-table-wrap">
+                <table class="procs-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>PID</th>
+                            <th>RAM</th>
+                            <th>CPU%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="procsBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Network -->
+        <section class="card network-card">
+            <div class="card-header">
+                <h2>🌐 Network</h2>
+            </div>
+            <div class="net-stats">
+                <div class="net-stat">
+                    <span class="net-arrow up">▲</span>
+                    <div>
+                        <div class="net-speed" id="netUpSpeed">0 MB/s</div>
+                        <div class="net-label">Upload</div>
+                    </div>
+                </div>
+                <div class="net-stat">
+                    <span class="net-arrow down">▼</span>
+                    <div>
+                        <div class="net-speed" id="netDownSpeed">0 MB/s</div>
+                        <div class="net-label">Download</div>
+                    </div>
+                </div>
+                <div class="net-stat">
+                    <div>
+                        <div class="net-speed" id="netTotalUp">0 MB</div>
+                        <div class="net-label">Total Sent</div>
+                    </div>
+                </div>
+                <div class="net-stat">
+                    <div>
+                        <div class="net-speed" id="netTotalDown">0 MB</div>
+                        <div class="net-label">Total Recv</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

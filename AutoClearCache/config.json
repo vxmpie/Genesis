@@ -1,0 +1,33 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 7700
+  },
+  "auto_boost": {
+    "enabled": true,
+    "threshold_percent": 50,
+    "mode": "scheduled",
+    "interval_minutes": 30,
+    "protected_processes": [
+      "csrss.exe",
+      "lsass.exe",
+      "smss.exe",
+      "wininit.exe",
+      "System",
+      "StarDesk.exe",
+      "parsecd.exe",
+      "dwm.exe"
+    ]
+  },
+  "mumu": {
+    "install_path": "C:/Program Files/Netease/MuMuPlayer",
+    "process_names": [
+      "MuMuNxDevice.exe",
+      "MuMuNxMain.exe"
+    ]
+  },
+  "metrics": {
+    "update_interval_ms": 1000,
+    "history_length": 60
+  }
+}
