@@ -408,13 +408,27 @@ DEEP_CLEAN_TARGETS = [
 
 _memory_dmp = r"C:\Windows\MEMORY.DMP"
 
+# Critical Safety Blacklist: Under NO circumstances allow cleaning in these paths
+_PROTECTED_DIR_SUBSTRINGS = ["mumu", "vms", "nemu", "program files", "system32", "syswow64"]
+
+
+def _is_safe_clean_path(target_path: str) -> bool:
+    norm = os.path.normpath(target_path).lower()
+    # Allow explicitly whitelisted system paths
+    for t in DEEP_CLEAN_TARGETS:
+        if os.path.normpath(t["path"]).lower() == norm:
+            return True
+    if norm == os.path.normpath(_memory_dmp).lower():
+        return True
+    return False
+
 
 def deep_clean_preview() -> list:
-    """Scan all targets and return estimated sizes without deleting anything."""
+    """Scan only strictly whitelisted system targets and return estimated sizes."""
     preview = []
     for target in DEEP_CLEAN_TARGETS:
         folder = target["path"]
-        if not os.path.exists(folder):
+        if not os.path.exists(folder) or not _is_safe_clean_path(folder):
             continue
         total_size = 0
         file_count = 0
@@ -454,27 +468,6 @@ def deep_clean_preview() -> list:
         except OSError:
             pass
 
-    mumu_path = Path(CONFIG.get("mumu", {}).get("install_path", ""))
-    if mumu_path.exists():
-        vms_dir = mumu_path / "vms"
-        if vms_dir.exists():
-            total_size = 0
-            file_count = 0
-            for log_file in vms_dir.rglob("*.log"):
-                try:
-                    total_size += log_file.stat().st_size
-                    file_count += 1
-                except OSError:
-                    continue
-            if file_count > 0:
-                preview.append({
-                    "name": "MuMu Logs",
-                    "path": str(vms_dir),
-                    "file_count": file_count,
-                    "size_mb": round(total_size / (1024 * 1024), 1),
-                    "requires_service_stop": None,
-                })
-
     return preview
 
 
@@ -489,9 +482,11 @@ def deep_clean_execute(targets: list | None = None) -> dict:
     results = []
 
     for item in preview:
+        path = item["path"]
+        if not _is_safe_clean_path(path):
+            continue
         service = item.get("requires_service_stop")
         service_was_running = False
-        path = item["path"]
         freed = 0
         deleted = 0
 
