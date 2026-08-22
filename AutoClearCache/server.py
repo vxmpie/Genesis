@@ -182,14 +182,20 @@ def verify_pin_input(input_pin: str) -> bool:
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract real client IP from Cloudflare header or fall back to client host."""
-    cf_ip = request.headers.get("CF-Connecting-IP")
-    if cf_ip:
-        return cf_ip.strip()
-    x_fwd = request.headers.get("X-Forwarded-For")
-    if x_fwd:
-        return x_fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Extract real client IP securely.
+    
+    Only trust proxy headers (CF-Connecting-IP / X-Forwarded-For) if connection 
+    originates from local loopback (cloudflared tunnel proxy). Otherwise use peer IP.
+    """
+    peer_ip = request.client.host if request.client else "unknown"
+    if peer_ip in ("127.0.0.1", "::1", "localhost"):
+        cf_ip = request.headers.get("CF-Connecting-IP")
+        if cf_ip:
+            return cf_ip.strip()
+        x_fwd = request.headers.get("X-Forwarded-For")
+        if x_fwd:
+            return x_fwd.split(",")[0].strip()
+    return peer_ip
 
 
 def is_auth_enabled() -> bool:
