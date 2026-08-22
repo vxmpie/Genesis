@@ -19,20 +19,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # ---------------------------------------------------------------------------
-# GPU helper — pynvml with graceful fallback
-# ---------------------------------------------------------------------------
-_GPU_AVAILABLE = False
-_GPU_HANDLE = None
-try:
-    import pynvml
-    pynvml.nvmlInit()
-    _GPU_HANDLE = pynvml.nvmlDeviceGetHandleByIndex(0)
-    _GPU_AVAILABLE = True
-except Exception:
-    _GPU_HANDLE = None
-    _GPU_AVAILABLE = False
-
-# ---------------------------------------------------------------------------
 # Paths & Config
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
@@ -179,17 +165,31 @@ def ram_boost() -> dict:
 # ---------------------------------------------------------------------------
 # Metrics collection
 # ---------------------------------------------------------------------------
+_last_gpu_data = {
+    "available": True,
+    "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+    "temperature_c": 0,
+    "utilization_percent": 0,
+    "memory_used_mb": 0,
+    "memory_total_mb": 4096,
+    "memory_percent": 0.0,
+}
+
+
 def get_gpu_metrics() -> dict:
-    if not _GPU_AVAILABLE or _GPU_HANDLE is None:
-        return {"available": False}
+    global _last_gpu_data
     try:
-        temp = pynvml.nvmlDeviceGetTemperature(_GPU_HANDLE, pynvml.NVML_TEMPERATURE_GPU)
-        util = pynvml.nvmlDeviceGetUtilizationRates(_GPU_HANDLE)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(_GPU_HANDLE)
-        name = pynvml.nvmlDeviceGetName(_GPU_HANDLE)
+        import pynvml
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        name = pynvml.nvmlDeviceGetName(handle)
         if isinstance(name, bytes):
             name = name.decode("utf-8")
-        return {
+
+        _last_gpu_data = {
             "available": True,
             "name": name,
             "temperature_c": temp,
@@ -198,7 +198,19 @@ def get_gpu_metrics() -> dict:
             "memory_total_mb": round(mem.total / (1024 * 1024)),
             "memory_percent": round(mem.used / mem.total * 100, 1),
         }
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+        return _last_gpu_data
     except Exception:
+        try:
+            import pynvml
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+        if _last_gpu_data.get("temperature_c", 0) > 0:
+            return _last_gpu_data
         return {"available": False}
 
 
@@ -440,11 +452,6 @@ async def lifespan(app: FastAPI):
     yield
     if _auto_boost_task:
         _auto_boost_task.cancel()
-    if _GPU_AVAILABLE:
-        try:
-            pynvml.nvmlShutdown()
-        except Exception:
-            pass
     add_event("system", "Genesis Dashboard stopped")
 
 
