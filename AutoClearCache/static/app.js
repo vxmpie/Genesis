@@ -181,6 +181,10 @@ function handleMessage(data) {
             if (data.defender) updateDefenderStatus(data.defender);
             if (data.vm_disk) updateVmDiskData(data.vm_disk);
             if (data.observatory) updateNetworkObservatory(data.observatory);
+            // If defender data was empty on init, request fresh status
+            if (!data.defender || !data.defender.available) {
+                setTimeout(() => sendCommand('get_defender_status'), 3000);
+            }
             break;
         case 'auth_success':
             setAuthState(true);
@@ -240,6 +244,10 @@ function handleMessage(data) {
                 DOM.quickScanBtn.disabled = false;
             }
             showToast('system', data.success ? '🔒 Quick Scan started in background' : '❌ Quick Scan failed');
+            // Refresh defender card to show updated scan age
+            if (data.success) {
+                setTimeout(() => sendCommand('get_defender_status'), 5000);
+            }
             break;
         case 'vm_trim_result':
             showToast('system', data.success ? `📱 VM cache trimmed (port ${data.port})` : '❌ VM trim failed');

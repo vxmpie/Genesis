@@ -2000,6 +2000,9 @@ async def handle_ws_command(ws: WebSocket, data: dict):
     elif cmd == "quick_scan":
         success = run_quick_scan()
         await ws.send_json({"type": "quick_scan_result", "success": success})
+        # Refresh defender status after scan trigger so UI updates immediately
+        status = get_defender_status()
+        await ws.send_json({"type": "defender_status", "data": status})
 
     elif cmd == "growth_data":
         await ws.send_json({"type": "growth_data", "data": _growth_data[-24:]})
