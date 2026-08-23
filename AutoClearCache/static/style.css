@@ -213,6 +213,74 @@ body {
 }
 
 /* ============================================================
+   Session & Uptime Summary Card (v2.4)
+   ============================================================ */
+
+.summary-card {
+    background: linear-gradient(135deg, rgba(22, 22, 34, 0.95), rgba(15, 15, 24, 0.98));
+    border: 1px solid rgba(0, 210, 255, 0.18);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    align-items: center;
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    transition: var(--transition);
+}
+
+.summary-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(0, 210, 255, 0.25);
+}
+
+.summary-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.summary-val {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: #FFFFFF;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.summary-val.fresh {
+    color: var(--green);
+    text-shadow: 0 0 8px var(--green-glow);
+}
+
+.summary-val.stale, .summary-val.warning {
+    color: var(--amber);
+    text-shadow: 0 0 8px var(--amber-glow);
+}
+
+.summary-val.critical {
+    color: var(--accent);
+    text-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* ============================================================
    Metric Cards Row (4 cards)
    ============================================================ */
 
@@ -1682,6 +1750,11 @@ body {
    ============================================================ */
 
 @media (max-width: 900px) {
+    .summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+
     .metrics-row {
         grid-template-columns: repeat(2, 1fr);
         gap: 12px;
@@ -1765,6 +1838,23 @@ body {
     .dashboard {
         padding: 10px;
         gap: 10px;
+    }
+
+    .summary-card {
+        padding: 10px 12px;
+    }
+
+    .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .summary-item:last-child {
+        grid-column: span 2;
+    }
+
+    .summary-val {
+        font-size: 13px;
     }
 
     .card {

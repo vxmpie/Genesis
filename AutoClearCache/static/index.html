@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2.4.0">
 </head>
 <body>
     <!-- Header -->
@@ -34,6 +34,32 @@
     </header>
 
     <main class="dashboard">
+        <!-- Session & Uptime Summary Card (v2.4) -->
+        <section class="card summary-card">
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">⏱️ Server Uptime</span>
+                    <span class="summary-val" id="sumUptime">0h 00m</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">⚡ Total Boosts</span>
+                    <span class="summary-val" id="sumBoosts">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">🌐 Net Recoveries</span>
+                    <span class="summary-val" id="sumRecoveries">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">🧹 Last Clean</span>
+                    <span class="summary-val" id="sumLastClean">None</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">🛡️ Hardening</span>
+                    <span class="summary-val fresh" id="sumHardening">4/4 OK</span>
+                </div>
+            </div>
+        </section>
+
         <!-- Metric Cards Row -->
         <section class="metrics-row">
             <div class="metric-card" id="cpuCard">
@@ -279,7 +305,7 @@
         <section class="card chart-card">
             <div class="card-header">
                 <h2>📊 RAM & CPU History</h2>
-                <span class="chart-time">Last 60 seconds</span>
+                <span class="chart-time" id="chartTimeLabel">Last 30 minutes</span>
             </div>
             <canvas id="historyChart" width="800" height="200"></canvas>
         </section>
@@ -429,6 +455,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2.4.0"></script>
 </body>
 </html>

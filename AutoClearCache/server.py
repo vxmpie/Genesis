@@ -22,7 +22,9 @@ import os
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
+import urllib.request
 import winreg
 from contextlib import asynccontextmanager
 from datetime import datetime, date
@@ -238,24 +240,32 @@ def create_session_token() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Event History
+# Server Runtime & Persistence Layer (Cap: 5,000 Entries, Atomic Write)
 # ---------------------------------------------------------------------------
-MAX_HISTORY = 200
+_server_start_time = time.time()
+MAX_HISTORY = 5000
 
 
 def _load_history() -> list:
     if HISTORY_PATH.exists():
         try:
             with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data[-MAX_HISTORY:]
         except Exception:
             return []
     return []
 
 
 def _save_history(events: list):
-    with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(events[-MAX_HISTORY:], f, indent=2, ensure_ascii=False)
+    try:
+        tmp_path = DATA_DIR / "history.json.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(events[-MAX_HISTORY:], f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, HISTORY_PATH)
+    except Exception as e:
+        print(f"[ERROR] Failed to save history.json: {e}")
 
 
 event_history: list = _load_history()
@@ -272,6 +282,119 @@ def add_event(event_type: str, message: str):
         del event_history[: len(event_history) - MAX_HISTORY]
     _save_history(event_history)
     return entry
+
+
+# ---------------------------------------------------------------------------
+# Discord Alert Dispatcher & Heartbeat Engine
+# ---------------------------------------------------------------------------
+_last_alert_times = {}
+
+
+def send_discord_alert(title: str, description: str, color: int = 0x00D2FF, fields: list = None):
+    """Dispatch a rich embed notification to Discord Webhook asynchronously (non-blocking)."""
+    alerts_cfg = CONFIG.get("alerts", {})
+    webhook_url = alerts_cfg.get("discord_webhook_url", "").strip()
+    if not webhook_url:
+        return
+
+    # Debounce / rate limit check per alert title
+    min_interval = alerts_cfg.get("min_alert_interval_seconds", 60)
+    now = time.time()
+    if title in _last_alert_times and (now - _last_alert_times[title]) < min_interval:
+        return
+    _last_alert_times[title] = now
+
+    def _post_async():
+        try:
+            payload = {
+                "username": "Genesis Sentinel v2.4",
+                "embeds": [{
+                    "title": title,
+                    "description": description,
+                    "color": color,
+                    "fields": fields or [],
+                    "footer": {"text": "Genesis Dashboard • Fable 5 Production Suite"},
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                }]
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                webhook_url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "Genesis-Sentinel/2.4"}
+            )
+            with urllib.request.urlopen(req, timeout=8):
+                pass
+        except Exception as e:
+            print(f"[DISCORD ALERT ERROR] {e}")
+
+    threading.Thread(target=_post_async, daemon=True).start()
+
+
+async def heartbeat_loop():
+    """Dead Man's Switch: Periodically send heartbeat GET request to monitor server liveliness."""
+    while True:
+        try:
+            alerts_cfg = CONFIG.get("alerts", {})
+            hb_url = alerts_cfg.get("heartbeat_url", "").strip()
+            interval_min = alerts_cfg.get("heartbeat_interval_minutes", 5)
+            if hb_url:
+                try:
+                    await asyncio.to_thread(lambda: urllib.request.urlopen(hb_url, timeout=10))
+                except Exception as e:
+                    print(f"[HEARTBEAT ERROR] {e}")
+            await asyncio.sleep(max(60, interval_min * 60))
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            await asyncio.sleep(60)
+
+
+# ---------------------------------------------------------------------------
+# 30-Minute Downsampled Chart Buffer & Session Summary
+# ---------------------------------------------------------------------------
+_chart_buffer_ram = []  # max 60 data points (30 seconds per point = 30 mins)
+_chart_buffer_cpu = []
+_chart_last_sample_time = 0
+
+
+def update_chart_buffer(ram_pct: float, cpu_pct: float):
+    global _chart_last_sample_time
+    now = time.time()
+    if now - _chart_last_sample_time >= 30:
+        _chart_buffer_ram.append(round(float(ram_pct), 1))
+        _chart_buffer_cpu.append(round(float(cpu_pct), 1))
+        if len(_chart_buffer_ram) > 60:
+            _chart_buffer_ram.pop(0)
+        if len(_chart_buffer_cpu) > 60:
+            _chart_buffer_cpu.pop(0)
+        _chart_last_sample_time = now
+
+
+def get_session_summary() -> dict:
+    """Calculate session-level metrics and historical counters for the Summary Card."""
+    uptime_sec = int(time.time() - _server_start_time)
+    total_boosts = sum(1 for e in event_history if e.get("type") == "boost")
+    
+    last_clean_time = "None"
+    for e in reversed(event_history):
+        if e.get("type") == "boost":
+            last_clean_time = e.get("time", "")
+            break
+
+    # Extract watchdog recoveries from watchdog status
+    watchdog = get_watchdog_status()
+    net_recoveries = watchdog.get("recoveries_today", 0)
+
+    return {
+        "uptime_seconds": uptime_sec,
+        "total_boosts": total_boosts,
+        "net_recoveries": net_recoveries,
+        "last_clean_time": last_clean_time,
+        "total_events": len(event_history),
+        "drift_detected": _last_drift_result.get("has_drift", False) if _last_drift_result else False,
+    }
+
 
 
 # ===========================================================================
@@ -788,6 +911,13 @@ def check_hardening_drift() -> dict:
     if drift:
         drift_items = ", ".join(f"{k}: {v}" for k, v in drift.items())
         add_event("warning", f"⚠️ Hardening drift detected: {drift_items}")
+        if CONFIG.get("alerts", {}).get("notify_on_drift", True):
+            send_discord_alert(
+                "🚨 Windows Hardening Drift Detected",
+                f"The following security/display settings have drifted from production baseline:\n\n**{drift_items}**",
+                color=0xFFB800,
+                fields=[{"name": "Action Required", "value": "Verify registry settings or re-run setup_network_hardening.ps1", "inline": False}]
+            )
 
     return _last_drift_result
 
@@ -1510,6 +1640,13 @@ def get_metrics_with_rates() -> dict:
     _prev_disk_io = disk_io
     _prev_net_io = net_io
     _prev_time = now
+
+    # Update 30-minute downsampled chart buffer
+    try:
+        update_chart_buffer(metrics["ram"]["percent"], metrics["cpu"]["total_percent"])
+    except Exception:
+        pass
+
     return metrics
 
 
@@ -1559,7 +1696,18 @@ def check_mumu_health() -> dict:
 
     if _prev_mumu_count is not None and current_device_count < _prev_mumu_count:
         lost = _prev_mumu_count - current_device_count
-        add_event("crash", f"MuMu Instance crash detected — {lost} instance(s) disappeared")
+        msg = f"MuMu Instance crash detected — {lost} instance(s) disappeared"
+        add_event("crash", msg)
+        if CONFIG.get("alerts", {}).get("notify_on_mumu_crash", True):
+            send_discord_alert(
+                "🚨 MuMu Instance Crash Detected",
+                f"**{lost}** instance(s) terminated unexpectedly.\nActive devices: **{current_device_count}** (was {_prev_mumu_count})",
+                color=0xFF3366,
+                fields=[
+                    {"name": "Remaining Instances", "value": f"{current_device_count} running", "inline": True},
+                    {"name": "Impact", "value": f"-{lost} bot(s) offline", "inline": True},
+                ]
+            )
 
     _prev_mumu_count = current_device_count
 
@@ -1617,6 +1765,12 @@ async def auto_boost_loop():
             if mode == "auto" and mem.percent >= cfg.get("threshold_percent", 85):
                 should_boost = True
                 add_event("warning", f"RAM threshold {cfg['threshold_percent']}% reached ({mem.percent}%)")
+                if mem.percent >= 90 and CONFIG.get("alerts", {}).get("notify_on_ram_critical", True):
+                    send_discord_alert(
+                        "⚠️ RAM Critical Alert (>90%)",
+                        f"System RAM reached **{mem.percent}%** ({round(mem.used/(1024**3), 1)}GB / {round(mem.total/(1024**3), 1)}GB).\nAuto-Boost is purging caches now.",
+                        color=0xFFB800,
+                    )
             elif mode == "scheduled":
                 interval = cfg.get("interval_minutes", 10) * 60
                 if _last_boost_time is None or (time.time() - _last_boost_time) >= interval:
@@ -1811,22 +1965,37 @@ async def broadcast_event(data: dict):
 # ---------------------------------------------------------------------------
 # FastAPI App
 # ---------------------------------------------------------------------------
+_heartbeat_task = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task
     psutil.cpu_percent(interval=0, percpu=True)
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
-    add_event("system", "Genesis Dashboard started (v2.2 Production Engine)")
+    _heartbeat_task = asyncio.create_task(heartbeat_loop())
+    add_event("system", "Genesis Dashboard started (v2.4 Production Engine)")
+
+    # Send Discord notification on startup
+    if CONFIG.get("alerts", {}).get("notify_on_startup", True):
+        send_discord_alert(
+            "🚀 Genesis Dashboard Online (v2.4)",
+            "**Fable 5 Production Suite & Network Observatory** successfully initialized.\nAll 8 Modules active, persistence enabled (5,000 entries cap).",
+            color=0x00FF88
+        )
+
     yield
     if _auto_boost_task:
         _auto_boost_task.cancel()
     if _maintenance_task:
         _maintenance_task.cancel()
+    if _heartbeat_task:
+        _heartbeat_task.cancel()
     add_event("system", "Genesis Dashboard stopped")
 
 
-app = FastAPI(title="Genesis Dashboard", version="2.2.0", lifespan=lifespan)
+app = FastAPI(title="Genesis Dashboard", version="2.4.0", lifespan=lifespan)
 
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
@@ -1892,6 +2061,11 @@ async def websocket_endpoint(ws: WebSocket):
             "vm_disk": _vm_disk_cache,
             "growth": _growth_data[-24:] if _growth_data else [],
             "observatory": get_network_observatory(),
+            "summary": get_session_summary(),
+            "chart_history": {
+                "ram": _chart_buffer_ram,
+                "cpu": _chart_buffer_cpu,
+            },
         })
 
         _obs_counter = 0
@@ -1906,6 +2080,7 @@ async def websocket_endpoint(ws: WebSocket):
                 "metrics": metrics,
                 "mumu": mumu,
                 "top_processes": top_procs,
+                "summary": get_session_summary(),
                 "auto_boost": {
                     "enabled": CONFIG["auto_boost"]["enabled"],
                     "mode": CONFIG["auto_boost"]["mode"],
@@ -2129,14 +2304,19 @@ async def api_network_flush_dns(request: Request):
     return JSONResponse({"success": flush_dns_cache()})
 
 
+@app.get("/api/summary")
+async def api_summary():
+    return JSONResponse(get_session_summary())
+
+
 if __name__ == "__main__":
     import uvicorn
 
     host = CONFIG.get("server", {}).get("host", "0.0.0.0")
     port = CONFIG.get("server", {}).get("port", 7700)
     print(f"\n{'='*50}")
-    print(f"  GENESIS DASHBOARD v2.2 — Fable 5 Production Engine")
+    print(f"  GENESIS DASHBOARD v2.4 — Fable 5 Production Suite")
     print(f"  http://localhost:{port}")
-    print(f"  http://0.0.0.0:{port} (LAN access)")
+    print(f"  http://{host}:{port} (LAN/Remote Access)")
     print(f"{'='*50}\n")
     uvicorn.run(app, host=host, port=port, log_level="info")

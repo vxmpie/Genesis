@@ -118,6 +118,12 @@ const DOM = {
     watchdogLogPanel: $('#watchdogLogPanel'),
     watchdogHeartbeat: $('#watchdogHeartbeat'),
     watchdogLogConsole: $('#watchdogLogConsole'),
+    // Summary Card (v2.4)
+    sumUptime: $('#sumUptime'),
+    sumBoosts: $('#sumBoosts'),
+    sumRecoveries: $('#sumRecoveries'),
+    sumLastClean: $('#sumLastClean'),
+    sumHardening: $('#sumHardening'),
 };
 
 // ============================================================
@@ -181,6 +187,16 @@ function handleMessage(data) {
             if (data.defender) updateDefenderStatus(data.defender);
             if (data.vm_disk) updateVmDiskData(data.vm_disk);
             if (data.observatory) updateNetworkObservatory(data.observatory);
+            if (data.summary) updateSessionSummary(data.summary);
+            if (data.chart_history) {
+                if (data.chart_history.cpu && data.chart_history.cpu.length > 0) {
+                    STATE.cpuHistory = [...data.chart_history.cpu];
+                }
+                if (data.chart_history.ram && data.chart_history.ram.length > 0) {
+                    STATE.ramHistory = [...data.chart_history.ram];
+                }
+                drawHistoryChart();
+            }
             // If defender data was empty on init, request fresh status
             if (!data.defender || !data.defender.available) {
                 setTimeout(() => sendCommand('get_defender_status'), 3000);
@@ -203,6 +219,7 @@ function handleMessage(data) {
             updateTopProcesses(data.top_processes);
             updateAutoBoostStatus(data.auto_boost);
             if (data.observatory) updateNetworkObservatory(data.observatory);
+            if (data.summary) updateSessionSummary(data.summary);
             break;
         case 'boost_result':
         case 'boost_triggered':
@@ -406,11 +423,22 @@ function updateMetrics(m) {
 
     updateCoreBars(m.cpu);
 
-    STATE.cpuHistory.push(cpuTotal);
-    STATE.ramHistory.push(ramPct);
-    if (STATE.cpuHistory.length > STATE.historyLength) STATE.cpuHistory.shift();
-    if (STATE.ramHistory.length > STATE.historyLength) STATE.ramHistory.shift();
-    drawHistoryChart();
+    // 30-Minute Chart Downsampling (Sample every 30s or on empty)
+    pushChartSample(cpuTotal, ramPct);
+}
+
+let lastChartSampleTime = 0;
+
+function pushChartSample(cpuTotal, ramPct) {
+    const now = Date.now();
+    if (now - lastChartSampleTime >= 30000 || STATE.cpuHistory.length === 0) {
+        STATE.cpuHistory.push(cpuTotal);
+        STATE.ramHistory.push(ramPct);
+        if (STATE.cpuHistory.length > 60) STATE.cpuHistory.shift();
+        if (STATE.ramHistory.length > 60) STATE.ramHistory.shift();
+        lastChartSampleTime = now;
+        drawHistoryChart();
+    }
 }
 
 // ============================================================
@@ -779,6 +807,52 @@ function updateDefenderStatus(data) {
 
     DOM.defRealtime.textContent = data.realtime_enabled ? 'ON' : 'OFF';
     DOM.defRealtime.className = `defender-value ${data.realtime_enabled ? 'fresh' : 'stale'}`;
+}
+
+// ============================================================
+// Session & Uptime Summary (v2.4)
+// ============================================================
+function updateSessionSummary(sum) {
+    if (!sum) return;
+
+    if (DOM.sumUptime) {
+        const sec = sum.uptime_seconds || 0;
+        const days = Math.floor(sec / 86400);
+        const hours = Math.floor((sec % 86400) / 3600);
+        const mins = Math.floor((sec % 3600) / 60);
+        if (days > 0) {
+            DOM.sumUptime.textContent = `${days}d ${hours}h ${mins}m`;
+        } else {
+            DOM.sumUptime.textContent = `${hours}h ${mins}m`;
+        }
+    }
+
+    if (DOM.sumBoosts) {
+        DOM.sumBoosts.textContent = sum.total_boosts || 0;
+    }
+
+    if (DOM.sumRecoveries) {
+        DOM.sumRecoveries.textContent = sum.net_recoveries || 0;
+    }
+
+    if (DOM.sumLastClean) {
+        if (!sum.last_clean_time || sum.last_clean_time === 'None') {
+            DOM.sumLastClean.textContent = 'None';
+        } else {
+            const parts = sum.last_clean_time.split(' ');
+            DOM.sumLastClean.textContent = parts[1] || sum.last_clean_time;
+        }
+    }
+
+    if (DOM.sumHardening) {
+        if (sum.drift_detected) {
+            DOM.sumHardening.textContent = 'Drift Detected';
+            DOM.sumHardening.className = 'summary-val warning';
+        } else {
+            DOM.sumHardening.textContent = '4/4 Hardened';
+            DOM.sumHardening.className = 'summary-val fresh';
+        }
+    }
 }
 
 // ============================================================

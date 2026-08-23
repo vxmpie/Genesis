@@ -48,5 +48,16 @@
     "growth_snapshot_hours": 6,
     "drift_check_hours": 6,
     "standby_purge_min_gb": 2.0
+  },
+  "alerts": {
+    "discord_webhook_url": "",
+    "heartbeat_url": "",
+    "heartbeat_interval_minutes": 5,
+    "min_alert_interval_seconds": 60,
+    "notify_on_startup": true,
+    "notify_on_drift": true,
+    "notify_on_mumu_crash": true,
+    "notify_on_ram_critical": true,
+    "notify_on_watchdog_recovery": true
   }
 }
