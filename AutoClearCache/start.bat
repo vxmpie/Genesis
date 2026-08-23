@@ -38,6 +38,9 @@ echo.
 echo [START] Starting Genesis Dashboard server...
 start /B "" venv\Scripts\python.exe server.py
 
+echo [START] Starting Autonomous Network Watchdog...
+start /B "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0net_watchdog.ps1"
+
 REM Wait for server to start
 timeout /t 3 /nobreak >nul
 
