@@ -121,6 +121,8 @@ const DOM = {
     // Summary Card (v2.4)
     sumUptime: $('#sumUptime'),
     sumBoosts: $('#sumBoosts'),
+    sumTotalBoosts: $('#sumTotalBoosts'),
+    btnResetBoosts: $('#btnResetBoosts'),
     sumRecoveries: $('#sumRecoveries'),
     sumLastClean: $('#sumLastClean'),
     sumHardening: $('#sumHardening'),
@@ -278,6 +280,13 @@ function handleMessage(data) {
             break;
         case 'observatory_update':
             updateNetworkObservatory(data.data);
+            break;
+        case 'session_summary':
+        case 'boost_counter_reset':
+            updateSessionSummary(data.data);
+            if (data.type === 'boost_counter_reset') {
+                showToast('system', '↺ Session Boosts Counter Reset to 0');
+            }
             break;
     }
 }
@@ -828,7 +837,12 @@ function updateSessionSummary(sum) {
     }
 
     if (DOM.sumBoosts) {
-        DOM.sumBoosts.textContent = sum.total_boosts || 0;
+        const sessionCount = (sum.session_boosts !== undefined) ? sum.session_boosts : (sum.total_boosts || 0);
+        DOM.sumBoosts.textContent = sessionCount;
+    }
+
+    if (DOM.sumTotalBoosts) {
+        DOM.sumTotalBoosts.textContent = `(Total: ${sum.total_boosts || 0})`;
     }
 
     if (DOM.sumRecoveries) {
@@ -851,6 +865,14 @@ function updateSessionSummary(sum) {
         } else {
             DOM.sumHardening.textContent = '4/4 Hardened';
             DOM.sumHardening.className = 'summary-val fresh';
+        }
+    }
+
+    // Display clock-aligned next scheduled boost time if in scheduled mode
+    if (sum.boost_mode === 'scheduled' && sum.next_scheduled_boost && sum.next_scheduled_boost !== 'N/A') {
+        if (DOM.boostLast) {
+            const baseLast = DOM.boostLast.textContent.split(' | Next:')[0];
+            DOM.boostLast.textContent = `${baseLast} | Next: ${sum.next_scheduled_boost}`;
         }
     }
 }
@@ -980,6 +1002,23 @@ function setupEventHandlers() {
             } else {
                 showAuthModal(true);
             }
+        });
+    }
+
+    // Reset Session Boosts Counter
+    if (DOM.btnResetBoosts) {
+        DOM.btnResetBoosts.addEventListener('click', () => {
+            if (isAuthRequired()) {
+                requestPinAuth(() => {
+                    sendCommand('reset_boost_counter');
+                    DOM.btnResetBoosts.classList.add('rotating');
+                    setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
+                });
+                return;
+            }
+            sendCommand('reset_boost_counter');
+            DOM.btnResetBoosts.classList.add('rotating');
+            setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
         });
     }
 

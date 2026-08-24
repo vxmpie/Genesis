@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.4.0">
+    <link rel="stylesheet" href="/static/style.css?v=2.4.1">
 </head>
 <body>
     <!-- Header -->
@@ -41,9 +41,15 @@
                     <span class="summary-label">⏱️ Server Uptime</span>
                     <span class="summary-val" id="sumUptime">0h 00m</span>
                 </div>
-                <div class="summary-item">
-                    <span class="summary-label">⚡ Total Boosts</span>
-                    <span class="summary-val" id="sumBoosts">0</span>
+                <div class="summary-item summary-item-boosts">
+                    <div class="summary-label-row">
+                        <span class="summary-label">⚡ Session Boosts</span>
+                        <button class="btn-reset-mini" id="btnResetBoosts" title="Reset Session Boost Counter (Clear to 0)" aria-label="Reset Boost Counter">↺</button>
+                    </div>
+                    <div class="summary-val-wrap">
+                        <span class="summary-val" id="sumBoosts">0</span>
+                        <span class="summary-subval" id="sumTotalBoosts" title="Lifetime Total Boosts across all sessions">(Total: 0)</span>
+                    </div>
                 </div>
                 <div class="summary-item">
                     <span class="summary-label">🌐 Net Recoveries</span>
@@ -216,10 +222,11 @@
                     <div class="boost-row" id="intervalRow">
                         <label>Interval</label>
                         <select class="mode-select" id="boostInterval">
-                            <option value="5">5 min</option>
-                            <option value="10" selected>10 min</option>
-                            <option value="15">15 min</option>
-                            <option value="30">30 min</option>
+                            <option value="5">5 min (Clock :00, :05...)</option>
+                            <option value="10">10 min (Clock :00, :10...)</option>
+                            <option value="15">15 min (Clock :00, :15...)</option>
+                            <option value="30" selected>30 min (Clock :00, :30)</option>
+                            <option value="60">60 min (Clock :00)</option>
                         </select>
                     </div>
                     <div class="boost-last" id="boostLast">
@@ -455,6 +462,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.4.0"></script>
+    <script src="/static/app.js?v=2.4.1"></script>
 </body>
 </html>

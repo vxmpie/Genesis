@@ -27,7 +27,7 @@ import time
 import urllib.request
 import winreg
 from contextlib import asynccontextmanager
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import psutil
@@ -274,6 +274,7 @@ event_history: list = _load_history()
 def add_event(event_type: str, message: str):
     entry = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "epoch": time.time(),
         "type": event_type,
         "message": message,
     }
@@ -371,28 +372,64 @@ def update_chart_buffer(ram_pct: float, cpu_pct: float):
         _chart_last_sample_time = now
 
 
+_boost_counter_reset_time = _server_start_time
+
+
+def get_next_scheduled_boost_time(interval_min: int) -> str:
+    """Calculate the next clock-aligned boost time (e.g. 09:30:00, 10:00:00)."""
+    now_dt = datetime.now()
+    interval_min = max(1, interval_min)
+    current_minute = now_dt.minute
+    minutes_to_add = interval_min - (current_minute % interval_min)
+    if minutes_to_add == 0:
+        minutes_to_add = interval_min
+    next_dt = (now_dt + timedelta(minutes=minutes_to_add)).replace(second=0, microsecond=0)
+    return next_dt.strftime("%H:%M:%S")
+
+
 def get_session_summary() -> dict:
     """Calculate session-level metrics and historical counters for the Summary Card."""
     uptime_sec = int(time.time() - _server_start_time)
-    total_boosts = sum(1 for e in event_history if e.get("type") == "boost")
     
+    total_boosts = 0
+    session_boosts = 0
     last_clean_time = "None"
+    
     for e in reversed(event_history):
         if e.get("type") == "boost":
-            last_clean_time = e.get("time", "")
-            break
+            total_boosts += 1
+            if last_clean_time == "None":
+                last_clean_time = e.get("time", "")
+            
+            event_epoch = e.get("epoch")
+            if event_epoch is None:
+                try:
+                    event_dt = datetime.strptime(e.get("time", ""), "%Y-%m-%d %H:%M:%S")
+                    event_epoch = event_dt.timestamp()
+                except Exception:
+                    event_epoch = _server_start_time
+            if event_epoch >= _boost_counter_reset_time:
+                session_boosts += 1
 
     # Extract watchdog recoveries from watchdog status
     watchdog = get_watchdog_status()
     net_recoveries = watchdog.get("recoveries_today", 0)
+    
+    cfg_boost = CONFIG.get("auto_boost", {})
+    mode = cfg_boost.get("mode", "auto")
+    interval = cfg_boost.get("interval_minutes", 30)
+    next_boost_str = get_next_scheduled_boost_time(interval) if mode == "scheduled" else "N/A"
 
     return {
         "uptime_seconds": uptime_sec,
+        "session_boosts": session_boosts,
         "total_boosts": total_boosts,
         "net_recoveries": net_recoveries,
         "last_clean_time": last_clean_time,
         "total_events": len(event_history),
         "drift_detected": _last_drift_result.get("has_drift", False) if _last_drift_result else False,
+        "next_scheduled_boost": next_boost_str,
+        "boost_mode": mode,
     }
 
 
@@ -1747,10 +1784,11 @@ def get_top_processes(limit: int = 10) -> list:
 _auto_boost_task = None
 _last_boost_time = None
 _last_boost_result = None
+_last_scheduled_slot = None
 
 
 async def auto_boost_loop():
-    global _last_boost_time, _last_boost_result
+    global _last_boost_time, _last_boost_result, _last_scheduled_slot
     while True:
         try:
             cfg = CONFIG.get("auto_boost", {})
@@ -1772,9 +1810,13 @@ async def auto_boost_loop():
                         color=0xFFB800,
                     )
             elif mode == "scheduled":
-                interval = cfg.get("interval_minutes", 10) * 60
-                if _last_boost_time is None or (time.time() - _last_boost_time) >= interval:
+                interval_min = max(1, cfg.get("interval_minutes", 30))
+                now_dt = datetime.now()
+                current_slot = f"{now_dt.strftime('%Y-%m-%d %H')}:{now_dt.minute}"
+                is_aligned_minute = (now_dt.minute % interval_min == 0)
+                if is_aligned_minute and _last_scheduled_slot != current_slot:
                     should_boost = True
+                    _last_scheduled_slot = current_slot
 
             if should_boost:
                 # In auto/scheduled mode, apply intelligent gating on standby purge
@@ -1783,6 +1825,12 @@ async def auto_boost_loop():
                 await broadcast_event({
                     "type": "boost_triggered",
                     "result": _last_boost_result,
+                })
+                # Broadcast updated session summary so counter updates immediately
+                summary = get_session_summary()
+                await broadcast_event({
+                    "type": "session_summary",
+                    "data": summary,
                 })
 
             await asyncio.sleep(5)
@@ -2190,6 +2238,13 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         obs = get_network_observatory()
         await ws.send_json({"type": "observatory_update", "data": obs})
 
+    elif cmd == "reset_boost_counter":
+        global _boost_counter_reset_time
+        _boost_counter_reset_time = time.time()
+        summary = get_session_summary()
+        await broadcast_event({"type": "session_summary", "data": summary})
+        await ws.send_json({"type": "boost_counter_reset", "data": summary})
+
 
 # ---------------------------------------------------------------------------
 # REST API Endpoints
@@ -2307,6 +2362,17 @@ async def api_network_flush_dns(request: Request):
 @app.get("/api/summary")
 async def api_summary():
     return JSONResponse(get_session_summary())
+
+
+@app.post("/api/summary/reset-boosts")
+async def api_reset_boosts(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    global _boost_counter_reset_time
+    _boost_counter_reset_time = time.time()
+    summary = get_session_summary()
+    await broadcast_event({"type": "session_summary", "data": summary})
+    return JSONResponse({"success": True, "summary": summary})
 
 
 if __name__ == "__main__":
