@@ -1815,8 +1815,21 @@ async def auto_boost_loop():
                 current_slot = f"{now_dt.strftime('%Y-%m-%d %H')}:{now_dt.minute}"
                 is_aligned_minute = (now_dt.minute % interval_min == 0)
                 if is_aligned_minute and _last_scheduled_slot != current_slot:
-                    should_boost = True
                     _last_scheduled_slot = current_slot
+                    # Dual-Gate Evaluation: Avoid trimming working sets when RAM is healthy & free
+                    ram_breakdown = get_ram_breakdown()
+                    thresh = cfg.get("threshold_percent", 80)
+                    needs_ram_trim = (mem.percent >= thresh) or (ram_breakdown.get("available_gb", 0) < 4.0)
+                    needs_standby_purge = should_purge_standby_gate(
+                        ram_breakdown.get("available_gb", 0),
+                        ram_breakdown.get("standby_gb", 0)
+                    )
+
+                    if needs_ram_trim or needs_standby_purge:
+                        should_boost = True
+                        add_event("boost", f"Scheduled Clock-Aligned Boost (:00/:30) triggered — Gate Passed: RAM {mem.percent}%, Standby {ram_breakdown.get('standby_gb', 0)}GB")
+                    else:
+                        add_event("info", f"Scheduled Boost (:00/:30) skipped — Memory Healthy: RAM {mem.percent}%, Available {ram_breakdown.get('available_gb', 0)}GB, Standby {ram_breakdown.get('standby_gb', 0)}GB")
 
             if should_boost:
                 # In auto/scheduled mode, apply intelligent gating on standby purge
