@@ -231,9 +231,6 @@ document.addEventListener('visibilitychange', () => {
             connectWS();
         }
         checkAuthStatus();
-    } else {
-        // Automatically pause auto-refresh screencap when app is backgrounded / screen locked
-        pauseScreenPreviewAutoRefresh();
     }
 });
 
