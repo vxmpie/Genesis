@@ -2084,7 +2084,10 @@ async def tunnel_supervisor_loop():
                         except Exception:
                             pass
                         add_event("system", f"Cloudflare Public Tunnel active: {url}")
-                        print(f"\n[TUNNEL] 🌐 Public Access URL: {url}\n")
+                        try:
+                            print(f"\n[TUNNEL] [PUBLIC URL] {url}\n")
+                        except Exception:
+                            pass
 
                         # Dispatch rich Discord Startup Alert with clickable URL
                         if not startup_alert_sent and CONFIG.get("alerts", {}).get("notify_on_startup", True):
