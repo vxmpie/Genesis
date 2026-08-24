@@ -1739,7 +1739,27 @@ body {
     font-family: var(--font-mono);
 }
 
-.obs-sub-stats b {
+.obs-sub-stats-stacked {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-start;
+    width: 100%;
+}
+
+.obs-stat-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+}
+
+.obs-sub-stats b,
+.obs-stat-row b {
     color: var(--text-secondary);
 }
 
