@@ -19,6 +19,7 @@ import ctypes.wintypes
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -308,13 +309,13 @@ def send_discord_alert(title: str, description: str, color: int = 0x00D2FF, fiel
     def _post_async():
         try:
             payload = {
-                "username": "Genesis Sentinel v2.4",
+                "username": "Genesis Autonomous Core",
                 "embeds": [{
                     "title": title,
                     "description": description,
                     "color": color,
                     "fields": fields or [],
-                    "footer": {"text": "Genesis Dashboard • Fable 5 Production Suite"},
+                    "footer": {"text": "Genesis Autonomous Supervisor • System Active"},
                     "timestamp": datetime.utcnow().isoformat() + "Z"
                 }]
             }
@@ -322,7 +323,7 @@ def send_discord_alert(title: str, description: str, color: int = 0x00D2FF, fiel
             req = urllib.request.Request(
                 webhook_url,
                 data=data,
-                headers={"Content-Type": "application/json", "User-Agent": "Genesis-Sentinel/2.4"}
+                headers={"Content-Type": "application/json", "User-Agent": "Genesis-Autonomous-Core"}
             )
             with urllib.request.urlopen(req, timeout=8):
                 pass
@@ -2024,27 +2025,104 @@ async def broadcast_event(data: dict):
 
 
 # ---------------------------------------------------------------------------
-# FastAPI App
+# FastAPI App & Subsystem Lifespan
 # ---------------------------------------------------------------------------
 _heartbeat_task = None
+_tunnel_task = None
+_current_tunnel_url = None
+_tunnel_proc = None
+
+
+async def tunnel_supervisor_loop():
+    """Supervise Cloudflare Tunnel subprocess, extract Public URL, and dispatch Discord Online alert with URL."""
+    global _current_tunnel_url, _tunnel_proc
+    cloudflared_path = BASE_DIR / "cloudflared.exe"
+
+    if not cloudflared_path.exists():
+        if CONFIG.get("alerts", {}).get("notify_on_startup", True):
+            send_discord_alert(
+                "🚀 Genesis Autonomous Core Online",
+                "Autonomous supervisor initialized.\nContinuous system monitoring, memory optimization, and self-healing watchdog are fully active.",
+                color=0x00FF88,
+                fields=[
+                    {"name": "🏠 Local Host", "value": "http://127.0.0.1:7700", "inline": True},
+                    {"name": "🛡️ Autonomous Watchdog", "value": "Armed (C:\\Genesis)", "inline": True},
+                    {"name": "⏰ Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
+                ]
+            )
+        return
+
+    startup_alert_sent = False
+
+    while True:
+        try:
+            port = CONFIG.get("server", {}).get("port", 7700)
+            cmd = [str(cloudflared_path), "tunnel", "--url", f"http://127.0.0.1:{port}"]
+            _tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+
+            while True:
+                line = await asyncio.to_thread(_tunnel_proc.stderr.readline)
+                if not line:
+                    if _tunnel_proc.poll() is not None:
+                        break
+                    await asyncio.sleep(0.5)
+                    continue
+
+                m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                if m:
+                    url = m.group(0)
+                    if url != _current_tunnel_url:
+                        _current_tunnel_url = url
+                        try:
+                            (DATA_DIR / "tunnel_url.txt").write_text(url, encoding="utf-8")
+                        except Exception:
+                            pass
+                        add_event("system", f"Cloudflare Public Tunnel active: {url}")
+                        print(f"\n[TUNNEL] 🌐 Public Access URL: {url}\n")
+
+                        # Dispatch rich Discord Startup Alert with clickable URL
+                        if not startup_alert_sent and CONFIG.get("alerts", {}).get("notify_on_startup", True):
+                            startup_alert_sent = True
+                            send_discord_alert(
+                                "🚀 Genesis Autonomous Core Online",
+                                "Autonomous supervisor initialized.\nContinuous system monitoring, memory optimization, and self-healing watchdog are fully active.",
+                                color=0x00FF88,
+                                fields=[
+                                    {"name": "🌐 Public Access URL", "value": f"[**Click to Open Dashboard**]({url})\n`{url}`", "inline": False},
+                                    {"name": "🏠 Local Host", "value": "http://127.0.0.1:7700", "inline": True},
+                                    {"name": "🛡️ Autonomous Watchdog", "value": "Armed (C:\\Genesis)", "inline": True},
+                                    {"name": "⏰ Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
+                                ]
+                            )
+
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            if _tunnel_proc:
+                try:
+                    _tunnel_proc.terminate()
+                except Exception:
+                    pass
+            break
+        except Exception as e:
+            print(f"[TUNNEL ERROR] {e}")
+            await asyncio.sleep(5)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task
     psutil.cpu_percent(interval=0, percpu=True)
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
     _heartbeat_task = asyncio.create_task(heartbeat_loop())
-    add_event("system", "Genesis Dashboard started (v2.4 Production Engine)")
-
-    # Send Discord notification on startup
-    if CONFIG.get("alerts", {}).get("notify_on_startup", True):
-        send_discord_alert(
-            "🚀 Genesis Dashboard Online (v2.4)",
-            "**Fable 5 Production Suite & Network Observatory** successfully initialized.\nAll 8 Modules active, persistence enabled (5,000 entries cap).",
-            color=0x00FF88
-        )
+    _tunnel_task = asyncio.create_task(tunnel_supervisor_loop())
+    add_event("system", "Genesis Autonomous Core started")
 
     yield
     if _auto_boost_task:
@@ -2053,7 +2131,14 @@ async def lifespan(app: FastAPI):
         _maintenance_task.cancel()
     if _heartbeat_task:
         _heartbeat_task.cancel()
-    add_event("system", "Genesis Dashboard stopped")
+    if _tunnel_task:
+        _tunnel_task.cancel()
+    if _tunnel_proc:
+        try:
+            _tunnel_proc.terminate()
+        except Exception:
+            pass
+    add_event("system", "Genesis Autonomous Core stopped")
 
 
 app = FastAPI(title="Genesis Dashboard", version="2.4.0", lifespan=lifespan)
@@ -2388,14 +2473,22 @@ async def api_reset_boosts(request: Request):
     return JSONResponse({"success": True, "summary": summary})
 
 
+@app.get("/api/tunnel")
+async def api_get_tunnel():
+    port = CONFIG.get("server", {}).get("port", 7700)
+    return JSONResponse({
+        "tunnel_url": _current_tunnel_url,
+        "local_url": f"http://127.0.0.1:{port}"
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    host = CONFIG.get("server", {}).get("host", "0.0.0.0")
+    host = CONFIG.get("server", {}).get("host", "127.0.0.1")
     port = CONFIG.get("server", {}).get("port", 7700)
     print(f"\n{'='*50}")
-    print(f"  GENESIS DASHBOARD v2.4 — Fable 5 Production Suite")
-    print(f"  http://localhost:{port}")
-    print(f"  http://{host}:{port} (LAN/Remote Access)")
+    print(f"  GENESIS AUTONOMOUS CORE — System Supervisor")
+    print(f"  Local Ingress: http://{host}:{port}")
     print(f"{'='*50}\n")
     uvicorn.run(app, host=host, port=port, log_level="info")

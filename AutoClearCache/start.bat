@@ -34,26 +34,17 @@ pip install -r requirements.txt -q --disable-pip-version-check
 REM Create data directory
 if not exist "data" mkdir data
 
-echo.
-echo [START] Starting Genesis Dashboard server...
-start /B "" venv\Scripts\python.exe server.py
-
-echo [START] Starting Autonomous Network Watchdog...
-start /B "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0net_watchdog.ps1"
-
-REM Wait for server to start
-timeout /t 3 /nobreak >nul
-
 REM Check for cloudflared
 if not exist "cloudflared.exe" (
     echo [SETUP] Downloading Cloudflare Tunnel binary...
     powershell -Command "Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'cloudflared.exe' -UseBasicParsing"
 )
 
-echo [START] Starting Cloudflare Tunnel...
-echo [INFO]  Please wait a few seconds for the Public Cloud URL to appear below:
-echo.
+echo [START] Starting Autonomous Network Watchdog...
+start /B "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0net_watchdog.ps1"
 
-REM Start cloudflared tunnel (output shows the public URL)
-.\cloudflared.exe tunnel --url http://localhost:7700
+echo.
+echo [START] Starting Genesis Autonomous Core...
+venv\Scripts\python.exe server.py
+
 
