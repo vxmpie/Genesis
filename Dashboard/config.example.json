@@ -59,5 +59,10 @@
     "notify_on_mumu_crash": true,
     "notify_on_ram_critical": true,
     "notify_on_watchdog_recovery": true
+  },
+  "tunnel": {
+    "provider": "ngrok",
+    "ngrok_authtoken": "",
+    "ngrok_domain": ""
   }
 }

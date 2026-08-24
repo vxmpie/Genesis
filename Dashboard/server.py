@@ -2233,29 +2233,78 @@ _tunnel_proc = None
 
 
 async def tunnel_supervisor_loop():
-    """Supervise Cloudflare Tunnel subprocess, extract Public URL, and dispatch Discord Online alert with URL."""
+    """Supervise Tunnel connection (ngrok Permanent Domain or Cloudflare Tunnel), extract URL, and dispatch Discord alert."""
     global _current_tunnel_url, _tunnel_proc
-    cloudflared_path = BASE_DIR / "cloudflared.exe"
+    tunnel_cfg = CONFIG.get("tunnel", {})
+    provider = tunnel_cfg.get("provider", "ngrok").lower()
+    ngrok_token = tunnel_cfg.get("ngrok_authtoken", "").strip()
+    ngrok_domain = tunnel_cfg.get("ngrok_domain", "").strip()
+    port = CONFIG.get("server", {}).get("port", 7700)
+    startup_alert_sent = False
 
+    # 1. Preferred: ngrok Native Python SDK (Permanent Free Domain)
+    if provider == "ngrok" and ngrok_token:
+        try:
+            import ngrok
+            print(f"[TUNNEL] Initializing ngrok Permanent Tunnel on port {port}...")
+            forward_kwargs = {"authtoken": ngrok_token}
+            if ngrok_domain:
+                forward_kwargs["domain"] = ngrok_domain
+
+            listener = await ngrok.forward(port, **forward_kwargs)
+            url = listener.url()
+            _current_tunnel_url = url
+            try:
+                (DATA_DIR / "tunnel_url.txt").write_text(url, encoding="utf-8")
+            except Exception:
+                pass
+            add_event("system", f"Permanent ngrok Public Tunnel active: {url}")
+            print(f"\n[TUNNEL] [PERMANENT PUBLIC URL] {url}\n")
+
+            if not startup_alert_sent and CONFIG.get("alerts", {}).get("notify_on_startup", True):
+                startup_alert_sent = True
+                send_discord_alert(
+                    "🚀 Genesis Autonomous Core Online (Permanent Domain)",
+                    "Autonomous supervisor initialized.\nContinuous system monitoring, memory optimization, and self-healing watchdog are fully active.",
+                    color=0x00FF88,
+                    fields=[
+                        {"name": "🌐 Permanent Public URL", "value": f"[**Open Dashboard on iPad / Phone**]({url})\n`{url}`", "inline": False},
+                        {"name": "🏠 Local Host", "value": f"http://127.0.0.1:{port}", "inline": True},
+                        {"name": "🛡️ Autonomous Watchdog", "value": "Armed (C:\\Genesis)", "inline": True},
+                        {"name": "⏰ Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
+                    ]
+                )
+
+            # Keep listener alive until cancelled
+            while True:
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            try:
+                await listener.close()
+            except Exception:
+                pass
+            return
+        except Exception as e:
+            print(f"[NGROK TUNNEL ERROR] {e}. Falling back to Cloudflare Tunnel if available...")
+
+    # 2. Fallback: Cloudflare Quick Tunnel (cloudflared.exe)
+    cloudflared_path = BASE_DIR / "cloudflared.exe"
     if not cloudflared_path.exists():
-        if CONFIG.get("alerts", {}).get("notify_on_startup", True):
+        if not startup_alert_sent and CONFIG.get("alerts", {}).get("notify_on_startup", True):
             send_discord_alert(
                 "🚀 Genesis Autonomous Core Online",
                 "Autonomous supervisor initialized.\nContinuous system monitoring, memory optimization, and self-healing watchdog are fully active.",
                 color=0x00FF88,
                 fields=[
-                    {"name": "🏠 Local Host", "value": "http://127.0.0.1:7700", "inline": True},
+                    {"name": "🏠 Local Host", "value": f"http://127.0.0.1:{port}", "inline": True},
                     {"name": "🛡️ Autonomous Watchdog", "value": "Armed (C:\\Genesis)", "inline": True},
                     {"name": "⏰ Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
                 ]
             )
         return
 
-    startup_alert_sent = False
-
     while True:
         try:
-            port = CONFIG.get("server", {}).get("port", 7700)
             cmd = [str(cloudflared_path), "tunnel", "--url", f"http://127.0.0.1:{port}"]
             _tunnel_proc = subprocess.Popen(
                 cmd,
@@ -2297,7 +2346,7 @@ async def tunnel_supervisor_loop():
                                 color=0x00FF88,
                                 fields=[
                                     {"name": "🌐 Public Access URL", "value": f"[**Click to Open Dashboard**]({url})\n`{url}`", "inline": False},
-                                    {"name": "🏠 Local Host", "value": "http://127.0.0.1:7700", "inline": True},
+                                    {"name": "🏠 Local Host", "value": f"http://127.0.0.1:{port}", "inline": True},
                                     {"name": "🛡️ Autonomous Watchdog", "value": "Armed (C:\\Genesis)", "inline": True},
                                     {"name": "⏰ Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
                                 ]

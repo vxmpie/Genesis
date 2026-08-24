@@ -19,14 +19,20 @@
 * **Full-Screen Standalone Mode:** ติดตั้งผ่าน "Add to Home Screen" บน iOS Safari, iPadOS และ Android Chrome เปิดใช้งานเต็มจอ 100% โดยไม่มี Browser URL Bar
 * **iOS Safe Area Inset Support:** รองรับ `viewport-fit=cover` พร้อมจัดระยะขอบล่างตาม `env(safe-area-inset-bottom)` เพื่อให้เข้ากับแถบ Home Bar และ Dynamic Island ของ iPhone/iPad
 * **Network-First Service Worker (`genesis-pwa-v2.6.1`):** ใช้กลยุทธ์ **Network-First with Cache Fallback** (`fetch(event.request).then(...).catch(() => caches.match(event.request))`) เพื่อให้หน้าเว็บบน iPad/iPhone โหลดโค้ดและ UI ล่าสุดจากเซิร์ฟเวอร์เสมอ และมี Offline Cache รองรับเมื่อเครือข่ายขัดข้อง
-* **iOS Lifecycle & Auto-Reconnect `pendingCommands` Queue:** ดักจับ Event `visibilitychange` และ `window.onfocus` เพื่อ Reconnect WebSocket และดึงข้อมูลใหม่ทันทีเมื่อปลดล็อกหน้าจอ iPad พร้อมคิวคำสั่ง `pendingCommands` จัดเก็บคำสั่งที่ส่งระหว่างสัญญาณหลุดและยิงคำสั่งอัตโนมัติทันทีที่ต่อติด:
+* **iOS Lifecycle & Auto-Reconnect `pendingCommands` Queue:** ดักจับ Event `visibilitychange` และ `window.onfocus` เพื่อ Reconnect WebSocket และดึงข้อมูลใหม่ทันทีเมื่อปลดล็อกหน้าจอ iPad พร้อมคิวคำสั่ง `pendingCommands` จัดเก็บคำสั่งที่ส่งระหว่างสัญญาณหลุดและยิงคำสั่งอัตโนมัติทันทีที่ต่อติด พร้อม Queue De-duplication Guard ป้องกันการสแปมคำสั่ง:
   ```javascript
-  // โค้ดจริงใน app.js (Lines 181-189 & 213-222)
+  // โค้ดจริงใน app.js (Lines 213-227)
   function sendCommand(command, payload = {}) {
       if (STATE.ws && STATE.ws.readyState === WebSocket.OPEN) {
           STATE.ws.send(JSON.stringify({ command, token: STATE.token, ...payload }));
       } else {
-          STATE.pendingCommands.push({ command, payload });
+          // 🛡️ Queue de-duplication guard: แทนที่คำสั่งเดิมถ้าเป็นประเภทเดียวกัน
+          const existingIdx = STATE.pendingCommands.findIndex(item => item.command === command);
+          if (existingIdx !== -1) {
+              STATE.pendingCommands[existingIdx] = { command, payload };
+          } else {
+              STATE.pendingCommands.push({ command, payload });
+          }
           showToast('info', '📡 Reconnecting... Action queued and will fire on connect.');
           connectWS();
       }
@@ -107,19 +113,20 @@ graph TD
 
 ```text
 Genesis/
-├── .gitignore                      # ป้องกันการ Push venv, data/, config.json และ cloudflared.exe
+├── .gitignore                      # ป้องกันการ Push venv, data/, config.json, ngrok.exe และ cloudflared.exe
 ├── .gitattributes                  # จัดการ Line Endings (CRLF / LF)
 ├── PROJECT_REPORT.md               # รายงานสรุปโครงการฉบับทางการ (ปลอด Secret 100%)
 ├── main.lua                        # สคริปต์ Roblox In-Game Auto-Reset Character & GUI
-└── AutoClearCache/
-    ├── server.py                   # Backend หลัก (FastAPI + Standby Guard + Memory Shield + 9 Modules)
+└── Dashboard/                      # [Modular Observability Suite & Autonomous Backend]
+    ├── server.py                   # Backend หลัก (FastAPI + Standby Guard + Memory Shield + ngrok/Cloudflare + 9 Modules)
     ├── net_watchdog.ps1            # Autonomous Network Watchdog v2.2 (Pure .NET Ping, 120s Boot Grace, C:\Genesis Log)
     ├── setup_network_hardening.ps1 # สคริปต์ติดตั้ง Wi-Fi Hardening & Watchdog Scheduled Task
     ├── install_startup_task.bat    # 1-Click ติดตั้ง Genesis Auto-Startup บน Task Scheduler แบบ Highest Privileges
     ├── config.example.json         # แม่แบบการตั้งค่าสำหรับ GitHub
     ├── config.json                 # [Git-ignored] ไฟล์ตั้งค่าจริงในเครื่อง (Local Only)
-    ├── requirements.txt            # รายการ Python dependencies
-    ├── start.bat                   # สคริปต์บูตระบบ + เริ่มต้น Server & Watchdog + Cloudflare Tunnel
+    ├── requirements.txt            # รายการ Python dependencies (รวม ngrok SDK)
+    ├── start.bat                   # สคริปต์บูตระบบ + เริ่มต้น Server & Watchdog + Ingress Tunnel
+    ├── Autologon.exe               # [Git-ignored] Sysinternals เครื่องมือเปิดเครื่องอัตโนมัติ
     ├── data/                       # [Git-ignored] โฟลเดอร์เก็บข้อมูลภายใน
     │   ├── history.json            # บันทึกประวัติเหตุการณ์ย้อนหลัง (Cap 5,000 รายการแบบ Atomic Safe Write)
     │   └── growth.json             # ข้อมูล Snapshot การเติบโตของขนาด VM

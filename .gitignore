@@ -28,19 +28,27 @@ env/
 ENV/
 env.bak/
 venv.bak/
+Dashboard/venv/
+Dashboard/env/
 AutoClearCache/venv/
 AutoClearCache/env/
 
 # Binaries & Executables
-AutoClearCache/cloudflared.exe
+Dashboard/cloudflared.exe
+Dashboard/ngrok.exe
+Dashboard/Autologon.exe
 cloudflared.exe
+ngrok.exe
+Autologon.exe
 *.exe
 !*.lua
 
 # Sensitive Configuration & Credentials
 config.json
+Dashboard/config.json
 AutoClearCache/config.json
 !config.example.json
+!Dashboard/config.example.json
 !AutoClearCache/config.example.json
 .env
 .env.*
@@ -48,8 +56,10 @@ AutoClearCache/config.json
 *.key
 
 # Data & Runtime Logs
+Dashboard/data/
 AutoClearCache/data/
 data/
+Dashboard/*.log
 AutoClearCache/*.log
 *.log
 
