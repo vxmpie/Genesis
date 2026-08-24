@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import struct
 import subprocess
 import tempfile
 import threading
@@ -544,13 +545,33 @@ def purge_standby_list() -> bool:
 
 
 def get_ram_breakdown() -> dict:
-    """Return RAM breakdown: Active (In Use), Standby, Free, Total."""
+    """Return RAM breakdown: Active (In Use), Standby, Free, Total using Windows Native API."""
     mem = psutil.virtual_memory()
     total_gb = mem.total / (1024 ** 3)
     available_gb = mem.available / (1024 ** 3)
-    free_gb = mem.free / (1024 ** 3) if hasattr(mem, "free") else 0
-    active_gb = (mem.total - mem.available) / (1024 ** 3)
-    standby_gb = available_gb - free_gb
+    
+    standby_gb = 0.0
+    free_gb = 0.0
+    try:
+        buf = ctypes.create_string_buffer(176)
+        ret_len = ctypes.c_ulong()
+        status = _ntdll.NtQuerySystemInformation(0x50, buf, 176, ctypes.byref(ret_len))
+        if status == 0:
+            vals = struct.unpack("22Q", buf.raw)
+            zero_pages = vals[0]
+            free_pages = vals[1]
+            standby_pages = sum(vals[13:21])
+            page_size = 4096
+            standby_gb = (standby_pages * page_size) / (1024 ** 3)
+            free_gb = ((zero_pages + free_pages) * page_size) / (1024 ** 3)
+    except Exception:
+        pass
+
+    if standby_gb == 0.0:
+        free_gb = mem.free / (1024 ** 3) if hasattr(mem, "free") else 0
+        standby_gb = max(available_gb - free_gb, 0)
+
+    active_gb = total_gb - available_gb
 
     return {
         "total_gb": round(total_gb, 2),
@@ -1840,6 +1861,18 @@ async def auto_boost_loop():
                 is_aligned_minute = (now_dt.minute % interval_min == 0)
                 if is_aligned_minute and _last_scheduled_slot != current_slot:
                     _last_scheduled_slot = current_slot
+                    # Dynamic slot description (e.g. :00 for 60m, :00/:30 for 30m)
+                    if interval_min == 60:
+                        slot_desc = "(:00)"
+                    elif interval_min == 30:
+                        slot_desc = "(:00/:30)"
+                    elif interval_min == 15:
+                        slot_desc = "(:00/:15/:30/:45)"
+                    elif interval_min == 10:
+                        slot_desc = "(:00/:10/:20/:30/:40/:50)"
+                    else:
+                        slot_desc = f"(every {interval_min}m)"
+
                     # Dual-Gate Evaluation: Avoid trimming working sets when RAM is healthy & free
                     ram_breakdown = get_ram_breakdown()
                     thresh = cfg.get("threshold_percent", 80)
@@ -1851,13 +1884,13 @@ async def auto_boost_loop():
 
                     if needs_ram_trim or needs_standby_purge:
                         should_boost = True
-                        add_event("boost", f"Scheduled Clock-Aligned Boost (:00/:30) triggered — Gate Passed: RAM {mem.percent}%, Standby {ram_breakdown.get('standby_gb', 0)}GB")
+                        add_event("boost", f"Scheduled Clock-Aligned Boost {slot_desc} triggered — Gate Passed: RAM {mem.percent}%, Standby {ram_breakdown.get('standby_gb', 0)}GB")
                     else:
-                        add_event("info", f"Scheduled Boost (:00/:30) skipped — Memory Healthy: RAM {mem.percent}%, Available {ram_breakdown.get('available_gb', 0)}GB, Standby {ram_breakdown.get('standby_gb', 0)}GB")
+                        add_event("info", f"Scheduled Boost {slot_desc} skipped — Memory Healthy: RAM {mem.percent}%, Available {ram_breakdown.get('available_gb', 0)}GB, Standby {ram_breakdown.get('standby_gb', 0)}GB")
 
             if should_boost:
                 # In auto/scheduled mode, apply intelligent gating on standby purge
-                _last_boost_result = ram_boost(force_standby=False)
+                _last_boost_result = await asyncio.to_thread(ram_boost, False)
                 _last_boost_time = time.time()
                 await broadcast_event({
                     "type": "boost_triggered",
@@ -1870,10 +1903,12 @@ async def auto_boost_loop():
                     "data": summary,
                 })
 
-            await asyncio.sleep(5)
+            # Sub-second clock alignment: sleep until the start of the next second
+            delay = 1.0 - (datetime.now().microsecond / 1_000_000)
+            await asyncio.sleep(max(0.05, delay))
         except Exception as e:
             add_event("error", f"Auto-boost loop error: {str(e)}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------
