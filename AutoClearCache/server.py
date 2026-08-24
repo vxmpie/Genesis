@@ -582,11 +582,10 @@ def get_ram_breakdown() -> dict:
     }
 
 
-def should_purge_standby_gate(available_gb: float, standby_gb: float) -> bool:
-    """Purge Standby only when RAM is starved (Available < 4GB) AND Standby is large (> 4GB)."""
-    min_avail = CONFIG.get("maintenance", {}).get("standby_purge_min_available_gb", 4.0)
+def should_purge_standby_gate(free_gb: float, standby_gb: float, available_gb: float = 0.0) -> bool:
+    """Purge Standby when Standby is bloated (> 4GB) and Free unallocated RAM is low (< 2GB)."""
     min_standby = CONFIG.get("maintenance", {}).get("standby_purge_min_standby_gb", 4.0)
-    return available_gb < min_avail and standby_gb > min_standby
+    return standby_gb >= min_standby and (free_gb < 2.0 or available_gb < 8.0)
 
 
 def _get_protected_names() -> set:
@@ -800,10 +799,11 @@ def ram_boost(force_standby: bool = True) -> dict:
         except Exception:
             errors += 1
 
-    # Intelligent Dual-Condition Standby Gating (Available < 4GB AND Standby > 4GB)
+    # Intelligent Dual-Condition Standby Gating (Standby >= 4GB and Free < 2GB)
     should_purge_standby = force_standby or should_purge_standby_gate(
-        breakdown_before.get("available_gb", 0),
+        breakdown_before.get("free_gb", 0),
         breakdown_before.get("standby_gb", 0),
+        breakdown_before.get("available_gb", 0),
     )
 
     standby_purged = False
@@ -1878,8 +1878,9 @@ async def auto_boost_loop():
                     thresh = cfg.get("threshold_percent", 80)
                     needs_ram_trim = (mem.percent >= thresh) or (ram_breakdown.get("available_gb", 0) < 4.0)
                     needs_standby_purge = should_purge_standby_gate(
+                        ram_breakdown.get("free_gb", 0),
+                        ram_breakdown.get("standby_gb", 0),
                         ram_breakdown.get("available_gb", 0),
-                        ram_breakdown.get("standby_gb", 0)
                     )
 
                     if needs_ram_trim or needs_standby_purge:
