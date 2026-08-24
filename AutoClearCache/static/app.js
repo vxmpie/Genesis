@@ -214,8 +214,13 @@ function sendCommand(command, payload = {}) {
     if (STATE.ws && STATE.ws.readyState === WebSocket.OPEN) {
         STATE.ws.send(JSON.stringify({ command, token: STATE.token, ...payload }));
     } else {
-        // Queue command and initiate connection if disconnected
-        STATE.pendingCommands.push({ command, payload });
+        // 🛡️ Queue de-duplication guard: replace if identical command already exists to prevent spamming on reconnect
+        const existingIdx = STATE.pendingCommands.findIndex(item => item.command === command);
+        if (existingIdx !== -1) {
+            STATE.pendingCommands[existingIdx] = { command, payload };
+        } else {
+            STATE.pendingCommands.push({ command, payload });
+        }
         showToast('info', '📡 Reconnecting... Action queued and will fire on connect.');
         connectWS();
     }
