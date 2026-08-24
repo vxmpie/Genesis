@@ -1061,7 +1061,7 @@ function setupEventHandlers() {
     // Threshold
     DOM.threshDown.addEventListener('click', () => {
         let val = parseInt(DOM.threshValue.textContent) || 85;
-        val = Math.max(val - 5, 50);
+        val = Math.max(val - 5, 30);
         DOM.threshValue.textContent = val + '%';
         sendCommand('update_config', { config: { threshold_percent: val } });
     });

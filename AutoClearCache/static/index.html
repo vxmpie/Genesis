@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.4.4">
+    <link rel="stylesheet" href="/static/style.css?v=2.4.5">
 </head>
 <body>
     <!-- Header -->
@@ -388,13 +388,9 @@
                     <div class="obs-main-val">
                         <span class="obs-ssid" id="wifiSsid">KMITL-HiSpeed</span>
                     </div>
-                    <div class="obs-sub-stats obs-sub-stats-stacked">
-                        <div class="obs-stat-row">
-                            <span>Signal: <b id="wifiSignalVal">100%</b> (<b id="wifiDbmVal">-49 dBm</b>)</span>
-                        </div>
-                        <div class="obs-stat-row">
-                            <span>Speed: <b id="wifiRateVal">400/400</b> Mbps</span>
-                        </div>
+                    <div class="obs-sub-stats">
+                        <span title="Signal Strength & RSSI">📶 <b id="wifiSignalVal">100%</b> <span class="obs-unit-sub">(<b id="wifiDbmVal">-49 dBm</b>)</span></span>
+                        <span title="Negotiated Link Speed">⚡ <b id="wifiRateVal">400/400</b> <span class="obs-unit-sub">M</span></span>
                     </div>
                 </div>
 
@@ -469,6 +465,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.4.4"></script>
+    <script src="/static/app.js?v=2.4.5"></script>
 </body>
 </html>

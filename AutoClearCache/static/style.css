@@ -1763,6 +1763,12 @@ body {
     color: var(--text-secondary);
 }
 
+.obs-unit-sub {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
 .obs-toggle-link {
     color: var(--blue);
     cursor: pointer;
