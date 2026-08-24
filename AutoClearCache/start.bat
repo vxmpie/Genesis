@@ -10,6 +10,10 @@ echo.
 
 cd /d "%~dp0"
 
+REM Terminate any existing background instances to prevent stale processes
+taskkill /F /IM cloudflared.exe 2>nul
+taskkill /F /IM python.exe 2>nul
+
 REM Check for Python
 where python >nul 2>&1
 if %errorlevel% neq 0 (
