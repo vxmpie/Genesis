@@ -122,12 +122,16 @@ const DOM = {
     watchdogLogPanel: $('#watchdogLogPanel'),
     watchdogHeartbeat: $('#watchdogHeartbeat'),
     watchdogLogConsole: $('#watchdogLogConsole'),
-    // Summary Card (v2.4)
+    // Summary Card (v2.5)
     sumUptime: $('#sumUptime'),
     sumBoosts: $('#sumBoosts'),
     sumTotalBoosts: $('#sumTotalBoosts'),
     btnResetBoosts: $('#btnResetBoosts'),
     btnResetTotalBoosts: $('#btnResetTotalBoosts'),
+    sumStandbyPurges: $('#sumStandbyPurges'),
+    sumStandbyReclaimed: $('#sumStandbyReclaimed'),
+    sumStorageFree: $('#sumStorageFree'),
+    sumStoragePercent: $('#sumStoragePercent'),
     sumRecoveries: $('#sumRecoveries'),
     sumLastClean: $('#sumLastClean'),
     sumHardening: $('#sumHardening'),
@@ -135,6 +139,8 @@ const DOM = {
     chartTooltip: $('#chartTooltip'),
     chartTimeLabel: $('#chartTimeLabel'),
     chartZoomBtns: $$('.chart-zoom-btn'),
+    // Wi-Fi RF Quality Pill
+    wifiQualityPill: $('#wifiQualityPill'),
 };
 
 // ============================================================
@@ -304,6 +310,13 @@ function handleMessage(data) {
             updateSessionSummary(data.data);
             showToast('system', '🗑️ Lifetime Total Boosts Reset to 0');
             break;
+        case 'mumu_trim_result':
+            if (data.data && data.data.success) {
+                showToast('system', `↺ Trimmed working set for ${data.data.name || 'MuMu'} (freed ${data.data.freed_mb} MB)`);
+            } else {
+                showToast('system', `❌ Failed to trim instance: ${data.data ? data.data.error : 'Unknown'}`);
+            }
+            break;
     }
 }
 
@@ -445,6 +458,17 @@ function updateMetrics(m) {
     DOM.netDownSpeed.textContent = `${(m.network.recv_speed_mbs || 0).toFixed(2)} MB/s`;
     DOM.netTotalUp.textContent = `${m.network.sent_mb} MB`;
     DOM.netTotalDown.textContent = `${m.network.recv_mb} MB`;
+
+    if (m.storage && m.storage.c_drive) {
+        const c = m.storage.c_drive;
+        if (DOM.sumStorageFree) {
+            DOM.sumStorageFree.textContent = `${c.free_gb} GB`;
+            DOM.sumStorageFree.className = c.is_low ? 'summary-val critical' : (c.free_gb < 30.0 ? 'summary-val warning' : 'summary-val');
+        }
+        if (DOM.sumStoragePercent) {
+            DOM.sumStoragePercent.textContent = `${c.percent}% Used`;
+        }
+    }
 
     updateCoreBars(m.cpu);
 
@@ -740,7 +764,7 @@ function updateMuMu(mumu) {
     DOM.mumuCount.textContent = `${devices.length} instance${devices.length !== 1 ? 's' : ''} running`;
 
     if (all.length === 0) {
-        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="7">No instances detected</td></tr>';
+        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="8">No instances detected</td></tr>';
         return;
     }
 
@@ -765,18 +789,38 @@ function updateMuMu(mumu) {
             }
         }
 
+        const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)">⚠️ Bloat</span>' : '';
+        const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}">↺ Trim</button>`;
+
         return `
             <tr>
                 <td>${i + 1}</td>
                 <td>${type}</td>
                 <td>${inst.cpu_percent}%</td>
-                <td>${inst.ram_mb} MB</td>
+                <td>${inst.ram_mb} MB${bloatBadge}</td>
                 <td>${inst.uptime}</td>
                 <td>${vmDiskHtml}</td>
                 <td><span class="status-dot running"></span>OK</td>
+                <td>${trimBtn}</td>
             </tr>
         `;
     }).join('');
+
+    // Attach click listeners to per-instance trim buttons
+    DOM.mumuBody.querySelectorAll('.btn-trim-mini').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const pid = btn.dataset.pid;
+            if (!pid) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+            sendCommand('trim_mumu_instance', { pid: parseInt(pid) });
+            setTimeout(() => {
+                btn.textContent = '↺ Trim';
+                btn.disabled = false;
+            }, 2500);
+        });
+    });
 }
 
 // ============================================================
@@ -1003,6 +1047,11 @@ function updateSessionSummary(sum) {
         }
     }
 
+    if (sum.standby_guard) {
+        if (DOM.sumStandbyPurges) DOM.sumStandbyPurges.textContent = sum.standby_guard.purges || 0;
+        if (DOM.sumStandbyReclaimed) DOM.sumStandbyReclaimed.textContent = `(${sum.standby_guard.reclaimed_gb || 0.0} GB freed)`;
+    }
+
     // Display clock-aligned next scheduled boost time if in scheduled mode
     if (sum.boost_mode === 'scheduled' && sum.next_scheduled_boost && sum.next_scheduled_boost !== 'N/A') {
         if (DOM.boostLast) {
@@ -1038,6 +1087,11 @@ function updateNetworkObservatory(obs) {
         if (DOM.wifiSignalVal) DOM.wifiSignalVal.textContent = `${w.signal_percent}%`;
         if (DOM.wifiDbmVal) DOM.wifiDbmVal.textContent = `${w.rssi_dbm} dBm`;
         if (DOM.wifiRateVal) DOM.wifiRateVal.textContent = `${w.rx_rate_mbps}/${w.tx_rate_mbps}`;
+        if (DOM.wifiQualityPill && w.quality_label) {
+            DOM.wifiQualityPill.textContent = `${w.quality_label} (${w.quality_score}%)`;
+            const qClass = (w.quality_label || '').toLowerCase();
+            DOM.wifiQualityPill.className = `obs-quality-pill ${qClass === 'excellent' ? '' : qClass}`;
+        }
     }
 
     // 3. Standalone Watchdog Status

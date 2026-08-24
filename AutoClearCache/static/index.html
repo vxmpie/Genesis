@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.4.6">
+    <link rel="stylesheet" href="/static/style.css?v=2.5.0">
 </head>
 <body>
     <!-- Header -->
@@ -34,7 +34,7 @@
     </header>
 
     <main class="dashboard">
-        <!-- Session & Uptime Summary Card (v2.4) -->
+        <!-- Session & Uptime Summary Card (v2.5) -->
         <section class="card summary-card">
             <div class="summary-grid">
                 <div class="summary-item">
@@ -52,6 +52,20 @@
                             <span class="summary-subval" id="sumTotalBoosts" title="Lifetime Total Boosts across all sessions">(Total: 0)</span>
                             <button class="btn-reset-total-mini" id="btnResetTotalBoosts" title="Purge & Reset Lifetime Total Boosts History to 0" aria-label="Reset Lifetime Total Boosts">↺ Total</button>
                         </div>
+                    </div>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">🛡️ Standby Guard</span>
+                    <div class="summary-val-wrap">
+                        <span class="summary-val fresh" id="sumStandbyPurges">0</span>
+                        <span class="summary-subval" id="sumStandbyReclaimed">(0.0 GB freed)</span>
+                    </div>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">💾 Storage (C:)</span>
+                    <div class="summary-val-wrap">
+                        <span class="summary-val" id="sumStorageFree">-- GB</span>
+                        <span class="summary-subval" id="sumStoragePercent">--% Used</span>
                     </div>
                 </div>
                 <div class="summary-item">
@@ -258,10 +272,11 @@
                                 <th>Uptime</th>
                                 <th>VM Disk</th>
                                 <th>Status</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="mumuBody">
-                            <tr class="mumu-empty"><td colspan="7">No instances detected</td></tr>
+                            <tr class="mumu-empty"><td colspan="8">No instances detected</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -393,7 +408,10 @@
                 <div class="observatory-item">
                     <div class="obs-header">
                         <span class="obs-title">📡 Wi-Fi RF Link</span>
-                        <span class="obs-sub-tag" id="wifiBand">5 GHz</span>
+                        <div class="obs-header-tags">
+                            <span class="obs-quality-pill" id="wifiQualityPill">Excellent</span>
+                            <span class="obs-sub-tag" id="wifiBand">5 GHz</span>
+                        </div>
                     </div>
                     <div class="obs-main-val">
                         <span class="obs-ssid" id="wifiSsid">KMITL-HiSpeed</span>
@@ -475,6 +493,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.4.6"></script>
+    <script src="/static/app.js?v=2.5.0"></script>
 </body>
 </html>

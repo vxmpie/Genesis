@@ -375,6 +375,10 @@ def update_chart_buffer(ram_pct: float, cpu_pct: float):
 
 
 _boost_counter_reset_time = _server_start_time
+_standby_purge_count = 0
+_standby_reclaimed_gb = 0.0
+_last_standby_purge_time = None
+_standby_guard_task = None
 
 
 def get_next_scheduled_boost_time(interval_min: int) -> str:
@@ -455,6 +459,12 @@ def get_session_summary() -> dict:
         "drift_detected": _last_drift_result.get("has_drift", False) if _last_drift_result else False,
         "next_scheduled_boost": next_boost_str,
         "boost_mode": mode,
+        "standby_guard": {
+            "enabled": True,
+            "purges": _standby_purge_count,
+            "reclaimed_gb": round(_standby_reclaimed_gb, 2),
+            "last_purge": _last_standby_purge_time or "None",
+        },
     }
 
 
@@ -593,6 +603,28 @@ def _get_protected_names() -> set:
     for n in CONFIG.get("auto_boost", {}).get("protected_processes", []):
         names.add(n.lower())
     return names
+
+
+def trim_single_process(pid: int) -> dict:
+    """Trim working set for a specific process by PID (e.g. specific MuMu instance)."""
+    try:
+        p = psutil.Process(pid)
+        name = p.name()
+        mem_before = p.memory_info().rss / (1024 * 1024)
+        handle = _kernel32.OpenProcess(
+            PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid
+        )
+        if handle:
+            _psapi.EmptyWorkingSet(handle)
+            _kernel32.CloseHandle(handle)
+            time.sleep(0.1)
+            mem_after = p.memory_info().rss / (1024 * 1024)
+            freed = max(round(mem_before - mem_after, 1), 0.0)
+            add_event("mumu", f"↺ Trimmed working set for {name} (PID {pid}): freed {freed} MB")
+            return {"success": True, "pid": pid, "name": name, "freed_mb": freed}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Failed to open process"}
 
 
 # ===========================================================================
@@ -1487,8 +1519,15 @@ def get_wifi_telemetry() -> dict:
                 elif line.startswith("Radio type") and ":" in line:
                     radio = line.split(":", 1)[1].strip()
 
-            if rssi_dbm == -100 and signal_pct > 0:
-                rssi_dbm = int((signal_pct / 2) - 100)
+            quality_score = min(100, int(signal_pct * 0.6 + min(rx_rate / 400.0, 1.0) * 40)) if state.lower() == "connected" else 0
+            if quality_score >= 85:
+                quality_label = "Excellent"
+            elif quality_score >= 70:
+                quality_label = "Good"
+            elif quality_score >= 50:
+                quality_label = "Fair"
+            else:
+                quality_label = "Poor" if state.lower() == "connected" else "Offline"
 
             _wifi_telemetry_cache = {
                 "connected": state.lower() == "connected",
@@ -1500,6 +1539,8 @@ def get_wifi_telemetry() -> dict:
                 "radio_type": radio,
                 "rx_rate_mbps": rx_rate,
                 "tx_rate_mbps": tx_rate,
+                "quality_score": quality_score,
+                "quality_label": quality_label,
             }
             _wifi_telemetry_time = now
             return _wifi_telemetry_cache
@@ -1516,6 +1557,8 @@ def get_wifi_telemetry() -> dict:
         "radio_type": "N/A",
         "rx_rate_mbps": 0,
         "tx_rate_mbps": 0,
+        "quality_score": 0,
+        "quality_label": "Offline",
     }
 
 
@@ -1681,6 +1724,15 @@ def get_system_metrics() -> dict:
             "sent_mb": round(net_io.bytes_sent / (1024 ** 2), 1),
             "recv_mb": round(net_io.bytes_recv / (1024 ** 2), 1),
         },
+        "storage": {
+            "c_drive": {
+                "total_gb": round(psutil.disk_usage("C:\\").total / (1024 ** 3), 1),
+                "free_gb": round(psutil.disk_usage("C:\\").free / (1024 ** 3), 1),
+                "used_gb": round(psutil.disk_usage("C:\\").used / (1024 ** 3), 1),
+                "percent": psutil.disk_usage("C:\\").percent,
+                "is_low": round(psutil.disk_usage("C:\\").free / (1024 ** 3), 1) < 15.0,
+            }
+        },
     }
 
 
@@ -1750,14 +1802,18 @@ def get_mumu_instances() -> list:
                 uptime_sec = time.time() - proc.info["create_time"]
                 hours = int(uptime_sec // 3600)
                 minutes = int((uptime_sec % 3600) // 60)
+                ram_mb = round((proc.info["memory_info"].rss if proc.info["memory_info"] else 0) / (1024 ** 2), 1)
+                cpu_pct = round(proc.info["cpu_percent"] or 0, 1)
+                is_bloated = (ram_mb >= 4500.0) or (cpu_pct >= 80.0)
                 instances.append({
                     "pid": proc.info["pid"],
                     "name": proc.info["name"],
-                    "cpu_percent": round(proc.info["cpu_percent"] or 0, 1),
-                    "ram_mb": round((proc.info["memory_info"].rss if proc.info["memory_info"] else 0) / (1024 ** 2), 1),
+                    "cpu_percent": cpu_pct,
+                    "ram_mb": ram_mb,
                     "uptime": f"{hours}h{minutes:02d}m",
                     "uptime_seconds": int(uptime_sec),
                     "status": "running",
+                    "is_bloated": is_bloated,
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
@@ -1909,6 +1965,47 @@ async def auto_boost_loop():
             await asyncio.sleep(max(0.05, delay))
         except Exception as e:
             add_event("error", f"Auto-boost loop error: {str(e)}")
+            await asyncio.sleep(5)
+
+
+# ---------------------------------------------------------------------------
+# Autonomous Standby Watchdog Loop (24/7 Silent Kernel Purge)
+# ---------------------------------------------------------------------------
+async def autonomous_standby_loop():
+    """Continuous 24/7 Autonomous Standby List Watchdog (ISLC-grade micro-cleaner)."""
+    global _standby_purge_count, _standby_reclaimed_gb, _last_standby_purge_time
+    while True:
+        try:
+            cfg = CONFIG.get("maintenance", {})
+            min_standby = cfg.get("standby_purge_min_standby_gb", 4.0)
+            min_free = cfg.get("standby_purge_min_free_gb", 1.5)
+
+            ram = get_ram_breakdown()
+            standby_gb = ram.get("standby_gb", 0.0)
+            free_gb = ram.get("free_gb", 0.0)
+
+            # If Standby cache has bloated beyond threshold while Free RAM is running dry
+            if standby_gb >= min_standby and free_gb < min_free:
+                success = purge_standby_list()
+                if success:
+                    _standby_purge_count += 1
+                    _standby_reclaimed_gb += standby_gb
+                    _last_standby_purge_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    new_ram = get_ram_breakdown()
+                    add_event(
+                        "standby",
+                        f"🛡️ Standby Guard: Auto-purged {standby_gb:.2f} GB cache — Free RAM restored to {new_ram.get('free_gb', 0):.2f} GB"
+                    )
+
+                    summary = get_session_summary()
+                    await broadcast_event({
+                        "type": "session_summary",
+                        "data": summary,
+                    })
+
+            await asyncio.sleep(2)
+        except Exception:
             await asyncio.sleep(5)
 
 
@@ -2178,9 +2275,10 @@ async def tunnel_supervisor_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task
     psutil.cpu_percent(interval=0, percpu=True)
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
+    _standby_guard_task = asyncio.create_task(autonomous_standby_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
     _heartbeat_task = asyncio.create_task(heartbeat_loop())
     _tunnel_task = asyncio.create_task(tunnel_supervisor_loop())
@@ -2189,6 +2287,8 @@ async def lifespan(app: FastAPI):
     yield
     if _auto_boost_task:
         _auto_boost_task.cancel()
+    if _standby_guard_task:
+        _standby_guard_task.cancel()
     if _maintenance_task:
         _maintenance_task.cancel()
     if _heartbeat_task:
@@ -2408,6 +2508,12 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         await broadcast_event({"type": "session_summary", "data": summary})
         await ws.send_json({"type": "total_boost_reset", "data": summary})
 
+    elif cmd == "trim_mumu_instance":
+        pid = data.get("pid")
+        if pid:
+            res = trim_single_process(int(pid))
+            await ws.send_json({"type": "mumu_trim_result", "data": res})
+
 
 # ---------------------------------------------------------------------------
 # REST API Endpoints
@@ -2508,6 +2614,17 @@ async def api_growth():
 @app.get("/api/vm-disk")
 async def api_vm_disk():
     return JSONResponse(get_vm_disk_status())
+
+
+@app.post("/api/mumu/trim-instance")
+async def api_trim_mumu_instance(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    pid = request.query_params.get("pid")
+    if not pid:
+        return JSONResponse({"error": "Missing PID"}, status_code=400)
+    res = trim_single_process(int(pid))
+    return JSONResponse(res)
 
 
 @app.get("/api/network/observatory")
