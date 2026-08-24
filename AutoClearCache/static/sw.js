@@ -3,14 +3,14 @@
  * Strategy: Cache-First with Versioned Invalidation for Core Local Assets
  */
 
-const CACHE_NAME = 'genesis-pwa-v2.6.0';
+const CACHE_NAME = 'genesis-pwa-v2.6.1';
 
 // Core Local Assets: 100% Reliable Local Shell (All-or-Nothing)
 const CORE_LOCAL_ASSETS = [
     '/',
-    '/static/index.html?v=2.6.0',
-    '/static/style.css?v=2.6.0',
-    '/static/app.js?v=2.6.0',
+    '/static/index.html?v=2.6.1',
+    '/static/style.css?v=2.6.1',
+    '/static/app.js?v=2.6.1',
     '/static/manifest.json',
     '/static/icon-192.png',
     '/static/icon-512.png'
@@ -50,18 +50,24 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// 3. Fetch Phase: Cache-First for static shell, Network-Only for dynamic API routes
+// 3. Fetch Phase: Network-First with Cache Fallback for instant update propagation
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
     // Bypass API routes and WebSocket requests
-    if (url.pathname.startsWith('/api')) {
+    if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) {
         return;
     }
 
     event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-            return cachedResponse || fetch(event.request);
-        })
+        fetch(event.request)
+            .then((response) => {
+                if (response && response.status === 200 && response.type === 'basic') {
+                    const responseClone = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+                }
+                return response;
+            })
+            .catch(() => caches.match(event.request))
     );
 });

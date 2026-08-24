@@ -154,16 +154,6 @@ const DOM = {
     cyberConfirmMsg: $('#cyberConfirmMsg'),
     btnCyberCancel: $('#btnCyberCancel'),
     btnCyberProceed: $('#btnCyberProceed'),
-    // MuMu Screen Sniffer Modal (v2.6)
-    mumuPreviewModal: $('#mumuPreviewModal'),
-    previewInstanceLabel: $('#previewInstanceLabel'),
-    previewAutoRefreshToggle: $('#previewAutoRefreshToggle'),
-    btnPreviewRefresh: $('#btnPreviewRefresh'),
-    mumuPreviewCloseBtn: $('#mumuPreviewCloseBtn'),
-    previewLoadingSpinner: $('#previewLoadingSpinner'),
-    previewEmptyState: $('#previewEmptyState'),
-    mumuPreviewImg: $('#mumuPreviewImg'),
-    previewLastTime: $('#previewLastTime'),
 };
 
 // ============================================================
@@ -869,8 +859,6 @@ function updateMuMu(mumu) {
 
         const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)">⚠️ Bloat</span>' : '';
         const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}">↺ Trim</button>`;
-        const viewPort = (vmDisks[devices.indexOf(inst)] && vmDisks[devices.indexOf(inst)].port) || (5555 + devices.indexOf(inst) * 2);
-        const viewBtn = isDevice ? `<button class="btn-trim-mini btn-view-mini" data-port="${viewPort}" title="View live screenshot for port ${viewPort}">📷 View</button>` : '';
 
         return `
             <tr>
@@ -881,13 +869,13 @@ function updateMuMu(mumu) {
                 <td>${inst.uptime}</td>
                 <td>${vmDiskHtml}</td>
                 <td><span class="status-dot running"></span>OK</td>
-                <td><div style="display:flex;gap:4px;">${trimBtn}${viewBtn}</div></td>
+                <td>${trimBtn}</td>
             </tr>
         `;
     }).join('');
 
     // Attach click listeners to per-instance trim buttons
-    DOM.mumuBody.querySelectorAll('.btn-trim-mini:not(.btn-view-mini)').forEach(btn => {
+    DOM.mumuBody.querySelectorAll('.btn-trim-mini').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const pid = btn.dataset.pid;
@@ -899,15 +887,6 @@ function updateMuMu(mumu) {
                 btn.textContent = '↺ Trim';
                 btn.disabled = false;
             }, 2500);
-        });
-    });
-
-    // Attach click listeners to per-instance view buttons
-    DOM.mumuBody.querySelectorAll('.btn-view-mini').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const port = btn.dataset.port || 5555;
-            openMuMuPreviewModal(parseInt(port));
         });
     });
 }
@@ -949,7 +928,6 @@ function confirmCyberAction() {
 // ============================================================
 const COMMANDS = [
     { id: 'boost', label: '⚡ Quick RAM Boost Now', desc: 'Parallel Working Set & Standby Purge', disruptive: false },
-    { id: 'view_mumu', label: '📷 View MuMu Live Screen', desc: 'Inspect active bot farming screen', disruptive: false },
     { id: 'scan_deep_clean', label: '🧹 Scan Deep Clean Targets', desc: 'Preview reclaimable caches and dumps', disruptive: false },
     { id: 'refresh_hardening', label: '🛡️ Re-verify Hardening (4/4 CIM)', desc: 'Audit VBS, MPO, Hypervisor, and Defender', disruptive: false },
     { id: 'flush_dns', label: '🌐 Flush DNS Resolver Cache', desc: 'Reset Windows DNS resolver and clear stale caches', disruptive: true },
@@ -1027,9 +1005,6 @@ function runDispatchedAction(cmdId) {
             sendCommand('boost');
             showToast('system', '⚡ RAM Boost triggered via Command Palette');
             break;
-        case 'view_mumu':
-            openMuMuPreviewModal();
-            break;
         case 'scan_deep_clean':
             sendCommand('scan_deep_clean');
             showToast('info', '🧹 Scanning system caches...');
@@ -1051,122 +1026,6 @@ function runDispatchedAction(cmdId) {
             if (requireAuth(() => sendCommand('reset_total_boosts'))) return;
             sendCommand('reset_total_boosts');
             break;
-    }
-}
-
-// ============================================================
-// MuMu Live Screen Sniffer: Zero Token Leak via ObjectURL
-// ============================================================
-let _currentPreviewPort = null;
-let _previewRefreshTimer = null;
-let _currentObjectUrl = null;
-
-async function openMuMuPreviewModal(port) {
-    _currentPreviewPort = port || 5555;
-    if (DOM.mumuPreviewModal) {
-        DOM.mumuPreviewModal.style.display = 'flex';
-        DOM.previewInstanceLabel.textContent = `MuMu VM (Port: ${_currentPreviewPort})`;
-        if (DOM.previewEmptyState) DOM.previewEmptyState.style.display = 'flex';
-        if (DOM.mumuPreviewImg) DOM.mumuPreviewImg.style.display = 'none';
-        await refreshMuMuPreviewFrame();
-    }
-}
-
-async function refreshMuMuPreviewFrame() {
-    if (!_currentPreviewPort || !DOM.mumuPreviewImg) return;
-
-    try {
-        if (DOM.previewLoadingSpinner) DOM.previewLoadingSpinner.style.display = 'flex';
-
-        // 🔒 ZERO URL TOKEN LEAK: Transmit token strictly via X-Auth-Token HTTP header
-        const res = await fetch(`/api/mumu/preview/${_currentPreviewPort}`, {
-            headers: {
-                'X-Auth-Token': STATE.token || localStorage.getItem('genesis_auth_token') || '',
-            }
-        });
-
-        if (res.status === 401) {
-            pauseScreenPreviewAutoRefresh();
-            showToast('warning', '🔒 Session locked. Please unlock dashboard first.');
-            requireAuth(() => refreshMuMuPreviewFrame());
-            return;
-        }
-
-        if (res.status === 429) {
-            showToast('info', '⏳ ADB capture busy, capturing in a moment...');
-            return;
-        }
-
-        if (res.status === 502) {
-            showToast('warning', `⚠️ MuMu instance (Port ${_currentPreviewPort}) is offline or unreachable`);
-            return;
-        }
-
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-        }
-
-        const blob = await res.blob();
-
-        // Revoke previous Blob URL to prevent client memory leaks
-        if (_currentObjectUrl) {
-            URL.revokeObjectURL(_currentObjectUrl);
-        }
-
-        _currentObjectUrl = URL.createObjectURL(blob);
-        DOM.mumuPreviewImg.src = _currentObjectUrl;
-        DOM.mumuPreviewImg.style.display = 'block';
-        if (DOM.previewEmptyState) DOM.previewEmptyState.style.display = 'none';
-
-        if (DOM.previewLastTime) {
-            DOM.previewLastTime.textContent = `Snapshot: ${new Date().toLocaleTimeString()}`;
-        }
-    } catch (err) {
-        console.error('[PREVIEW FETCH ERROR]', err);
-        showToast('error', `Failed to load preview: ${err.message}`);
-    } finally {
-        if (DOM.previewLoadingSpinner) DOM.previewLoadingSpinner.style.display = 'none';
-    }
-}
-
-function toggleAutoRefresh(enable) {
-    pauseScreenPreviewAutoRefresh();
-    if (enable) {
-        if (DOM.previewAutoRefreshToggle) DOM.previewAutoRefreshToggle.checked = true;
-        _previewRefreshTimer = setInterval(() => {
-            if (DOM.mumuPreviewModal && DOM.mumuPreviewModal.style.display !== 'none' && document.visibilityState === 'visible') {
-                refreshMuMuPreviewFrame();
-            } else {
-                pauseScreenPreviewAutoRefresh();
-            }
-        }, 5000);
-    }
-}
-
-function pauseScreenPreviewAutoRefresh() {
-    if (_previewRefreshTimer) {
-        clearInterval(_previewRefreshTimer);
-        _previewRefreshTimer = null;
-    }
-    if (DOM.previewAutoRefreshToggle) {
-        DOM.previewAutoRefreshToggle.checked = false;
-    }
-}
-
-function closeMuMuPreviewModal() {
-    pauseScreenPreviewAutoRefresh();
-    if (_currentObjectUrl) {
-        URL.revokeObjectURL(_currentObjectUrl);
-        _currentObjectUrl = null;
-    }
-    if (DOM.mumuPreviewImg) {
-        DOM.mumuPreviewImg.style.display = 'none';
-    }
-    if (DOM.previewEmptyState) {
-        DOM.previewEmptyState.style.display = 'flex';
-    }
-    if (DOM.mumuPreviewModal) {
-        DOM.mumuPreviewModal.style.display = 'none';
     }
 }
 
@@ -1776,24 +1635,6 @@ function setupEventHandlers() {
         });
     }
 
-    // MuMu Live Screen Sniffer Handlers
-    if (DOM.btnPreviewRefresh) {
-        DOM.btnPreviewRefresh.addEventListener('click', refreshMuMuPreviewFrame);
-    }
-    if (DOM.mumuPreviewCloseBtn) {
-        DOM.mumuPreviewCloseBtn.addEventListener('click', closeMuMuPreviewModal);
-    }
-    if (DOM.mumuPreviewModal) {
-        DOM.mumuPreviewModal.addEventListener('click', (e) => {
-            if (e.target === DOM.mumuPreviewModal) closeMuMuPreviewModal();
-        });
-    }
-    if (DOM.previewAutoRefreshToggle) {
-        DOM.previewAutoRefreshToggle.addEventListener('change', (e) => {
-            toggleAutoRefresh(e.target.checked);
-        });
-    }
-
     // Global Keyboard Shortcuts (Ctrl+K, Cmd+K, Escape)
     window.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -1805,7 +1646,6 @@ function setupEventHandlers() {
             }
         } else if (e.key === 'Escape') {
             closeCommandPalette();
-            closeMuMuPreviewModal();
             closeCyberConfirm();
         }
     });

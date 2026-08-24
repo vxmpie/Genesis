@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.6.0">
+    <link rel="stylesheet" href="/static/style.css?v=2.6.1">
 </head>
 <body>
     <!-- Header -->
@@ -576,44 +576,9 @@
         </div>
     </div>
 
-    <!-- MuMu Live Screen Sniffer Modal -->
-    <div class="mumu-preview-overlay" id="mumuPreviewModal" style="display:none;">
-        <div class="mumu-preview-box">
-            <div class="mumu-preview-header">
-                <div class="mumu-preview-title-wrap">
-                    <span class="preview-live-dot"></span>
-                    <span class="mumu-preview-title" id="previewInstanceLabel">MuMu VM Screen</span>
-                </div>
-                <div class="mumu-preview-ctrls">
-                    <label class="preview-toggle-label" title="Opt-in 5s Auto-Refresh (Auto-pauses on background)">
-                        <input type="checkbox" id="previewAutoRefreshToggle">
-                        <span>Auto (5s)</span>
-                    </label>
-                    <button class="btn-preview-refresh" id="btnPreviewRefresh" title="Fetch snapshot frame">↺ Snapshot</button>
-                    <button class="mumu-preview-close" id="mumuPreviewCloseBtn">✕</button>
-                </div>
-            </div>
-            <div class="mumu-preview-body">
-                <div class="preview-spinner" id="previewLoadingSpinner" style="display:none;">
-                    <div class="spinner-ring"></div>
-                </div>
-                <div class="preview-empty-state" id="previewEmptyState">
-                    <span class="empty-state-icon">🎮</span>
-                    <p>Connecting to ADB Screen Stream...</p>
-                </div>
-                <img class="mumu-preview-img" id="mumuPreviewImg" alt="MuMu VM Live Frame" style="display:none;">
-                <div class="preview-scanlines"></div>
-            </div>
-            <div class="mumu-preview-footer">
-                <span id="previewLastTime">Snapshot: Ready</span>
-                <span class="preview-codec-tag">JPEG ~35KB • WebP Resized</span>
-            </div>
-        </div>
-    </div>
-
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.6.0"></script>
+    <script src="/static/app.js?v=2.6.1"></script>
 </body>
 </html>
