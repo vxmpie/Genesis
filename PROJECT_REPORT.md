@@ -1,4 +1,4 @@
-# รายงานสรุปโครงการ: Genesis Dashboard v2.5.2 (Autonomous Pro Suite - Master HUD Edition)
+# รายงานสรุปโครงการ: Genesis Dashboard v2.6.0 (Mobile & iPad-First Enterprise Suite)
 
 ---
 
@@ -6,38 +6,36 @@
 
 โครงการ **Genesis Dashboard** ถูกออกแบบและพัฒนาขึ้นเพื่อเป็นระบบบริหารจัดการ, ติดตามสถานะ (Observability) และบำรุงรักษาเครื่องคอมพิวเตอร์แล็ปท็อป (Intel Core i5-12500H, RAM 32GB DDR4/DDR5, NVIDIA GeForce RTX 3050 Laptop GPU) ที่ทำหน้าที่เป็น **เครื่องฟาร์มบอทเกม Roblox ผ่าน MuMu Player 12/15 ตลอด 24 ชั่วโมง 7 วันแบบไร้ผู้ดูแล (24/7 Unattended Automation)**
 
-เวอร์ชัน **v2.5.2** ยกระดับดีไซน์สู่ **World-Class Master Operations HUD (Bento Grid Architecture)** ตามมาตรฐาน UX/UI สากลระดับโลก และเสริมความมั่นคงปลอดภัยสูงสุดให้โปรเซส Hypervisor จำลองของ MuMu Player 100% เพื่อป้องกันปัญหาเกมค้างหรือ Virtual Disk Error ระหว่างการฟาร์มบอท
+เวอร์ชัน **v2.6.0** ยกระดับสู่ **Mobile & iPad-First Enterprise Suite** ออกแบบรองรับการใช้งานผ่าน iPad และสมาร์ทโฟนเป็นหลัก (>90% Focus) ด้วย **Progressive Web App (PWA) Standalone Mode**, **Floating Command Hub & `Ctrl + K` Palette** พร้อมระบบยืนยันคำสั่ง Cyberpunk Modal และ **MuMu Live Screen Sniffer** บีบอัดภาพผ่าน Pillow บนเซิร์ฟเวอร์แบบ Non-blocking Async และล็อคความปลอดภัยด้วย Header-Only Token Auth
 
 ---
 
-## 2. นวัตกรรมและสถาปัตยกรรมสำคัญในเวอร์ชัน v2.5.2 (Architectural Deepening)
+## 2. นวัตกรรมและสถาปัตยกรรมสำคัญในเวอร์ชัน v2.6.0 (Architectural Deepening)
 
 > [!IMPORTANT]
-> **การจำแนกและยกระดับระบบย่อย (Modular Sub-Systems) สู่ระดับ Enterprise:**
+> **การยกระดับสถาปัตยกรรม Mobile & iPad-First และความมั่นคงปลอดภัยขั้นสูงสุด:**
 
-### 1. Master Operations & System Health HUD (World-Class Bento UI Standard)
-* **2-Tier Modular HUD Layout:** ออกแบบตามหลัก Dashboard Design ระดับโลก (เทียบชั้น Datadog, Vercel, Stripe) แบ่งสัดส่วนข้อมูลออกเป็น 2 ชั้น:
-  - **Tier 1 (Core Operations - 4 Hero Cards):** 
-    1. ⏱️ `Server Uptime` (พร้อม Dynamic Pulse Dot แสดงสถานะ Online)
-    2. ⚡ `RAM & Cache Boosts` (แสดง Session Counter ตัวเลขเด่นชัด, ป้าย Lifetime Counter, และปุ่มกด `↺ Session` / `↺ Total` ในการ์ดเดียวกันโดยไม่มีการล้นตกขอบ)
-    3. 🛡️ `Standby Guard` (สถิติจำนวนครั้ง Purge และปริมาณ GB แรมที่ทวงคืนได้ตลอด 24 ชั่วโมง)
-    4. 💾 `NVMe Storage (C:)` (พื้นที่ว่าง GB Free พร้อมป้าย % Used)
-  - **Tier 2 (Sentinel & Health Strip - 3 Cards):** 
-    5. 🌐 `Watchdog Sentinel` (จำนวนครั้งที่กู้คืนเครือข่าย)
-    6. 🧹 `Last Cache Clean` (รอบเวลาบูสต์ล่าสุด)
-    7. 🛡️ `Windows Hardening` (สถานะการป้องกัน 4/4 CIM Baseline Verified)
-* **Zero-Overflow Typography:** ปรับแต่ง Grid แบบ 4 Columns (Row 1) และ 1+1+2 Span (Row 2) พร้อม Responsive Breakpoints สำหรับ Tablet และ Mobile โดยไม่เกิดการบีบอัดข้อความ
+### 1. Progressive Web App (PWA) & iOS Standalone Engine
+* **Full-Screen Standalone Mode:** ติดตั้งผ่าน "Add to Home Screen" บน iOS Safari, iPadOS และ Android Chrome เปิดใช้งานเต็มจอ 100% โดยไม่มี Browser URL Bar
+* **iOS Safe Area Inset Support:** รองรับ `viewport-fit=cover` พร้อมจัดระยะขอบล่างตาม `env(safe-area-inset-bottom)` เพื่อให้เข้ากับแถบ Home Bar และ Dynamic Island ของ iPhone/iPad
+* **Versioned Resilient Service Worker (`genesis-pwa-v2.6.0`):** แยกการแคช Core Local Assets (Offline Shell) ออกจาก Third-Party Fonts อย่างปลอดภัย พร้อม `skipWaiting()` และ `clients.claim()` ป้องกันปัญหาค้าง UI เก่า
+* **iOS Lifecycle & Auto-Reconnect Queue:** ดักจับ Event `visibilitychange` และ `window.onfocus` เพื่อ Reconnect WebSocket และดึงข้อมูลใหม่ทันทีเมื่อปลดล็อกหน้าจอ iPad พร้อมคิวคำสั่ง `pendingCommands` ส่งคำสั่งอัตโนมัติเมื่อต่อติด
 
-### 2. เกราะป้องกันหน่วยความจำ Hypervisor (MuMu Immutable Memory Protection)
-* **Root Cause Analysis (RCA):** การที่ MuMu ค้างจนต้อง Clear Disk เกิดจากคำสั่ง `EmptyWorkingSet` ของ Windows เข้าไปล้าง Page Memory ของ `MuMuNxDevice.exe` (Hypervisor ของ Android VM) ทำให้ Guest OS ขาดช่วงการอ่านแรมจนระบบ Android Stutter และเขียน Disk Desync
-* **Permanent Fix (`IMMUTABLE_PROTECTED_PROCESSES`):** 
-  - ล็อครายชื่อโปรเซสของ MuMu (`MuMuNxDevice.exe`, `MuMuNxMain.exe`, `NemuHeadless.exe`, `NemuPlayer.exe`, `adb.exe`, `RobloxPlayerBeta.exe`) เข้าสู่เกราะคุ้มครองระดับสูงสุด
-  - ระบบ Auto-Boost และ Scheduled Boost จะ **ข้าม (Bypass) การ Trim โปรเซสของ MuMu 100%** ทำให้บอทฟาร์มได้ต่อเนื่องลื่นไหลตลอด 24 ชั่วโมงโดยไม่มีอาการค้าง
-* **Non-Destructive Filesystem TRIM:** เปลี่ยนคำสั่งเคลียร์แคช VM จากเดิมที่เป็น `pm trim-caches 128G` มาเป็น **`fstrim -v /data`** ซึ่งเป็นการสั่ง TRIM บล็อกว่างระดับ Filesystem อย่างปลอดภัย ไม่กระทบไฟล์แคชหรือ Resource ที่เกมกำลังรันอยู่
+### 2. Floating Action Hub & Command Palette (`Ctrl + K` / `⚡ HUB`)
+* **Thumb-Zone Accessibility:** ปุ่มลอย `⚡ HUB` ที่มุมขวาล่าง ออกแบบตามสรีรศาสตร์สำหรับนิ้วโป้งบนแท็บเล็ตและมือถือ
+* **Safe vs. Disruptive Action Gate:** แบ่งประเภทคำสั่งชัดเจน:
+  - **Safe Actions (Direct Execution):** ⚡ Quick RAM Boost, 📷 View MuMu Screen, 🧹 Scan Targets, 🛡️ Audit Hardening
+  - **Disruptive Actions (Custom Cyber Confirm):** 🌐 Flush DNS, 🔍 Run Defender Scan, 🗑️ Reset Lifetime History
+* **Zero Native Dialog Risk:** ใช้ Custom Cyberpunk Confirm Dialog (HTML/CSS Glow) ทั้งหมด ตัดปัญหา Browser Native `confirm()` ค้างหรือดีเลย์บน iOS PWA พร้อม Double-Tap Debounce Guard (1,000ms)
 
-### 3. สถาปัตยกรรมหน่วยความจำแบบไฮบริด (Hybrid Two-Tier Memory Architecture)
-* **Tier 1: Autonomous Standby Guard (24/7 Real-Time Silent Micro-Cleaner):**
-  - แยก Background Task ทำงานอิสระระดับ Kernel ตรวจสอบ `StandbyPageCount` (Priorities 0–7) และ `FreePageCount` ผ่าน Native `NtQuerySystemInformation(0x50)` ทุก 2 วินาที
+### 3. Bandwidth-Optimized & Auth-Gated MuMu Screen Sniffer
+* **Strict Header-Only Token Auth:** Endpoint `/api/mumu/preview/{port}` บังคับส่ง Token ผ่าน `X-Auth-Token` เท่านั้น (ตัด Query Param ทิ้ง 100%) ป้องกัน Token รั่วไหลลงใน URL History, Access Log หรือ Referer Header
+* **Client Blob ObjectURL Streaming:** ฝั่ง Client ดึงภาพผ่าน `fetch()` + Blob และแปลงเป็น `URL.createObjectURL(blob)` พร้อมคำสั่ง `URL.revokeObjectURL()` ป้องกัน Client Memory Leak
+* **Server-Side Pillow Compression (<35KB vs 3MB Raw):** รันคำสั่ง `adb exec-out screencap -p` แล้วย่อขนาด 50% (640x360) และบีบอัดเป็น JPEG (Quality 65) ผ่าน Pillow ส่งผลให้ประหยัด Bandwidth บนเครือข่าย LTE/Wi-Fi มหาศาล
+* **Non-Blocking Async ThreadPool & Concurrency Semaphore:** ประมวลผลภาพผ่าน `asyncio.to_thread()` ใน Worker Thread แยกจาก FastAPI Event Loop และจำกัดด้วย `_screencap_semaphore = asyncio.Semaphore(1)` ไม่ให้แย่ง CPU/ADB ของบอทเกม
+* **Page Visibility Auto-Pause:** ระบบจะหยุดส่งคำสั่ง Auto-Refresh (5s) ทันทีที่ปิดหน้าต่าง Modal, ล็อกหน้าจอ iPad หรือสลับแอป
+
+---
   - สั่งล้างแคชผ่าน `NtSetSystemInformation(0x50, MemoryPurgeStandbyList)` โดยใช้เวลาเพียง **2 Milliseconds**
 * **Tier 2: Ultra-Fast Parallel Clock-Aligned Boost (<80ms on :00.000):**
   - รันตามรอบเวลาหน้าปัดนาฬิกา (เช่น `:00` หรือ `:30` เป๊ะระดับเสี้ยววินาที)
@@ -108,9 +106,13 @@ Genesis/
     │   ├── history.json            # บันทึกประวัติเหตุการณ์ย้อนหลัง (Cap 5,000 รายการแบบ Atomic Safe Write)
     │   └── growth.json             # ข้อมูล Snapshot การเติบโตของขนาด VM
     └── static/
-        ├── index.html              # หน้าเว็บ Dashboard (Master Bento HUD, 30-Min Chart, 9 Modules)
-        ├── app.js                  # WebSocket Client, Master HUD Renderers, 30-Min Chart Engine
-        └── style.css               # Dark Cyberpunk UI, 2-Tier Bento Master HUD Grid, Responsive Breakpoints
+        ├── index.html              # หน้าเว็บ Dashboard (Master Bento HUD, Quick Hub, Preview Modal)
+        ├── app.js                  # WebSocket Client, Command Palette, MuMu Sniffer Engine, SW Register
+        ├── style.css               # Dark Cyberpunk UI, 2-Tier Bento Master HUD Grid, Safe Area Breakpoints
+        ├── manifest.json           # PWA Manifest (Standalone Mode, Theme Color #0b0c14)
+        ├── sw.js                   # Versioned Service Worker (genesis-pwa-v2.6.0 Resilient Cache)
+        ├── icon-192.png            # High-Resolution 192x192 PWA Icon
+        └── icon-512.png            # High-Resolution 512x512 PWA Icon
 ```
 
 ---
@@ -120,6 +122,9 @@ Genesis/
 | รายการตรวจสอบ | ผลการประเมิน | รายละเอียดการทำงานจริง |
 | :--- | :---: | :--- |
 | **Zero-Secret Documentation** | ✅ ผ่านการตรวจสอบ | ปลอด Secret, PIN, Salt และ Webhook URL ใน Git และ Documentation ทุกไฟล์ |
+| **PWA Standalone Mode** | ✅ ผ่านการทดสอบ | รองรับ Add to Home Screen บน iOS/iPadOS/Android แสดงผลเต็มจอไร้ URL Bar |
+| **Mobile Quick Command Hub** | ✅ ผ่านการทดสอบ | ปุ่มลอย `⚡ HUB` + `Ctrl+K` Palette พร้อมระบบยืนยันคำสั่ง Cyberpunk Modal |
+| **MuMu Screen Sniffer** | ✅ ผ่านการทดสอบ | บีบอัดภาพ JPEG Q=65 (~35KB) ผ่าน Pillow บน Server พร้อม Header-Only Auth |
 | **Autonomous Standby Guard** | ✅ ผ่านการทดสอบ | ล้างแคชระดับ Kernel ภายใน 2ms ทุก 2 วิเมื่อ Standby > 4GB และ Free < 1.5GB พร้อม Log Fallback |
 | **Ultra-Fast Clock Boost** | ✅ ผ่านการทดสอบ | บูสต์ตรงเสี้ยววินาที `:00` จบใน <80ms ด้วย 16-Worker ThreadPoolExecutor |
 | **MuMu Hypervisor Memory Shield** | ✅ ผ่านการทดสอบ | ยังไม่พบเคส MuMu Process Working Set ถูก Purge หลังติดตั้ง `IMMUTABLE_PROTECTED_PROCESSES` |

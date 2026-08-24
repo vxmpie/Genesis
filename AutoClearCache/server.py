@@ -33,8 +33,8 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import psutil
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 # ---------------------------------------------------------------------------
@@ -2388,6 +2388,86 @@ async def api_auth_status(request: Request):
         "auth_required": is_auth_enabled(),
         "authenticated": verify_session_token(token),
     })
+
+
+# ---------------------------------------------------------------------------
+# PWA Root Assets
+# ---------------------------------------------------------------------------
+@app.get("/manifest.json")
+async def serve_manifest():
+    return FileResponse(str(static_dir / "manifest.json"), media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def serve_service_worker():
+    return FileResponse(str(static_dir / "sw.js"), media_type="application/javascript")
+
+
+# ---------------------------------------------------------------------------
+# Module 3+: Bandwidth-Optimized & Auth-Gated MuMu Screen Sniffer
+# ---------------------------------------------------------------------------
+_screencap_semaphore = asyncio.Semaphore(1)
+
+
+def _capture_and_compress_sync(port: int) -> bytes | None:
+    """Synchronous worker executed in ThreadPoolExecutor to prevent blocking FastAPI loop."""
+    adb = _find_adb()
+    if not adb:
+        print(f"[PREVIEW ERROR] ADB executable not found on host system")
+        return None
+    try:
+        cmd = [adb, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-p"]
+        proc = subprocess.run(cmd, capture_output=True, timeout=5)
+        if proc.returncode != 0:
+            err = proc.stderr.decode("utf-8", errors="ignore").strip() if proc.stderr else "Unknown error"
+            print(f"[PREVIEW ERROR] ADB screencap failed on port {port} (Exit code {proc.returncode}): {err}")
+            return None
+        if not proc.stdout:
+            print(f"[PREVIEW ERROR] ADB screencap returned empty output on port {port}")
+            return None
+
+        # Convert raw PNG to optimized JPEG via Pillow
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(proc.stdout)) as img:
+            orig_w, orig_h = img.size
+            img_resized = img.resize((orig_w // 2, orig_h // 2), Image.Resampling.BILINEAR)
+            img_rgb = img_resized.convert("RGB")
+            out_buf = io.BytesIO()
+            img_rgb.save(out_buf, format="JPEG", quality=65, optimize=True)
+            return out_buf.getvalue()
+    except subprocess.TimeoutExpired:
+        print(f"[PREVIEW ERROR] ADB screencap timed out (>5s) on port {port}")
+        return None
+    except Exception as e:
+        print(f"[PREVIEW ERROR] Unexpected error during screencap on port {port}: {e}")
+        return None
+
+
+@app.get("/api/mumu/preview/{port}")
+async def api_mumu_preview(port: int, request: Request):
+    # 🔒 1. STRICT HEADER-ONLY AUTH GUARD: Token must be provided in X-Auth-Token header
+    token = request.headers.get("X-Auth-Token")
+    if not verify_session_token(token):
+        return Response(content="Unauthorized: Valid PIN token required in X-Auth-Token header", status_code=401)
+
+    # 🚦 2. CONCURRENCY LIMIT: Maximum 1 concurrent screencap to protect bot FPS
+    if _screencap_semaphore.locked():
+        return Response(content="Screencap busy, please wait", status_code=429)
+
+    async with _screencap_semaphore:
+        jpeg_bytes = await asyncio.to_thread(_capture_and_compress_sync, port)
+        if not jpeg_bytes:
+            return Response(content="Failed to capture VM frame", status_code=502)
+
+        return Response(
+            content=jpeg_bytes,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "X-Content-Type-Options": "nosniff",
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ const STATE = {
     token: localStorage.getItem('genesis_auth_token') || '',
     authenticated: false,
     authRequired: false,
+    pendingCommands: [],
 };
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 42; // ~263.9
@@ -141,12 +142,38 @@ const DOM = {
     chartZoomBtns: $$('.chart-zoom-btn'),
     // Wi-Fi RF Quality Pill
     wifiQualityPill: $('#wifiQualityPill'),
+    // Quick Command Hub (v2.6)
+    btnQuickHub: $('#btnQuickHub'),
+    commandPaletteModal: $('#commandPaletteModal'),
+    cmdPaletteInput: $('#cmdPaletteInput'),
+    cmdPaletteList: $('#cmdPaletteList'),
+    cmdPaletteCloseBtn: $('#cmdPaletteCloseBtn'),
+    // Cyberpunk Confirm Modal (v2.6)
+    cyberConfirmModal: $('#cyberConfirmModal'),
+    cyberConfirmTitle: $('#cyberConfirmTitle'),
+    cyberConfirmMsg: $('#cyberConfirmMsg'),
+    btnCyberCancel: $('#btnCyberCancel'),
+    btnCyberProceed: $('#btnCyberProceed'),
+    // MuMu Screen Sniffer Modal (v2.6)
+    mumuPreviewModal: $('#mumuPreviewModal'),
+    previewInstanceLabel: $('#previewInstanceLabel'),
+    previewAutoRefreshToggle: $('#previewAutoRefreshToggle'),
+    btnPreviewRefresh: $('#btnPreviewRefresh'),
+    mumuPreviewCloseBtn: $('#mumuPreviewCloseBtn'),
+    previewLoadingSpinner: $('#previewLoadingSpinner'),
+    previewEmptyState: $('#previewEmptyState'),
+    mumuPreviewImg: $('#mumuPreviewImg'),
+    previewLastTime: $('#previewLastTime'),
 };
 
 // ============================================================
 // WebSocket Connection & Auth Handshake
 // ============================================================
 function connectWS() {
+    if (STATE.ws && (STATE.ws.readyState === WebSocket.OPEN || STATE.ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const tokenQuery = STATE.token ? `?token=${encodeURIComponent(STATE.token)}` : '';
     const url = `${proto}://${location.host}/ws${tokenQuery}`;
@@ -159,6 +186,16 @@ function connectWS() {
         DOM.connText.textContent = 'Connected';
         if (STATE.token) {
             sendCommand('auth', { token: STATE.token });
+        }
+
+        // Flush any queued commands that were triggered during reconnection
+        if (STATE.pendingCommands && STATE.pendingCommands.length > 0) {
+            const queued = [...STATE.pendingCommands];
+            STATE.pendingCommands = [];
+            queued.forEach(item => {
+                sendCommand(item.command, item.payload);
+            });
+            showToast('system', `📡 Dispatched ${queued.length} queued action(s)`);
         }
     };
 
@@ -186,8 +223,35 @@ function connectWS() {
 function sendCommand(command, payload = {}) {
     if (STATE.ws && STATE.ws.readyState === WebSocket.OPEN) {
         STATE.ws.send(JSON.stringify({ command, token: STATE.token, ...payload }));
+    } else {
+        // Queue command and initiate connection if disconnected
+        STATE.pendingCommands.push({ command, payload });
+        showToast('info', '📡 Reconnecting... Action queued and will fire on connect.');
+        connectWS();
     }
 }
+
+// ============================================================
+// iOS / iPadOS Lifecycle: Auto-Reconnect on Wakeup & Visibility Guard
+// ============================================================
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        if (!STATE.ws || STATE.ws.readyState !== WebSocket.OPEN) {
+            console.log('[LIFECYCLE] App visible, re-establishing WebSocket...');
+            connectWS();
+        }
+        checkAuthStatus();
+    } else {
+        // Automatically pause auto-refresh screencap when app is backgrounded / screen locked
+        pauseScreenPreviewAutoRefresh();
+    }
+});
+
+window.addEventListener('focus', () => {
+    if (!STATE.ws || STATE.ws.readyState !== WebSocket.OPEN) {
+        connectWS();
+    }
+});
 
 // ============================================================
 // Message Handler
@@ -805,6 +869,8 @@ function updateMuMu(mumu) {
 
         const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)">⚠️ Bloat</span>' : '';
         const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}">↺ Trim</button>`;
+        const viewPort = (vmDisks[devices.indexOf(inst)] && vmDisks[devices.indexOf(inst)].port) || (5555 + devices.indexOf(inst) * 2);
+        const viewBtn = isDevice ? `<button class="btn-trim-mini btn-view-mini" data-port="${viewPort}" title="View live screenshot for port ${viewPort}">📷 View</button>` : '';
 
         return `
             <tr>
@@ -815,13 +881,13 @@ function updateMuMu(mumu) {
                 <td>${inst.uptime}</td>
                 <td>${vmDiskHtml}</td>
                 <td><span class="status-dot running"></span>OK</td>
-                <td>${trimBtn}</td>
+                <td><div style="display:flex;gap:4px;">${trimBtn}${viewBtn}</div></td>
             </tr>
         `;
     }).join('');
 
     // Attach click listeners to per-instance trim buttons
-    DOM.mumuBody.querySelectorAll('.btn-trim-mini').forEach(btn => {
+    DOM.mumuBody.querySelectorAll('.btn-trim-mini:not(.btn-view-mini)').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const pid = btn.dataset.pid;
@@ -835,6 +901,273 @@ function updateMuMu(mumu) {
             }, 2500);
         });
     });
+
+    // Attach click listeners to per-instance view buttons
+    DOM.mumuBody.querySelectorAll('.btn-view-mini').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const port = btn.dataset.port || 5555;
+            openMuMuPreviewModal(parseInt(port));
+        });
+    });
+}
+
+// ============================================================
+// Custom Cyberpunk Confirmation Modal (No Native Confirm)
+// ============================================================
+let _pendingCyberAction = null;
+let _lastActionTimestamp = 0;
+
+function showCyberConfirm(title, message, onConfirm) {
+    _pendingCyberAction = onConfirm;
+    if (DOM.cyberConfirmTitle) DOM.cyberConfirmTitle.textContent = title;
+    if (DOM.cyberConfirmMsg) DOM.cyberConfirmMsg.textContent = message;
+    if (DOM.cyberConfirmModal) DOM.cyberConfirmModal.style.display = 'flex';
+}
+
+function closeCyberConfirm() {
+    _pendingCyberAction = null;
+    if (DOM.cyberConfirmModal) DOM.cyberConfirmModal.style.display = 'none';
+}
+
+function confirmCyberAction() {
+    const now = Date.now();
+    // 🛡️ Double-Tap / Debounce Guard (1,000ms cooldown)
+    if (now - _lastActionTimestamp < 1000) return;
+    _lastActionTimestamp = now;
+
+    if (_pendingCyberAction) {
+        const action = _pendingCyberAction;
+        _pendingCyberAction = null;
+        action();
+    }
+    closeCyberConfirm();
+}
+
+// ============================================================
+// Command Palette (Ctrl+K / Mobile Quick Hub)
+// ============================================================
+const COMMANDS = [
+    { id: 'boost', label: '⚡ Quick RAM Boost Now', desc: 'Parallel Working Set & Standby Purge', disruptive: false },
+    { id: 'view_mumu', label: '📷 View MuMu Live Screen', desc: 'Inspect active bot farming screen', disruptive: false },
+    { id: 'scan_deep_clean', label: '🧹 Scan Deep Clean Targets', desc: 'Preview reclaimable caches and dumps', disruptive: false },
+    { id: 'refresh_hardening', label: '🛡️ Re-verify Hardening (4/4 CIM)', desc: 'Audit VBS, MPO, Hypervisor, and Defender', disruptive: false },
+    { id: 'flush_dns', label: '🌐 Flush DNS Resolver Cache', desc: 'Reset Windows DNS resolver and clear stale caches', disruptive: true },
+    { id: 'quick_scan', label: '🔍 Run Defender Quick Scan', desc: 'Execute real-time security malware sweep', disruptive: true },
+    { id: 'reset_session', label: '↺ Reset Session Boost Counter', desc: 'Zero out current session metrics', disruptive: false },
+    { id: 'reset_total', label: '🗑️ Reset Lifetime Total Boosts', desc: 'Permanently reset lifetime boost history', disruptive: true },
+];
+
+function openCommandPalette() {
+    if (DOM.commandPaletteModal) {
+        DOM.commandPaletteModal.style.display = 'flex';
+        renderCommandList();
+        if (DOM.cmdPaletteInput) {
+            DOM.cmdPaletteInput.value = '';
+            DOM.cmdPaletteInput.focus();
+        }
+    }
+}
+
+function closeCommandPalette() {
+    if (DOM.commandPaletteModal) {
+        DOM.commandPaletteModal.style.display = 'none';
+    }
+}
+
+function renderCommandList(filter = '') {
+    if (!DOM.cmdPaletteList) return;
+    const q = filter.trim().toLowerCase();
+    const filtered = COMMANDS.filter(c => c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
+
+    if (filtered.length === 0) {
+        DOM.cmdPaletteList.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">No matching commands found</div>';
+        return;
+    }
+
+    DOM.cmdPaletteList.innerHTML = filtered.map(c => `
+        <div class="cmd-palette-item" data-id="${c.id}">
+            <div class="cmd-item-left">
+                <span class="cmd-item-label">${c.label}</span>
+                <span class="cmd-item-desc">${c.desc}</span>
+            </div>
+            <span class="cmd-item-badge ${c.disruptive ? 'disruptive' : 'safe'}">${c.disruptive ? 'Confirm' : 'Direct'}</span>
+        </div>
+    `).join('');
+
+    DOM.cmdPaletteList.querySelectorAll('.cmd-palette-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const id = item.dataset.id;
+            executeCommand(id);
+        });
+    });
+}
+
+function executeCommand(cmdId) {
+    const cmd = COMMANDS.find(c => c.id === cmdId);
+    if (!cmd) return;
+
+    if (cmd.disruptive) {
+        closeCommandPalette();
+        showCyberConfirm(
+            `Confirm: ${cmd.label}`,
+            `This action may momentarily impact CPU/Network or reset persistent data. Proceed?`,
+            () => runDispatchedAction(cmdId)
+        );
+        return;
+    }
+
+    closeCommandPalette();
+    runDispatchedAction(cmdId);
+}
+
+function runDispatchedAction(cmdId) {
+    switch (cmdId) {
+        case 'boost':
+            sendCommand('boost');
+            showToast('system', '⚡ RAM Boost triggered via Command Palette');
+            break;
+        case 'view_mumu':
+            openMuMuPreviewModal();
+            break;
+        case 'scan_deep_clean':
+            sendCommand('scan_deep_clean');
+            showToast('info', '🧹 Scanning system caches...');
+            break;
+        case 'refresh_hardening':
+            sendCommand('refresh_hardening');
+            showToast('info', '🛡️ Auditing system hardening...');
+            break;
+        case 'flush_dns':
+            sendCommand('flush_dns');
+            break;
+        case 'quick_scan':
+            sendCommand('quick_scan');
+            break;
+        case 'reset_session':
+            sendCommand('reset_session_boosts');
+            break;
+        case 'reset_total':
+            if (requireAuth(() => sendCommand('reset_total_boosts'))) return;
+            sendCommand('reset_total_boosts');
+            break;
+    }
+}
+
+// ============================================================
+// MuMu Live Screen Sniffer: Zero Token Leak via ObjectURL
+// ============================================================
+let _currentPreviewPort = null;
+let _previewRefreshTimer = null;
+let _currentObjectUrl = null;
+
+async function openMuMuPreviewModal(port) {
+    _currentPreviewPort = port || 5555;
+    if (DOM.mumuPreviewModal) {
+        DOM.mumuPreviewModal.style.display = 'flex';
+        DOM.previewInstanceLabel.textContent = `MuMu VM (Port: ${_currentPreviewPort})`;
+        if (DOM.previewEmptyState) DOM.previewEmptyState.style.display = 'flex';
+        if (DOM.mumuPreviewImg) DOM.mumuPreviewImg.style.display = 'none';
+        await refreshMuMuPreviewFrame();
+    }
+}
+
+async function refreshMuMuPreviewFrame() {
+    if (!_currentPreviewPort || !DOM.mumuPreviewImg) return;
+
+    try {
+        if (DOM.previewLoadingSpinner) DOM.previewLoadingSpinner.style.display = 'flex';
+
+        // 🔒 ZERO URL TOKEN LEAK: Transmit token strictly via X-Auth-Token HTTP header
+        const res = await fetch(`/api/mumu/preview/${_currentPreviewPort}`, {
+            headers: {
+                'X-Auth-Token': STATE.token || localStorage.getItem('genesis_auth_token') || '',
+            }
+        });
+
+        if (res.status === 401) {
+            pauseScreenPreviewAutoRefresh();
+            showToast('warning', '🔒 Session locked. Please unlock dashboard first.');
+            requireAuth(() => refreshMuMuPreviewFrame());
+            return;
+        }
+
+        if (res.status === 429) {
+            showToast('info', '⏳ ADB capture busy, capturing in a moment...');
+            return;
+        }
+
+        if (res.status === 502) {
+            showToast('warning', `⚠️ MuMu instance (Port ${_currentPreviewPort}) is offline or unreachable`);
+            return;
+        }
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        }
+
+        const blob = await res.blob();
+
+        // Revoke previous Blob URL to prevent client memory leaks
+        if (_currentObjectUrl) {
+            URL.revokeObjectURL(_currentObjectUrl);
+        }
+
+        _currentObjectUrl = URL.createObjectURL(blob);
+        DOM.mumuPreviewImg.src = _currentObjectUrl;
+        DOM.mumuPreviewImg.style.display = 'block';
+        if (DOM.previewEmptyState) DOM.previewEmptyState.style.display = 'none';
+
+        if (DOM.previewLastTime) {
+            DOM.previewLastTime.textContent = `Snapshot: ${new Date().toLocaleTimeString()}`;
+        }
+    } catch (err) {
+        console.error('[PREVIEW FETCH ERROR]', err);
+        showToast('error', `Failed to load preview: ${err.message}`);
+    } finally {
+        if (DOM.previewLoadingSpinner) DOM.previewLoadingSpinner.style.display = 'none';
+    }
+}
+
+function toggleAutoRefresh(enable) {
+    pauseScreenPreviewAutoRefresh();
+    if (enable) {
+        if (DOM.previewAutoRefreshToggle) DOM.previewAutoRefreshToggle.checked = true;
+        _previewRefreshTimer = setInterval(() => {
+            if (DOM.mumuPreviewModal && DOM.mumuPreviewModal.style.display !== 'none' && document.visibilityState === 'visible') {
+                refreshMuMuPreviewFrame();
+            } else {
+                pauseScreenPreviewAutoRefresh();
+            }
+        }, 5000);
+    }
+}
+
+function pauseScreenPreviewAutoRefresh() {
+    if (_previewRefreshTimer) {
+        clearInterval(_previewRefreshTimer);
+        _previewRefreshTimer = null;
+    }
+    if (DOM.previewAutoRefreshToggle) {
+        DOM.previewAutoRefreshToggle.checked = false;
+    }
+}
+
+function closeMuMuPreviewModal() {
+    pauseScreenPreviewAutoRefresh();
+    if (_currentObjectUrl) {
+        URL.revokeObjectURL(_currentObjectUrl);
+        _currentObjectUrl = null;
+    }
+    if (DOM.mumuPreviewImg) {
+        DOM.mumuPreviewImg.style.display = 'none';
+    }
+    if (DOM.previewEmptyState) {
+        DOM.previewEmptyState.style.display = 'flex';
+    }
+    if (DOM.mumuPreviewModal) {
+        DOM.mumuPreviewModal.style.display = 'none';
+    }
 }
 
 // ============================================================
@@ -1409,6 +1742,73 @@ function setupEventHandlers() {
             }, 2500);
         });
     }
+
+    // ============================================================
+    // Genesis v2.6: Mobile & iPad-First Quick Action Hub & Command Palette
+    // ============================================================
+    if (DOM.btnQuickHub) {
+        DOM.btnQuickHub.addEventListener('click', openCommandPalette);
+    }
+    if (DOM.cmdPaletteCloseBtn) {
+        DOM.cmdPaletteCloseBtn.addEventListener('click', closeCommandPalette);
+    }
+    if (DOM.commandPaletteModal) {
+        DOM.commandPaletteModal.addEventListener('click', (e) => {
+            if (e.target === DOM.commandPaletteModal) closeCommandPalette();
+        });
+    }
+    if (DOM.cmdPaletteInput) {
+        DOM.cmdPaletteInput.addEventListener('input', (e) => {
+            renderCommandList(e.target.value);
+        });
+    }
+
+    // Custom Cyberpunk Confirmation Dialog Handlers
+    if (DOM.btnCyberCancel) {
+        DOM.btnCyberCancel.addEventListener('click', closeCyberConfirm);
+    }
+    if (DOM.btnCyberProceed) {
+        DOM.btnCyberProceed.addEventListener('click', confirmCyberAction);
+    }
+    if (DOM.cyberConfirmModal) {
+        DOM.cyberConfirmModal.addEventListener('click', (e) => {
+            if (e.target === DOM.cyberConfirmModal) closeCyberConfirm();
+        });
+    }
+
+    // MuMu Live Screen Sniffer Handlers
+    if (DOM.btnPreviewRefresh) {
+        DOM.btnPreviewRefresh.addEventListener('click', refreshMuMuPreviewFrame);
+    }
+    if (DOM.mumuPreviewCloseBtn) {
+        DOM.mumuPreviewCloseBtn.addEventListener('click', closeMuMuPreviewModal);
+    }
+    if (DOM.mumuPreviewModal) {
+        DOM.mumuPreviewModal.addEventListener('click', (e) => {
+            if (e.target === DOM.mumuPreviewModal) closeMuMuPreviewModal();
+        });
+    }
+    if (DOM.previewAutoRefreshToggle) {
+        DOM.previewAutoRefreshToggle.addEventListener('change', (e) => {
+            toggleAutoRefresh(e.target.checked);
+        });
+    }
+
+    // Global Keyboard Shortcuts (Ctrl+K, Cmd+K, Escape)
+    window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            if (DOM.commandPaletteModal && DOM.commandPaletteModal.style.display === 'flex') {
+                closeCommandPalette();
+            } else {
+                openCommandPalette();
+            }
+        } else if (e.key === 'Escape') {
+            closeCommandPalette();
+            closeMuMuPreviewModal();
+            closeCyberConfirm();
+        }
+    });
 }
 
 // ============================================================
@@ -1436,6 +1836,17 @@ function init() {
     connectWS();
     setInterval(updateUptime, 1000);
     window.addEventListener('resize', drawHistoryChart);
+
+    // Register Progressive Web App (PWA) Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').then((reg) => {
+                console.log('[PWA] Service Worker registered with scope:', reg.scope);
+            }).catch((err) => {
+                console.warn('[PWA] Service Worker registration failed:', err);
+            });
+        });
+    }
 }
 
 document.addEventListener('DOMContentLoaded', init);

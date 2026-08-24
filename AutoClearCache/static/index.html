@@ -2,13 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Genesis Dashboard</title>
-    <meta name="description" content="Genesis — Real-Time System Monitor & Autonomous Auto-Boost Suite">
+    <meta name="description" content="Genesis — Real-Time Autonomous Observability & Unattended Bot Farming Suite">
+    <!-- PWA & iOS Safari Standalone Meta Tags -->
+    <meta name="theme-color" content="#0b0c14">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Genesis">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.5.2">
+    <link rel="stylesheet" href="/static/style.css?v=2.6.0">
 </head>
 <body>
     <!-- Header -->
@@ -528,9 +536,84 @@
         </div>
     </div>
 
+    <!-- Floating Action Hub Button (Mobile & iPad Thumb Zone) -->
+    <button class="btn-quick-hub" id="btnQuickHub" title="Open Quick Command Hub (Ctrl+K)" aria-label="Quick Command Hub">
+        <span class="quick-hub-icon">⚡</span>
+        <span class="quick-hub-text">HUB</span>
+    </button>
+
+    <!-- Command Palette Modal (Ctrl+K / Quick Hub) -->
+    <div class="cmd-palette-overlay" id="commandPaletteModal" style="display:none;">
+        <div class="cmd-palette-box">
+            <div class="cmd-palette-header">
+                <span class="cmd-palette-prompt">⚡ Genesis Command Hub</span>
+                <button class="cmd-palette-close" id="cmdPaletteCloseBtn">✕</button>
+            </div>
+            <div class="cmd-palette-search-wrap">
+                <input type="text" id="cmdPaletteInput" placeholder="Type a command or filter actions..." autocomplete="off">
+            </div>
+            <div class="cmd-palette-list" id="cmdPaletteList">
+                <!-- Injected via JS -->
+            </div>
+            <div class="cmd-palette-footer">
+                <span>Tip: Press <kbd>ESC</kbd> to exit • Use on touch or keyboard</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Cyberpunk Confirmation Dialog (No Native Confirm) -->
+    <div class="cyber-confirm-overlay" id="cyberConfirmModal" style="display:none;">
+        <div class="cyber-confirm-box">
+            <div class="cyber-confirm-header">
+                <span class="cyber-confirm-icon">⚠️</span>
+                <h3 id="cyberConfirmTitle">Confirm Action</h3>
+            </div>
+            <p class="cyber-confirm-msg" id="cyberConfirmMsg">Are you sure you want to proceed?</p>
+            <div class="cyber-confirm-actions">
+                <button class="btn-cyber-cancel" id="btnCyberCancel">Cancel</button>
+                <button class="btn-cyber-proceed" id="btnCyberProceed">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MuMu Live Screen Sniffer Modal -->
+    <div class="mumu-preview-overlay" id="mumuPreviewModal" style="display:none;">
+        <div class="mumu-preview-box">
+            <div class="mumu-preview-header">
+                <div class="mumu-preview-title-wrap">
+                    <span class="preview-live-dot"></span>
+                    <span class="mumu-preview-title" id="previewInstanceLabel">MuMu VM Screen</span>
+                </div>
+                <div class="mumu-preview-ctrls">
+                    <label class="preview-toggle-label" title="Opt-in 5s Auto-Refresh (Auto-pauses on background)">
+                        <input type="checkbox" id="previewAutoRefreshToggle">
+                        <span>Auto (5s)</span>
+                    </label>
+                    <button class="btn-preview-refresh" id="btnPreviewRefresh" title="Fetch snapshot frame">↺ Snapshot</button>
+                    <button class="mumu-preview-close" id="mumuPreviewCloseBtn">✕</button>
+                </div>
+            </div>
+            <div class="mumu-preview-body">
+                <div class="preview-spinner" id="previewLoadingSpinner" style="display:none;">
+                    <div class="spinner-ring"></div>
+                </div>
+                <div class="preview-empty-state" id="previewEmptyState">
+                    <span class="empty-state-icon">🎮</span>
+                    <p>Connecting to ADB Screen Stream...</p>
+                </div>
+                <img class="mumu-preview-img" id="mumuPreviewImg" alt="MuMu VM Live Frame" style="display:none;">
+                <div class="preview-scanlines"></div>
+            </div>
+            <div class="mumu-preview-footer">
+                <span id="previewLastTime">Snapshot: Ready</span>
+                <span class="preview-codec-tag">JPEG ~35KB • WebP Resized</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.5.2"></script>
+    <script src="/static/app.js?v=2.6.0"></script>
 </body>
 </html>

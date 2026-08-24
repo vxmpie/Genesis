@@ -2558,9 +2558,9 @@ body {
 
     /* Toast Container */
     .toast-container {
-        bottom: 12px;
-        right: 12px;
-        left: 12px;
+        bottom: max(16px, env(safe-area-inset-bottom));
+        right: 16px;
+        left: 16px;
     }
 
     .toast {
@@ -2569,3 +2569,541 @@ body {
         font-size: 12px;
     }
 }
+
+/* ============================================================
+   Genesis v2.6: Floating Quick Hub Button (Mobile & iPad Ergonomics)
+   ============================================================ */
+.btn-quick-hub {
+    position: fixed;
+    bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px));
+    right: 24px;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(0, 150, 255, 0.9));
+    color: #0b0c14;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 6px 20px rgba(0, 229, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    padding: 12px 18px;
+    border-radius: 50px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.btn-quick-hub:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 10px 28px rgba(0, 229, 255, 0.6);
+}
+
+.btn-quick-hub:active {
+    transform: scale(0.95);
+}
+
+.quick-hub-icon {
+    font-size: 16px;
+    animation: hubPulse 2s infinite ease-in-out;
+}
+
+.quick-hub-text {
+    letter-spacing: 1px;
+}
+
+@keyframes hubPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.25); filter: drop-shadow(0 0 6px #ffffff); }
+}
+
+/* ============================================================
+   Command Palette Modal (Ctrl+K / Mobile Quick Hub)
+   ============================================================ */
+.cmd-palette-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 10, 18, 0.85);
+    backdrop-filter: blur(14px);
+    z-index: 10000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: max(60px, env(safe-area-inset-top));
+    padding-left: 16px;
+    padding-right: 16px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.cmd-palette-box {
+    background: linear-gradient(145deg, rgba(20, 22, 34, 0.98), rgba(12, 14, 24, 0.99));
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 229, 255, 0.15);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 560px;
+    overflow: hidden;
+    animation: slideDown 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cmd-palette-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.cmd-palette-prompt {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.cmd-palette-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s;
+    min-width: 32px;
+    min-height: 32px;
+}
+
+.cmd-palette-close:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.cmd-palette-search-wrap {
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cmd-palette-search-wrap input {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 15px;
+    color: #FFFFFF;
+    font-family: var(--font-main);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.cmd-palette-search-wrap input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.2);
+}
+
+.cmd-palette-list {
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cmd-palette-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 48px;
+    touch-action: manipulation;
+}
+
+.cmd-palette-item:hover, .cmd-palette-item.active {
+    background: rgba(0, 229, 255, 0.1);
+    border-color: rgba(0, 229, 255, 0.35);
+    transform: translateX(4px);
+}
+
+.cmd-item-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cmd-item-label {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #FFFFFF;
+}
+
+.cmd-item-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.cmd-item-badge {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+}
+
+.cmd-item-badge.safe {
+    background: rgba(0, 255, 136, 0.12);
+    color: #00ff88;
+    border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.cmd-item-badge.disruptive {
+    background: rgba(255, 184, 0, 0.15);
+    color: #ffb800;
+    border: 1px solid rgba(255, 184, 0, 0.4);
+}
+
+.cmd-palette-footer {
+    padding: 10px 18px;
+    background: rgba(0, 0, 0, 0.3);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.cmd-palette-footer kbd {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+/* ============================================================
+   Custom Cyberpunk Confirmation Dialog (No native confirm)
+   ============================================================ */
+.cyber-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 10, 18, 0.88);
+    backdrop-filter: blur(16px);
+    z-index: 11000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.cyber-confirm-box {
+    background: linear-gradient(145deg, rgba(26, 22, 34, 0.98), rgba(18, 14, 24, 0.99));
+    border: 1px solid rgba(255, 184, 0, 0.45);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 30px rgba(255, 184, 0, 0.2);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 440px;
+    padding: 22px;
+    animation: scaleUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cyber-confirm-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.cyber-confirm-icon {
+    font-size: 24px;
+}
+
+.cyber-confirm-header h3 {
+    font-size: 16px;
+    font-weight: 800;
+    color: #ffb800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cyber-confirm-msg {
+    font-size: 13.5px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.cyber-confirm-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.btn-cyber-cancel {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-secondary);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.btn-cyber-cancel:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #FFFFFF;
+}
+
+.btn-cyber-proceed {
+    background: linear-gradient(135deg, rgba(255, 136, 0, 0.9), rgba(255, 85, 0, 0.9));
+    border: 1px solid #ffaa33;
+    color: #FFFFFF;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(255, 136, 0, 0.35);
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.btn-cyber-proceed:hover {
+    box-shadow: 0 6px 20px rgba(255, 136, 0, 0.6);
+    transform: translateY(-1px);
+}
+
+/* ============================================================
+   MuMu Live Screen Sniffer Modal
+   ============================================================ */
+.mumu-preview-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 10, 18, 0.88);
+    backdrop-filter: blur(16px);
+    z-index: 10500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.mumu-preview-box {
+    background: linear-gradient(145deg, rgba(20, 22, 34, 0.98), rgba(12, 14, 24, 0.99));
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(0, 229, 255, 0.2);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 720px;
+    overflow: hidden;
+    animation: scaleUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mumu-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.mumu-preview-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.preview-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 8px #00ff88;
+    animation: pulseGlow 1.5s infinite;
+}
+
+.mumu-preview-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #FFFFFF;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mumu-preview-ctrls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.preview-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.preview-toggle-label input {
+    accent-color: #00e5ff;
+    cursor: pointer;
+}
+
+.btn-preview-refresh {
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid rgba(0, 229, 255, 0.35);
+    color: #00e5ff;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    min-height: 36px;
+    touch-action: manipulation;
+    transition: all 0.2s;
+}
+
+.btn-preview-refresh:hover {
+    background: rgba(0, 229, 255, 0.25);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+}
+
+.mumu-preview-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    min-height: 36px;
+    min-width: 36px;
+}
+
+.mumu-preview-close:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.mumu-preview-body {
+    position: relative;
+    width: 100%;
+    min-height: 280px;
+    max-height: 460px;
+    background: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.mumu-preview-img {
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    object-fit: contain;
+    display: block;
+}
+
+.preview-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 13.5px;
+    font-family: var(--font-mono);
+    text-align: center;
+}
+
+.empty-state-icon {
+    font-size: 36px;
+    animation: hubPulse 2s infinite ease-in-out;
+}
+
+.preview-scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+    background-size: 100% 4px;
+    opacity: 0.35;
+}
+
+.preview-spinner {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.spinner-ring {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(0, 229, 255, 0.2);
+    border-top-color: #00e5ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.mumu-preview-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.preview-codec-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+@keyframes slideDown {
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes scaleUp {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
