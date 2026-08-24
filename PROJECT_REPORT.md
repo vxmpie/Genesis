@@ -74,15 +74,16 @@ graph TD
     K --> N[Salted SHA-256 PIN Security Layer]
 ```
 
-### สรุปความสามารถ 8 โมดูลหลัก:
-1. **Module 1: Hybrid Memory Core & Standby Guard** (ตรวจและเคลียร์ Standby List ทุก 2s + บูสต์ Working Set ขนาน 16 Thread ใน <80ms)
+### สรุปความสามารถ 9 โมดูลหลัก (Core Modules Overview):
+1. **Module 1: Hybrid Memory Core & Standby Guard** (ตรวจและเคลียร์ Standby List ทุก 2s ผ่าน `NtSetSystemInformation` + บูสต์ Working Set ขนาน 16 Thread ใน <80ms พร้อม Error Fallback)
 2. **Module 2: Windows Hardening Drift Detector** (4/4 Core Security: VBS, MPO, Hypervisor, Defender Exclusions)
-3. **Module 3: MuMu Instance Sentinel & ADB Disk Sentinel** (ตรวจจับ Memory Bloat $\ge 4.0\text{GB}$, สั่ง Safe fstrim, และล็อค Memory Shield)
-4. **Module 4: Deep Clean Engine** (ล้าง Temp, Crash Dumps, Roblox Logs, Windows Update Cache ด้วย try-finally)
-5. **Module 5: Real-Time Anti-EcoQoS Hook** (ปิด Power Throttling ให้กับ Emulator ทันที <1s)
+3. **Module 3: MuMu Instance Sentinel & ADB Disk Sentinel** (ตรวจจับ Memory Bloat $\ge 4.0\text{GB}$, สั่ง Safe `fstrim`, และล็อค `IMMUTABLE_PROTECTED_PROCESSES`)
+4. **Module 4: Deep Clean Engine** (ล้าง Temp, Crash Dumps, Roblox Logs, Windows Update Cache ด้วย try-finally wuauserv)
+5. **Module 5: Real-Time Anti-EcoQoS Hook** (ปิด Power Throttling ให้กับ Emulator ทันที <1s บน Intel 12th Gen)
 6. **Module 6: Storage & Growth Tracker** (ติดตามพื้นที่ C: Drive และบันทึก Snapshot ขนาดโฟลเดอร์ VM ทุก 6 ชม.)
 7. **Module 7: Verified Defender Maintenance** (ติดตาม Signature Age, รัน Quick Scan อัตโนมัติเวลา 04:00 น.)
 8. **Module 8: Network Observatory & Autonomous Watchdog** (วัด Wi-Fi Link Quality Index, Ping/Jitter, .NET Self-Healing Watchdog)
+9. **Module 9: Thermal & Hardware Telemetry Engine** (ติดตาม GPU Hotspot Temp, VRAM Usage, CPU Package Power และความสัมพันธ์กับ DPC Latency)
 
 ---
 
@@ -95,7 +96,7 @@ Genesis/
 ├── PROJECT_REPORT.md               # รายงานสรุปโครงการฉบับทางการ (ปลอด Secret 100%)
 ├── main.lua                        # สคริปต์ Roblox In-Game Auto-Reset Character & GUI
 └── AutoClearCache/
-    ├── server.py                   # Backend หลัก (FastAPI + Standby Guard + Memory Shield + 8 Modules)
+    ├── server.py                   # Backend หลัก (FastAPI + Standby Guard + Memory Shield + 9 Modules)
     ├── net_watchdog.ps1            # Autonomous Network Watchdog v2.2 (Pure .NET Ping, 120s Boot Grace, C:\Genesis Log)
     ├── setup_network_hardening.ps1 # สคริปต์ติดตั้ง Wi-Fi Hardening & Watchdog Scheduled Task
     ├── install_startup_task.bat    # 1-Click ติดตั้ง Genesis Auto-Startup บน Task Scheduler แบบ Highest Privileges
@@ -107,7 +108,7 @@ Genesis/
     │   ├── history.json            # บันทึกประวัติเหตุการณ์ย้อนหลัง (Cap 5,000 รายการแบบ Atomic Safe Write)
     │   └── growth.json             # ข้อมูล Snapshot การเติบโตของขนาด VM
     └── static/
-        ├── index.html              # หน้าเว็บ Dashboard (Master Bento HUD, 30-Min Chart, 8 Modules)
+        ├── index.html              # หน้าเว็บ Dashboard (Master Bento HUD, 30-Min Chart, 9 Modules)
         ├── app.js                  # WebSocket Client, Master HUD Renderers, 30-Min Chart Engine
         └── style.css               # Dark Cyberpunk UI, 2-Tier Bento Master HUD Grid, Responsive Breakpoints
 ```
@@ -116,19 +117,39 @@ Genesis/
 
 ## 5. ตารางตรวจสอบความพร้อมของระบบ (System Readiness Matrix)
 
-| รายการตรวจสอบ | สถานะ | รายละเอียดการทำงาน |
+| รายการตรวจสอบ | ผลการประเมิน | รายละเอียดการทำงานจริง |
 | :--- | :---: | :--- |
-| **Zero-Secret Documentation** | ✅ ผ่าน 100% | ปลอด Secret, PIN, Salt และ Webhook URL ในรายงานและ Git ทุกไฟล์ |
-| **Autonomous Standby Guard** | ✅ ผ่าน 100% | ล้างแคชระดับ Kernel ภายใน 2ms ทุก 2 วิเมื่อ Standby > 4GB และ Free < 1.5GB |
-| **Ultra-Fast Clock Boost** | ✅ ผ่าน 100% | บูสต์ตรงเสี้ยววินาที `:00` จบใน <80ms ด้วย 16-Worker ThreadPoolExecutor |
-| **MuMu Hypervisor Memory Shield** | ✅ ผ่าน 100% | ล็อคโปรเซส VM ไม่ให้ถูก Empty Working Set ป้องกันเกม Roblox ค้าง 100% |
-| **Safe VM Disk Maintenance** | ✅ ผ่าน 100% | ใช้คำสั่ง `fstrim -v /data` ปลอดภัย ไม่ลบแคชเกมขณะบอทรันอยู่ |
-| **Master Bento Operations HUD** | ✅ ผ่าน 100% | เลย์เอาต์ 2 ชั้น 7 ช่อง กว้างขวาง สบายตา รองรับ Dual Reset ปุ่มไม่ล้นขอบ |
-| **Strict Memory Bloat Gate** | ✅ ผ่าน 100% | ตรวจจับเฉพาะ Memory Leak จริง ($\ge 4.0\text{ GB}$) ตัด False Alarm จาก CPU Spike |
-| **Storage (C:) Health Watcher** | ✅ ผ่าน 100% | แสดงพื้นที่ว่างและแจ้งเตือนทันทีเมื่อความจุใกล้เต็ม |
-| **Wi-Fi RF Link Quality** | ✅ ผ่าน 100% | ประเมิน Link Quality Index (Excellent/Good/Fair/Poor) แบบเรียลไทม์ |
-| **Elevated Auto-Startup** | ✅ ผ่าน 100% | Task Scheduler `Genesis-Dashboard-Startup` รันด้วยสิทธิ์ Highest Privileges |
-| **Uvicorn Host Bind** | ✅ ผ่าน 100% | Bind `127.0.0.1` พร้อมรับ Ingress ผ่าน Cloudflare Tunnel ปลอดภัยสูงสุด |
-| **Watchdog Unified Logging** | ✅ ผ่าน 100% | บันทึก Log กลางที่ `C:\Genesis\watchdog.log` บน NVMe SSD ท้องถิ่น |
+| **Zero-Secret Documentation** | ✅ ผ่านการตรวจสอบ | ปลอด Secret, PIN, Salt และ Webhook URL ใน Git และ Documentation ทุกไฟล์ |
+| **Autonomous Standby Guard** | ✅ ผ่านการทดสอบ | ล้างแคชระดับ Kernel ภายใน 2ms ทุก 2 วิเมื่อ Standby > 4GB และ Free < 1.5GB พร้อม Log Fallback |
+| **Ultra-Fast Clock Boost** | ✅ ผ่านการทดสอบ | บูสต์ตรงเสี้ยววินาที `:00` จบใน <80ms ด้วย 16-Worker ThreadPoolExecutor |
+| **MuMu Hypervisor Memory Shield** | ✅ ผ่านการทดสอบ | ยังไม่พบเคส MuMu Process Working Set ถูก Purge หลังติดตั้ง `IMMUTABLE_PROTECTED_PROCESSES` |
+| **Safe VM Disk Maintenance** | ✅ ผ่านการทดสอบ | สลับมาใช้ `fstrim -v /data` แทนการล้าง package cache เพื่อถนอม runtime ของเกม |
+| **Master Bento Operations HUD** | ✅ ผ่านการทดสอบ | เลย์เอาต์ 2 ชั้น 7 ช่อง กว้างขวาง สบายตา รองรับ Dual Reset ปุ่มไม่ล้นขอบ |
+| **Strict Memory Bloat Gate** | ✅ ผ่านการทดสอบ | ตรวจจับเฉพาะ Memory Leak จริง ($\ge 4.0\text{ GB}$) ตัด False Alarm จาก CPU Spike |
+| **Storage (C:) Health Watcher** | ✅ ผ่านการทดสอบ | แสดงพื้นที่ว่างและแจ้งเตือนทันทีเมื่อความจุใกล้เต็ม |
+| **Wi-Fi RF Link Quality** | ✅ ผ่านการทดสอบ | ประเมิน Link Quality Index (Excellent/Good/Fair/Poor) แบบเรียลไทม์ |
+| **Elevated Auto-Startup** | ✅ ผ่านการทดสอบ | Task Scheduler `Genesis-Dashboard-Startup` รันด้วยสิทธิ์ Highest Privileges |
+| **Uvicorn Host Bind** | ✅ ผ่านการทดสอบ | Bind `127.0.0.1` พร้อมรับ Ingress ผ่าน Cloudflare Tunnel |
+| **Watchdog Unified Logging** | ✅ ผ่านการทดสอบ | บันทึก Log กลางที่ `C:\Genesis\watchdog.log` บน NVMe SSD ท้องถิ่น |
 
-ระบบทั้งหมดพร้อมสำหรับการรันแบบ **24/7 Unattended Autonomous Operation** อย่างสมบูรณ์แบบครับ 🚀
+---
+
+## 6. ปัญหาที่อยู่ระหว่างการเฝ้าระวังและการสืบสวน (Known Issues & Open Investigations)
+
+> [!WARNING]
+> **ประเด็นด้านความเสถียรของฮาร์ดแวร์และระบบเครือข่ายที่ต้องติดตามอย่างใกล้ชิด:**
+
+1. **การสืบสวนข้อผิดพลาด BugCheck 0x133 (`DPC_WATCHDOG_VIOLATION`):**
+   - **สถานะ:** อยู่ระหว่างการวิเคราะห์สาเหตุเชิงลึก (Active Investigation) บนแล็ปท็อป Lenovo IdeaPad Gaming 3
+   - **แนวทางการวิเคราะห์:** DPC Timeout มักสัมพันธ์กับจังหวะที่ไดรเวอร์ฮาร์ดแวร์ (เช่น Realtek Wi-Fi RTWlan64, NVIDIA NVLDDMKM) เกิดอาการ Stall จาก Thermal Throttling หรือ PCIe Power State Transition
+   - **มาตรการปัจจุบัน:** ตั้งค่า HWiNFO64 Sensor Logging คู่ขนานกับ Windows Minidump Analysis เพื่อบันทึกพฤติกรรมความร้อนและแรงดันไฟก่อนเกิด Hard Lockup
+2. **ความเสี่ยงและการรับมือ Undocumented NT Native API:**
+   - การเรียกใช้ `NtSetSystemInformation(0x50, MemoryPurgeStandbyList)` เป็น API ที่ไม่มี Official Documentation จาก Microsoft
+   - **การรับมือ:** วางระบบ Exception Handling ครอบคลุมรอบด้าน หาก Windows Build ในอนาคตบล็อก Privilege ระบบจะบันทึก Warning Log และทำการ Degrade การทำงานไปใช้ Working Set Trim ตามปกติโดยไม่ทำให้โปรแกรม Crash
+3. **ระดับความปลอดภัยของ Cloudflare Quick Tunnel:**
+   - ปัจจุบันใช้ Quick Tunnel (`trycloudflare.com`) ซึ่งมีเกราะป้องกันเดียวคือ Salted SHA-256 PIN Auth ที่ฝั่ง Application
+   - **Roadmap การยกระดับ:** วางแผนปรับใช้ Cloudflare Tunnel แบบ Named Tunnel ร่วมกับ Cloudflare Access (Zero Trust Email OTP / IP Whitelist) ในเฟสถัดไปเพื่อเพิ่มความปลอดภัยสองชั้น (2FA)
+
+---
+
+ระบบทั้งหมดพร้อมสำหรับการรันแบบ **24/7 Unattended Autonomous Operation** ภายใต้การเฝ้าระวังอย่างเป็นระบบครับ 🚀
