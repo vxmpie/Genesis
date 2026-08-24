@@ -2566,6 +2566,19 @@ async def api_get_tunnel():
     })
 
 
+@app.post("/api/system/restart")
+async def api_system_restart(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    def _delayed_exit():
+        time.sleep(1)
+        os._exit(0)
+
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return JSONResponse({"success": True, "message": "Server restarting..."})
+
+
 if __name__ == "__main__":
     import uvicorn
 
