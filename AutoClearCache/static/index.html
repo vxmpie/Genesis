@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.4.5">
+    <link rel="stylesheet" href="/static/style.css?v=2.4.6">
 </head>
 <body>
     <!-- Header -->
@@ -314,10 +314,20 @@
         <!-- RAM History Chart -->
         <section class="card chart-card">
             <div class="card-header">
-                <h2>📊 RAM & CPU History</h2>
-                <span class="chart-time" id="chartTimeLabel">Last 30 minutes</span>
+                <div class="chart-header-left">
+                    <h2>📊 RAM & CPU History</h2>
+                    <span class="chart-time" id="chartTimeLabel">Last 30 mins</span>
+                </div>
+                <div class="chart-zoom-controls">
+                    <button class="chart-zoom-btn" data-zoom="5" title="View last 5 minutes">5m</button>
+                    <button class="chart-zoom-btn" data-zoom="15" title="View last 15 minutes">15m</button>
+                    <button class="chart-zoom-btn active" data-zoom="30" title="View full 30 minutes">30m</button>
+                </div>
             </div>
-            <canvas id="historyChart" width="800" height="200"></canvas>
+            <div class="chart-container-wrap">
+                <canvas id="historyChart" width="800" height="210"></canvas>
+                <div class="chart-tooltip" id="chartTooltip" style="display: none;"></div>
+            </div>
         </section>
 
         <!-- Event Log -->
@@ -465,6 +475,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.4.5"></script>
+    <script src="/static/app.js?v=2.4.6"></script>
 </body>
 </html>

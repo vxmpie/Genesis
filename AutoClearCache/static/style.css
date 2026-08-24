@@ -1227,10 +1227,61 @@ body {
    History Chart
    ============================================================ */
 
+.chart-header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.chart-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 2px 4px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chart-zoom-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+}
+
+.chart-zoom-btn:hover {
+    color: var(--cyan);
+    background: rgba(0, 229, 255, 0.08);
+}
+
+.chart-zoom-btn.active {
+    background: rgba(0, 229, 255, 0.18);
+    border-color: rgba(0, 229, 255, 0.5);
+    color: #ffffff;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.25);
+}
+
+.chart-container-wrap {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    cursor: crosshair;
+}
+
 .chart-card canvas {
     width: 100%;
-    height: 200px;
-    border-radius: var(--radius-sm);
+    height: 210px;
+    display: block;
 }
 
 .chart-time {
@@ -1238,6 +1289,44 @@ body {
     color: var(--text-muted);
     font-family: var(--font-mono);
 }
+
+.chart-tooltip {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    pointer-events: none;
+    background: rgba(13, 13, 20, 0.94);
+    border: 1px solid rgba(0, 229, 255, 0.35);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 10px rgba(0, 229, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    color: #e2e8f0;
+    backdrop-filter: blur(8px);
+    z-index: 10;
+    transform: translate(-50%, 0);
+    white-space: nowrap;
+    transition: opacity 0.1s ease;
+}
+
+.chart-tooltip-time {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.chart-tooltip-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.chart-tooltip-cpu { color: #ff5555; font-weight: 700; }
+.chart-tooltip-ram { color: #60a5fa; font-weight: 700; }
 
 /* ============================================================
    Event Log

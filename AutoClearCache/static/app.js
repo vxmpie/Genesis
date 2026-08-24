@@ -13,6 +13,10 @@ const STATE = {
     config: null,
     cpuHistory: [],
     ramHistory: [],
+    chartTimestamps: [],
+    chartZoom: 30, // 5, 15, or 30 mins
+    chartHoverIndex: -1,
+    chartHoverX: -1,
     startTime: Date.now(),
     historyLength: 60,
     deepCleanPreview: [],
@@ -127,6 +131,10 @@ const DOM = {
     sumRecoveries: $('#sumRecoveries'),
     sumLastClean: $('#sumLastClean'),
     sumHardening: $('#sumHardening'),
+    // History Chart Controls & Tooltip
+    chartTooltip: $('#chartTooltip'),
+    chartTimeLabel: $('#chartTimeLabel'),
+    chartZoomBtns: $$('.chart-zoom-btn'),
 };
 
 // ============================================================
@@ -198,6 +206,8 @@ function handleMessage(data) {
                 if (data.chart_history.ram && data.chart_history.ram.length > 0) {
                     STATE.ramHistory = [...data.chart_history.ram];
                 }
+                const now = Date.now();
+                STATE.chartTimestamps = STATE.cpuHistory.map((_, i) => now - (STATE.cpuHistory.length - 1 - i) * 30000);
                 drawHistoryChart();
             }
             // If defender data was empty on init, request fresh status
@@ -449,8 +459,10 @@ function pushChartSample(cpuTotal, ramPct) {
     if (now - lastChartSampleTime >= 30000 || STATE.cpuHistory.length === 0) {
         STATE.cpuHistory.push(cpuTotal);
         STATE.ramHistory.push(ramPct);
+        STATE.chartTimestamps.push(now);
         if (STATE.cpuHistory.length > 60) STATE.cpuHistory.shift();
         if (STATE.ramHistory.length > 60) STATE.ramHistory.shift();
+        if (STATE.chartTimestamps.length > 60) STATE.chartTimestamps.shift();
         lastChartSampleTime = now;
         drawHistoryChart();
     }
@@ -497,7 +509,7 @@ function updateCoreBars(cpu) {
 }
 
 // ============================================================
-// History Chart (Canvas)
+// History Chart (Canvas with Zoom & Interactive Inspection)
 // ============================================================
 function drawHistoryChart() {
     const canvas = DOM.historyChart;
@@ -513,64 +525,119 @@ function drawHistoryChart() {
 
     const w = rect.width;
     const h = rect.height;
-    const padTop = 10;
-    const padBot = 20;
-    const plotH = h - padTop - padBot;
+    const padTop = 14;
+    const padBot = 28;
+    const padLeft = 32;
+    const padRight = 14;
+    const plotW = Math.max(w - padLeft - padRight, 10);
+    const plotH = Math.max(h - padTop - padBot, 10);
 
     ctx.fillStyle = '#0D0D14';
     ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = '#1A1A24';
+    // Determine data slice based on zoom
+    let pointsCount = 60;
+    if (STATE.chartZoom === 5) pointsCount = 10;
+    else if (STATE.chartZoom === 15) pointsCount = 30;
+    else pointsCount = 60;
+
+    const fullLen = STATE.cpuHistory.length;
+    const startIndex = Math.max(0, fullLen - pointsCount);
+    const cpuData = STATE.cpuHistory.slice(startIndex);
+    const ramData = STATE.ramHistory.slice(startIndex);
+    let timeData = (STATE.chartTimestamps || []).slice(startIndex);
+
+    const now = Date.now();
+    while (timeData.length < cpuData.length) {
+        timeData.unshift(now - (cpuData.length - timeData.length) * 30000);
+    }
+
+    // 1. Horizontal Percentage Grid Lines
+    ctx.strokeStyle = '#181824';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
         const y = padTop + (plotH / 4) * i;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotW, y);
         ctx.stroke();
 
         ctx.fillStyle = '#55556A';
         ctx.font = '10px "JetBrains Mono", monospace';
-        ctx.fillText(`${100 - i * 25}%`, 4, y - 3);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${100 - i * 25}%`, padLeft - 6, y + 3);
     }
 
+    // 2. Vertical Time Grid Lines & Round Clock Timestamps on X-Axis
+    const numTicks = STATE.chartZoom === 5 ? 5 : 4;
+    for (let t = 0; t < numTicks; t++) {
+        const ratio = t / (numTicks - 1);
+        const x = padLeft + plotW * ratio;
+        const sampleIdx = Math.min(Math.round(ratio * (cpuData.length - 1)), Math.max(cpuData.length - 1, 0));
+        const ts = timeData[sampleIdx] || (now - (1 - ratio) * STATE.chartZoom * 60000);
+        const dateObj = new Date(ts);
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const mins = String(dateObj.getMinutes()).padStart(2, '0');
+        const secs = String(dateObj.getSeconds()).padStart(2, '0');
+        const timeStr = STATE.chartZoom === 5 ? `${hours}:${mins}:${secs}` : `${hours}:${mins}`;
+
+        // Vertical dotted grid line
+        ctx.beginPath();
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = '#1A1A28';
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Time label text
+        ctx.fillStyle = '#66667C';
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = (t === 0) ? 'left' : (t === numTicks - 1) ? 'right' : 'center';
+        ctx.fillText(timeStr, x, padTop + plotH + 16);
+    }
+
+    // 3. Line & Gradient Renderer
     function drawLine(data, color, glowColor) {
         if (data.length < 2) return;
-        const step = w / (STATE.historyLength - 1);
+        const step = plotW / Math.max(data.length - 1, 1);
 
+        // Glow pass
         ctx.beginPath();
         ctx.strokeStyle = glowColor;
-        ctx.lineWidth = 6;
+        ctx.lineWidth = 5;
         ctx.lineJoin = 'round';
         for (let i = 0; i < data.length; i++) {
-            const x = i * step;
-            const y = padTop + plotH * (1 - data[i] / 100);
+            const x = padLeft + i * step;
+            const y = padTop + plotH * (1 - Math.min(Math.max(data[i], 0), 100) / 100);
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
 
+        // Main line
         ctx.beginPath();
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
         for (let i = 0; i < data.length; i++) {
-            const x = i * step;
-            const y = padTop + plotH * (1 - data[i] / 100);
+            const x = padLeft + i * step;
+            const y = padTop + plotH * (1 - Math.min(Math.max(data[i], 0), 100) / 100);
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
 
+        // Gradient under fill
         ctx.beginPath();
         for (let i = 0; i < data.length; i++) {
-            const x = i * step;
-            const y = padTop + plotH * (1 - data[i] / 100);
+            const x = padLeft + i * step;
+            const y = padTop + plotH * (1 - Math.min(Math.max(data[i], 0), 100) / 100);
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
-        ctx.lineTo((data.length - 1) * step, padTop + plotH);
-        ctx.lineTo(0, padTop + plotH);
+        ctx.lineTo(padLeft + (data.length - 1) * step, padTop + plotH);
+        ctx.lineTo(padLeft, padTop + plotH);
         ctx.closePath();
 
         const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
@@ -580,15 +647,77 @@ function drawHistoryChart() {
         ctx.fill();
     }
 
-    drawLine(STATE.cpuHistory, '#FF3C3C', 'rgba(255,60,60,0.12)');
-    drawLine(STATE.ramHistory, '#60A5FA', 'rgba(96,165,250,0.12)');
+    drawLine(ramData, '#60A5FA', 'rgba(96,165,250,0.12)');
+    drawLine(cpuData, '#FF3C3C', 'rgba(255,60,60,0.14)');
 
-    const legendY = h - 6;
+    // 4. Interactive Crosshair & Highlight Points
+    if (STATE.chartHoverIndex >= 0 && STATE.chartHoverIndex < cpuData.length) {
+        const step = plotW / Math.max(cpuData.length - 1, 1);
+        const hoverX = padLeft + STATE.chartHoverIndex * step;
+        const cpuVal = cpuData[STATE.chartHoverIndex] || 0;
+        const ramVal = ramData[STATE.chartHoverIndex] || 0;
+        const cpuY = padTop + plotH * (1 - Math.min(Math.max(cpuVal, 0), 100) / 100);
+        const ramY = padTop + plotH * (1 - Math.min(Math.max(ramVal, 0), 100) / 100);
+
+        // Vertical glowing crosshair line
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.moveTo(hoverX, padTop);
+        ctx.lineTo(hoverX, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // CPU glowing dot
+        ctx.beginPath();
+        ctx.arc(hoverX, cpuY, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#FF3C3C';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        // RAM glowing dot
+        ctx.beginPath();
+        ctx.arc(hoverX, ramY, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#60A5FA';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        // Update floating Tooltip
+        if (DOM.chartTooltip) {
+            const pointTs = timeData[STATE.chartHoverIndex] || now;
+            const dt = new Date(pointTs);
+            const timeFormatted = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}:${String(dt.getSeconds()).padStart(2, '0')}`;
+            
+            DOM.chartTooltip.innerHTML = `
+                <span class="chart-tooltip-time">🕒 ${timeFormatted}</span>
+                <div class="chart-tooltip-row"><span class="chart-tooltip-cpu">● CPU</span><span>${cpuVal.toFixed(1)}%</span></div>
+                <div class="chart-tooltip-row"><span class="chart-tooltip-ram">● RAM</span><span>${ramVal.toFixed(1)}%</span></div>
+            `;
+            DOM.chartTooltip.style.display = 'block';
+            
+            const tooltipW = DOM.chartTooltip.offsetWidth || 110;
+            let tipX = hoverX;
+            if (tipX - tooltipW / 2 < 10) tipX = tooltipW / 2 + 10;
+            if (tipX + tooltipW / 2 > w - 10) tipX = w - tooltipW / 2 - 10;
+            DOM.chartTooltip.style.left = `${tipX}px`;
+        }
+    } else {
+        if (DOM.chartTooltip) DOM.chartTooltip.style.display = 'none';
+    }
+
+    // 5. Chart Legend
+    const legendY = padTop + 8;
     ctx.font = '11px "Inter", sans-serif';
-    ctx.fillStyle = '#FF3C3C';
-    ctx.fillText('● CPU', w - 130, legendY);
+    ctx.textAlign = 'right';
     ctx.fillStyle = '#60A5FA';
-    ctx.fillText('● RAM', w - 60, legendY);
+    ctx.fillText('● RAM', padLeft + plotW - 10, legendY);
+    ctx.fillStyle = '#FF3C3C';
+    ctx.fillText('● CPU', padLeft + plotW - 65, legendY);
 }
 
 // ============================================================
@@ -1159,6 +1288,69 @@ function setupEventHandlers() {
             const isHidden = DOM.watchdogLogPanel.style.display === 'none';
             DOM.watchdogLogPanel.style.display = isHidden ? 'block' : 'none';
             DOM.toggleWatchdogLogs.textContent = isHidden ? 'Hide Logs ▴' : 'View Logs ▾';
+        });
+    }
+
+    // History Chart Zoom Range Controls
+    const zoomBtns = document.querySelectorAll('.chart-zoom-btn');
+    zoomBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            zoomBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const zoom = parseInt(btn.dataset.zoom) || 30;
+            STATE.chartZoom = zoom;
+            if (DOM.chartTimeLabel) {
+                DOM.chartTimeLabel.textContent = `Last ${zoom} mins`;
+            }
+            STATE.chartHoverIndex = -1;
+            drawHistoryChart();
+        });
+    });
+
+    // History Chart Interactive Scrubbing / Inspection Tooltip
+    if (DOM.historyChart) {
+        const handleChartHover = (clientX) => {
+            const rect = DOM.historyChart.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const padLeft = 32;
+            const padRight = 14;
+            const plotW = Math.max(rect.width - padLeft - padRight, 10);
+
+            let pointsCount = 60;
+            if (STATE.chartZoom === 5) pointsCount = 10;
+            else if (STATE.chartZoom === 15) pointsCount = 30;
+            else pointsCount = 60;
+
+            const fullLen = STATE.cpuHistory.length;
+            const startIndex = Math.max(0, fullLen - pointsCount);
+            const currentSliceLen = fullLen - startIndex;
+            if (currentSliceLen <= 1) return;
+
+            const relativeX = Math.max(0, Math.min(x - padLeft, plotW));
+            const step = plotW / Math.max(currentSliceLen - 1, 1);
+            const hoverIndex = Math.round(relativeX / step);
+
+            STATE.chartHoverIndex = Math.max(0, Math.min(hoverIndex, currentSliceLen - 1));
+            drawHistoryChart();
+        };
+
+        DOM.historyChart.addEventListener('mousemove', (e) => handleChartHover(e.clientX));
+        DOM.historyChart.addEventListener('mouseleave', () => {
+            STATE.chartHoverIndex = -1;
+            drawHistoryChart();
+        });
+
+        DOM.historyChart.addEventListener('touchmove', (e) => {
+            if (e.touches && e.touches[0]) {
+                handleChartHover(e.touches[0].clientX);
+            }
+        }, { passive: true });
+
+        DOM.historyChart.addEventListener('touchend', () => {
+            setTimeout(() => {
+                STATE.chartHoverIndex = -1;
+                drawHistoryChart();
+            }, 2500);
         });
     }
 }
