@@ -388,14 +388,27 @@ def get_next_scheduled_boost_time(interval_min: int) -> str:
     return next_dt.strftime("%H:%M:%S")
 
 
-def reset_all_boost_counters() -> dict:
-    """Reset both session boosts and total lifetime boosts to 0, purging past boost history."""
+def reset_session_boosts() -> dict:
+    """Reset only session boosts counter to 0 (lifetime total preserved)."""
+    global _boost_counter_reset_time
+    _boost_counter_reset_time = time.time()
+    add_event("system", "Session boost counter reset to 0 (Lifetime total preserved)")
+    return get_session_summary()
+
+
+def reset_total_boosts() -> dict:
+    """Purge lifetime boost records and reset both session and total counters to 0."""
     global _boost_counter_reset_time, event_history
     _boost_counter_reset_time = time.time()
     event_history = [e for e in event_history if e.get("type") != "boost"]
     _save_history(event_history)
-    add_event("system", "Boost counters reset: Session & Lifetime Total set to 0")
+    add_event("system", "Lifetime total boost history purged (All counters 0)")
     return get_session_summary()
+
+
+def reset_all_boost_counters() -> dict:
+    """Alias for reset_total_boosts."""
+    return reset_total_boosts()
 
 
 def get_session_summary() -> dict:
@@ -2349,10 +2362,15 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         obs = get_network_observatory()
         await ws.send_json({"type": "observatory_update", "data": obs})
 
-    elif cmd == "reset_boost_counter":
-        summary = reset_all_boost_counters()
+    elif cmd in ("reset_boost_counter", "reset_session_boosts"):
+        summary = reset_session_boosts()
         await broadcast_event({"type": "session_summary", "data": summary})
-        await ws.send_json({"type": "boost_counter_reset", "data": summary})
+        await ws.send_json({"type": "session_boost_reset", "data": summary})
+
+    elif cmd == "reset_total_boosts":
+        summary = reset_total_boosts()
+        await broadcast_event({"type": "session_summary", "data": summary})
+        await ws.send_json({"type": "total_boost_reset", "data": summary})
 
 
 # ---------------------------------------------------------------------------
@@ -2473,11 +2491,33 @@ async def api_summary():
     return JSONResponse(get_session_summary())
 
 
+@app.post("/api/summary/reset-session-boosts")
+async def api_reset_session_boosts(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    summary = reset_session_boosts()
+    await broadcast_event({"type": "session_summary", "data": summary})
+    return JSONResponse({"success": True, "summary": summary})
+
+
+@app.post("/api/summary/reset-total-boosts")
+async def api_reset_total_boosts(request: Request):
+    if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    summary = reset_total_boosts()
+    await broadcast_event({"type": "session_summary", "data": summary})
+    return JSONResponse({"success": True, "summary": summary})
+
+
 @app.post("/api/summary/reset-boosts")
 async def api_reset_boosts(request: Request):
     if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    summary = reset_all_boost_counters()
+    target = request.query_params.get("target", "session")
+    if target == "total":
+        summary = reset_total_boosts()
+    else:
+        summary = reset_session_boosts()
     await broadcast_event({"type": "session_summary", "data": summary})
     return JSONResponse({"success": True, "summary": summary})
 

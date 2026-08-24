@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.4.2">
+    <link rel="stylesheet" href="/static/style.css?v=2.4.3">
 </head>
 <body>
     <!-- Header -->
@@ -44,11 +44,14 @@
                 <div class="summary-item summary-item-boosts">
                     <div class="summary-label-row">
                         <span class="summary-label">⚡ Session Boosts</span>
-                        <button class="btn-reset-mini" id="btnResetBoosts" title="Reset Session Boost Counter (Clear to 0)" aria-label="Reset Boost Counter">↺</button>
+                        <button class="btn-reset-mini" id="btnResetBoosts" title="Reset Session Boosts Counter only (Preserve Total)" aria-label="Reset Session Boost Counter">↺</button>
                     </div>
                     <div class="summary-val-wrap">
                         <span class="summary-val" id="sumBoosts">0</span>
-                        <span class="summary-subval" id="sumTotalBoosts" title="Lifetime Total Boosts across all sessions">(Total: 0)</span>
+                        <div class="summary-subval-group">
+                            <span class="summary-subval" id="sumTotalBoosts" title="Lifetime Total Boosts across all sessions">(Total: 0)</span>
+                            <button class="btn-reset-total-mini" id="btnResetTotalBoosts" title="Purge & Reset Lifetime Total Boosts History to 0" aria-label="Reset Lifetime Total Boosts">↺ Total</button>
+                        </div>
                     </div>
                 </div>
                 <div class="summary-item">
@@ -462,6 +465,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.4.2"></script>
+    <script src="/static/app.js?v=2.4.3"></script>
 </body>
 </html>

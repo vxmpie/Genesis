@@ -123,6 +123,7 @@ const DOM = {
     sumBoosts: $('#sumBoosts'),
     sumTotalBoosts: $('#sumTotalBoosts'),
     btnResetBoosts: $('#btnResetBoosts'),
+    btnResetTotalBoosts: $('#btnResetTotalBoosts'),
     sumRecoveries: $('#sumRecoveries'),
     sumLastClean: $('#sumLastClean'),
     sumHardening: $('#sumHardening'),
@@ -282,11 +283,16 @@ function handleMessage(data) {
             updateNetworkObservatory(data.data);
             break;
         case 'session_summary':
+            updateSessionSummary(data.data);
+            break;
+        case 'session_boost_reset':
         case 'boost_counter_reset':
             updateSessionSummary(data.data);
-            if (data.type === 'boost_counter_reset') {
-                showToast('system', '↺ Boost Counters Reset to 0 (Session & Total Cleared)');
-            }
+            showToast('system', '↺ Session Boosts Reset to 0 (Total preserved)');
+            break;
+        case 'total_boost_reset':
+            updateSessionSummary(data.data);
+            showToast('system', '🗑️ Lifetime Total Boosts Reset to 0');
             break;
     }
 }
@@ -1005,20 +1011,37 @@ function setupEventHandlers() {
         });
     }
 
-    // Reset Session Boosts Counter
+    // Reset Session Boosts Counter (Preserve Total)
     if (DOM.btnResetBoosts) {
         DOM.btnResetBoosts.addEventListener('click', () => {
             if (isAuthRequired()) {
                 requestPinAuth(() => {
-                    sendCommand('reset_boost_counter');
+                    sendCommand('reset_session_boosts');
                     DOM.btnResetBoosts.classList.add('rotating');
                     setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
                 });
                 return;
             }
-            sendCommand('reset_boost_counter');
+            sendCommand('reset_session_boosts');
             DOM.btnResetBoosts.classList.add('rotating');
             setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
+        });
+    }
+
+    // Reset Lifetime Total Boosts History
+    if (DOM.btnResetTotalBoosts) {
+        DOM.btnResetTotalBoosts.addEventListener('click', () => {
+            if (isAuthRequired()) {
+                requestPinAuth(() => {
+                    sendCommand('reset_total_boosts');
+                    DOM.btnResetTotalBoosts.textContent = '...';
+                    setTimeout(() => { DOM.btnResetTotalBoosts.textContent = '↺ Total'; }, 600);
+                });
+                return;
+            }
+            sendCommand('reset_total_boosts');
+            DOM.btnResetTotalBoosts.textContent = '...';
+            setTimeout(() => { DOM.btnResetTotalBoosts.textContent = '↺ Total'; }, 600);
         });
     }
 
