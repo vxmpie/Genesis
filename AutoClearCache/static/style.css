@@ -217,34 +217,38 @@ body {
    ============================================================ */
 
 .summary-card {
-    background: linear-gradient(135deg, rgba(22, 22, 34, 0.95), rgba(15, 15, 24, 0.98));
-    border: 1px solid rgba(0, 210, 255, 0.18);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    background: linear-gradient(135deg, rgba(20, 20, 32, 0.95), rgba(14, 14, 22, 0.98));
+    border: 1px solid rgba(0, 210, 255, 0.16);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     border-radius: var(--radius);
-    padding: 14px 18px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
 }
 
 .summary-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 12px;
-    align-items: center;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    align-items: stretch;
 }
 
 .summary-item {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.02);
+    justify-content: space-between;
+    gap: 6px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.025);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 8px;
-    transition: var(--transition);
+    transition: all 0.2s ease;
+    min-height: 58px;
 }
 
 .summary-item:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(0, 210, 255, 0.25);
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(0, 210, 255, 0.3);
+    box-shadow: 0 2px 10px rgba(0, 210, 255, 0.08);
 }
 
 .summary-label-row {
@@ -976,6 +980,7 @@ body {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .mumu-table tr:last-child td {
@@ -1832,15 +1837,20 @@ body {
 }
 
 .badge-bloat {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
     background: rgba(255, 184, 0, 0.15);
     color: #ffb800;
     border: 1px solid rgba(255, 184, 0, 0.4);
     font-size: 9px;
     font-weight: 700;
-    padding: 1px 4px;
-    border-radius: 3px;
-    margin-left: 4px;
-    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .obs-main-val {

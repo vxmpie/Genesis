@@ -323,6 +323,15 @@ function handleMessage(data) {
 // ============================================================
 // Auth State Management
 // ============================================================
+function requireAuth(callback) {
+    if (STATE.authRequired && !STATE.authenticated) {
+        showAuthModal(true);
+        STATE.pendingAuthAction = callback;
+        return true;
+    }
+    return false;
+}
+
 function setAuthState(isAuthed) {
     STATE.authenticated = isAuthed;
     if (DOM.authBadge) {
@@ -370,6 +379,11 @@ async function submitPin() {
             localStorage.setItem('genesis_auth_token', data.token);
             sendCommand('auth', { token: data.token });
             setAuthState(true);
+            if (STATE.pendingAuthAction) {
+                const action = STATE.pendingAuthAction;
+                STATE.pendingAuthAction = null;
+                setTimeout(action, 150);
+            }
         } else {
             DOM.authErrorMsg.textContent = data.error || 'Invalid PIN code';
             DOM.pinInput.value = '';
@@ -1196,15 +1210,9 @@ function setupEventHandlers() {
 
     // Reset Session Boosts Counter (Preserve Total)
     if (DOM.btnResetBoosts) {
-        DOM.btnResetBoosts.addEventListener('click', () => {
-            if (isAuthRequired()) {
-                requestPinAuth(() => {
-                    sendCommand('reset_session_boosts');
-                    DOM.btnResetBoosts.classList.add('rotating');
-                    setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
-                });
-                return;
-            }
+        DOM.btnResetBoosts.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (requireAuth(() => sendCommand('reset_session_boosts'))) return;
             sendCommand('reset_session_boosts');
             DOM.btnResetBoosts.classList.add('rotating');
             setTimeout(() => DOM.btnResetBoosts.classList.remove('rotating'), 600);
@@ -1213,15 +1221,9 @@ function setupEventHandlers() {
 
     // Reset Lifetime Total Boosts History
     if (DOM.btnResetTotalBoosts) {
-        DOM.btnResetTotalBoosts.addEventListener('click', () => {
-            if (isAuthRequired()) {
-                requestPinAuth(() => {
-                    sendCommand('reset_total_boosts');
-                    DOM.btnResetTotalBoosts.textContent = '...';
-                    setTimeout(() => { DOM.btnResetTotalBoosts.textContent = '↺ Total'; }, 600);
-                });
-                return;
-            }
+        DOM.btnResetTotalBoosts.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (requireAuth(() => sendCommand('reset_total_boosts'))) return;
             sendCommand('reset_total_boosts');
             DOM.btnResetTotalBoosts.textContent = '...';
             setTimeout(() => { DOM.btnResetTotalBoosts.textContent = '↺ Total'; }, 600);
