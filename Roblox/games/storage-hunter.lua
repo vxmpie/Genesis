@@ -10,13 +10,14 @@ local SETTINGS_FILE = SETTINGS_FOLDER .. "/settings.json"
 
 local State = {
     IsActive = false,
-    IntervalSeconds = 60,
-    IntervalValue = 1,
+    Mode = "Anti-Stuck",
+    IntervalSeconds = 15,
+    IntervalValue = 15,
     TimeRemaining = 0,
-    Unit = "Minutes",
+    Unit = "Seconds",
 }
 
-local timerThread = nil
+local trackerThread = nil
 
 local function ensureFolder()
     pcall(function()
@@ -32,6 +33,7 @@ local function saveSettings()
         local data = HttpService:JSONEncode({
             IntervalValue = State.IntervalValue,
             Unit = State.Unit,
+            Mode = State.Mode,
             IsActive = State.IsActive,
         })
         writefile(SETTINGS_FILE, data)
@@ -48,10 +50,13 @@ local function loadSettings()
         end)
         if success and decoded then
             if decoded.IntervalValue then
-                State.IntervalValue = tonumber(decoded.IntervalValue) or 1
+                State.IntervalValue = tonumber(decoded.IntervalValue) or 15
             end
             if decoded.Unit == "Minutes" or decoded.Unit == "Seconds" then
                 State.Unit = decoded.Unit
+            end
+            if decoded.Mode == "Anti-Stuck" or decoded.Mode == "Timer" then
+                State.Mode = decoded.Mode
             end
             if decoded.IsActive == true then
                 State.IsActive = true
@@ -92,48 +97,111 @@ local function resetCharacter()
     end
 end
 
-local function startTimer(countdownLabel, statusLabel, toggleBtn, toggleCircle)
-    if timerThread then
-        pcall(function() task.cancel(timerThread) end)
+local function startTracker(countdownLabel, statusLabel)
+    if trackerThread then
+        pcall(function() task.cancel(trackerThread) end)
     end
 
-    State.TimeRemaining = State.IntervalSeconds
+    trackerThread = task.spawn(function()
+        local lastPos = nil
+        local idleSeconds = 0
+        local timerCountdown = State.IntervalSeconds
 
-    timerThread = task.spawn(function()
         while State.IsActive do
-            if State.TimeRemaining <= 0 then
+            local character = LocalPlayer.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+            if not hrp or not humanoid or humanoid.Health <= 0 then
                 if statusLabel then
-                    statusLabel.Text = "RESETTING..."
+                    statusLabel.Text = "RESPAWNING..."
                     statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
                 end
-                resetCharacter()
-                task.wait(3)
-                State.TimeRemaining = State.IntervalSeconds
-                if statusLabel then
-                    statusLabel.Text = "ACTIVE"
-                    statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+                lastPos = nil
+                idleSeconds = 0
+                task.wait(1)
+            else
+                if State.Mode == "Anti-Stuck" then
+                    local currentPos = hrp.Position
+
+                    if not lastPos then
+                        lastPos = currentPos
+                        idleSeconds = 0
+                    end
+
+                    local distance = (currentPos - lastPos).Magnitude
+
+                    if distance > 3 then
+                        lastPos = currentPos
+                        idleSeconds = 0
+                        if statusLabel then
+                            statusLabel.Text = "FARMING (MOVING)"
+                            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+                        end
+                        if countdownLabel then
+                            countdownLabel.Text = "00:00"
+                        end
+                    else
+                        idleSeconds = idleSeconds + 1
+                        local remaining = math.max(0, State.IntervalSeconds - idleSeconds)
+
+                        if countdownLabel then
+                            local mins = math.floor(remaining / 60)
+                            local secs = remaining % 60
+                            countdownLabel.Text = string.format("%02d:%02d", mins, secs)
+                        end
+
+                        if remaining <= 0 then
+                            if statusLabel then
+                                statusLabel.Text = "STUCK! RESETTING..."
+                                statusLabel.TextColor3 = Color3.fromRGB(255, 70, 70)
+                            end
+                            resetCharacter()
+                            task.wait(3)
+                            lastPos = nil
+                            idleSeconds = 0
+                        else
+                            if statusLabel then
+                                statusLabel.Text = string.format("IDLE (%ds / %ds)", idleSeconds, State.IntervalSeconds)
+                                statusLabel.TextColor3 = Color3.fromRGB(255, 180, 60)
+                            end
+                        end
+                    end
+                else
+                    if timerCountdown <= 0 then
+                        if statusLabel then
+                            statusLabel.Text = "RESETTING..."
+                            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
+                        end
+                        resetCharacter()
+                        task.wait(3)
+                        timerCountdown = State.IntervalSeconds
+                        if statusLabel then
+                            statusLabel.Text = "ACTIVE"
+                            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+                        end
+                    end
+
+                    if countdownLabel then
+                        local mins = math.floor(timerCountdown / 60)
+                        local secs = timerCountdown % 60
+                        countdownLabel.Text = string.format("%02d:%02d", mins, secs)
+                    end
+
+                    timerCountdown = timerCountdown - 1
                 end
-            end
 
-            if countdownLabel then
-                local mins = math.floor(State.TimeRemaining / 60)
-                local secs = State.TimeRemaining % 60
-                countdownLabel.Text = string.format("%02d:%02d", mins, secs)
-            end
-
-            task.wait(1)
-            if State.IsActive then
-                State.TimeRemaining = State.TimeRemaining - 1
+                task.wait(1)
             end
         end
     end)
 end
 
-local function stopTimer(countdownLabel, statusLabel)
+local function stopTracker(countdownLabel, statusLabel)
     State.IsActive = false
-    if timerThread then
-        pcall(function() task.cancel(timerThread) end)
-        timerThread = nil
+    if trackerThread then
+        pcall(function() task.cancel(trackerThread) end)
+        trackerThread = nil
     end
     if countdownLabel then countdownLabel.Text = "00:00" end
     if statusLabel then
@@ -189,8 +257,8 @@ local function createUI()
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 340, 0, 450)
-    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -225)
+    MainFrame.Size = UDim2.new(0, 340, 0, 480)
+    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -240)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
@@ -244,7 +312,7 @@ local function createUI()
     SubTitle.Size = UDim2.new(1, -15, 0, 16)
     SubTitle.Position = UDim2.new(0, 15, 1, -20)
     SubTitle.BackgroundTransparency = 1
-    SubTitle.Text = "Character Reset Timer"
+    SubTitle.Text = "Storage Hunter | Anti-Stuck"
     SubTitle.TextColor3 = Color3.fromRGB(100, 100, 115)
     SubTitle.Font = Enum.Font.GothamMedium
     SubTitle.TextSize = 11
@@ -278,11 +346,11 @@ local function createUI()
 
     local layout = Instance.new("UIListLayout")
     layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 10)
+    layout.Padding = UDim.new(0, 8)
     layout.Parent = Content
 
     local CountdownFrame = Instance.new("Frame")
-    CountdownFrame.Size = UDim2.new(1, 0, 0, 100)
+    CountdownFrame.Size = UDim2.new(1, 0, 0, 95)
     CountdownFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
     CountdownFrame.LayoutOrder = 1
     CountdownFrame.Parent = Content
@@ -298,19 +366,19 @@ local function createUI()
 
     local CountdownLabel = Instance.new("TextLabel")
     CountdownLabel.Name = "Countdown"
-    CountdownLabel.Size = UDim2.new(1, 0, 0, 60)
+    CountdownLabel.Size = UDim2.new(1, 0, 0, 55)
     CountdownLabel.Position = UDim2.new(0, 0, 0, 8)
     CountdownLabel.BackgroundTransparency = 1
     CountdownLabel.Text = "00:00"
     CountdownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     CountdownLabel.Font = Enum.Font.GothamBlack
-    CountdownLabel.TextSize = 48
+    CountdownLabel.TextSize = 44
     CountdownLabel.Parent = CountdownFrame
 
     local StatusLabel = Instance.new("TextLabel")
     StatusLabel.Name = "Status"
     StatusLabel.Size = UDim2.new(1, 0, 0, 20)
-    StatusLabel.Position = UDim2.new(0, 0, 1, -28)
+    StatusLabel.Position = UDim2.new(0, 0, 1, -26)
     StatusLabel.BackgroundTransparency = 1
     StatusLabel.Text = "INACTIVE"
     StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
@@ -318,19 +386,50 @@ local function createUI()
     StatusLabel.TextSize = 12
     StatusLabel.Parent = CountdownFrame
 
-    local SectionHeader = Instance.new("TextLabel")
-    SectionHeader.Size = UDim2.new(1, 0, 0, 20)
-    SectionHeader.BackgroundTransparency = 1
-    SectionHeader.Text = "TIMER SETTINGS"
-    SectionHeader.TextColor3 = Color3.fromRGB(100, 100, 115)
-    SectionHeader.Font = Enum.Font.GothamBlack
-    SectionHeader.TextSize = 11
-    SectionHeader.TextXAlignment = Enum.TextXAlignment.Left
-    SectionHeader.LayoutOrder = 2
-    SectionHeader.Parent = Content
+    local ModeRow = Instance.new("Frame")
+    ModeRow.Size = UDim2.new(1, 0, 0, 40)
+    ModeRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+    ModeRow.LayoutOrder = 2
+    ModeRow.Parent = Content
+
+    local mrCorner = Instance.new("UICorner")
+    mrCorner.CornerRadius = UDim.new(0, 8)
+    mrCorner.Parent = ModeRow
+
+    local ModeLabel = Instance.new("TextLabel")
+    ModeLabel.Size = UDim2.new(0, 80, 1, 0)
+    ModeLabel.Position = UDim2.new(0, 12, 0, 0)
+    ModeLabel.BackgroundTransparency = 1
+    ModeLabel.Text = "Mode"
+    ModeLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
+    ModeLabel.Font = Enum.Font.GothamSemibold
+    ModeLabel.TextSize = 13
+    ModeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ModeLabel.Parent = ModeRow
+
+    local ModeBtn = Instance.new("TextButton")
+    ModeBtn.Name = "ModeToggle"
+    ModeBtn.Size = UDim2.new(0, 120, 0, 28)
+    ModeBtn.Position = UDim2.new(1, -132, 0.5, -14)
+    ModeBtn.BackgroundColor3 = Color3.fromRGB(35, 30, 48)
+    ModeBtn.TextColor3 = Color3.fromRGB(210, 160, 255)
+    ModeBtn.Text = State.Mode
+    ModeBtn.Font = Enum.Font.GothamBold
+    ModeBtn.TextSize = 12
+    ModeBtn.AutoButtonColor = false
+    ModeBtn.Parent = ModeRow
+
+    local mbCorner = Instance.new("UICorner")
+    mbCorner.CornerRadius = UDim.new(0, 6)
+    mbCorner.Parent = ModeBtn
+
+    local mbStroke = Instance.new("UIStroke")
+    mbStroke.Color = Color3.fromRGB(110, 70, 170)
+    mbStroke.Thickness = 1
+    mbStroke.Parent = ModeBtn
 
     local InputRow = Instance.new("Frame")
-    InputRow.Size = UDim2.new(1, 0, 0, 44)
+    InputRow.Size = UDim2.new(1, 0, 0, 42)
     InputRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
     InputRow.LayoutOrder = 3
     InputRow.Parent = Content
@@ -340,10 +439,10 @@ local function createUI()
     irCorner.Parent = InputRow
 
     local InputLabel = Instance.new("TextLabel")
-    InputLabel.Size = UDim2.new(0, 80, 1, 0)
+    InputLabel.Size = UDim2.new(0, 90, 1, 0)
     InputLabel.Position = UDim2.new(0, 12, 0, 0)
     InputLabel.BackgroundTransparency = 1
-    InputLabel.Text = "Interval"
+    InputLabel.Text = State.Mode == "Anti-Stuck" and "Max Idle (s)" or "Interval"
     InputLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
     InputLabel.Font = Enum.Font.GothamSemibold
     InputLabel.TextSize = 13
@@ -352,14 +451,14 @@ local function createUI()
 
     local TimeInput = Instance.new("TextBox")
     TimeInput.Name = "TimeInput"
-    TimeInput.Size = UDim2.new(0, 70, 0, 30)
-    TimeInput.Position = UDim2.new(0, 100, 0.5, -15)
+    TimeInput.Size = UDim2.new(0, 65, 0, 28)
+    TimeInput.Position = UDim2.new(0, 105, 0.5, -14)
     TimeInput.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     TimeInput.TextColor3 = Color3.fromRGB(255, 255, 255)
     TimeInput.PlaceholderText = tostring(State.IntervalValue)
     TimeInput.Text = tostring(State.IntervalValue)
     TimeInput.Font = Enum.Font.GothamBold
-    TimeInput.TextSize = 14
+    TimeInput.TextSize = 13
     TimeInput.ClearTextOnFocus = false
     TimeInput.Parent = InputRow
 
@@ -374,8 +473,8 @@ local function createUI()
 
     local UnitBtn = Instance.new("TextButton")
     UnitBtn.Name = "UnitToggle"
-    UnitBtn.Size = UDim2.new(0, 95, 0, 30)
-    UnitBtn.Position = UDim2.new(1, -107, 0.5, -15)
+    UnitBtn.Size = UDim2.new(0, 85, 0, 28)
+    UnitBtn.Position = UDim2.new(1, -97, 0.5, -14)
     UnitBtn.AutoButtonColor = false
     UnitBtn.Parent = InputRow
 
@@ -390,7 +489,7 @@ local function createUI()
     end
 
     UnitBtn.Font = Enum.Font.GothamBold
-    UnitBtn.TextSize = 12
+    UnitBtn.TextSize = 11
 
     local ubCorner = Instance.new("UICorner")
     ubCorner.CornerRadius = UDim.new(0, 6)
@@ -405,6 +504,21 @@ local function createUI()
     ubStroke.Thickness = 1
     ubStroke.Parent = UnitBtn
 
+    ModeBtn.MouseButton1Click:Connect(function()
+        if State.Mode == "Anti-Stuck" then
+            State.Mode = "Timer"
+            InputLabel.Text = "Interval"
+        else
+            State.Mode = "Anti-Stuck"
+            InputLabel.Text = "Max Idle (s)"
+        end
+        ModeBtn.Text = State.Mode
+        saveSettings()
+        if State.IsActive then
+            startTracker(CountdownLabel, StatusLabel)
+        end
+    end)
+
     UnitBtn.MouseButton1Click:Connect(function()
         if State.Unit == "Minutes" then
             State.Unit = "Seconds"
@@ -418,6 +532,11 @@ local function createUI()
             UnitBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
             UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
             ubStroke.Color = Color3.fromRGB(120, 80, 180)
+        end
+        if State.Unit == "Minutes" then
+            State.IntervalSeconds = State.IntervalValue * 60
+        else
+            State.IntervalSeconds = State.IntervalValue
         end
         saveSettings()
     end)
@@ -435,16 +554,10 @@ local function createUI()
         saveSettings()
     end)
 
-    local Spacer = Instance.new("Frame")
-    Spacer.Size = UDim2.new(1, 0, 0, 5)
-    Spacer.BackgroundTransparency = 1
-    Spacer.LayoutOrder = 4
-    Spacer.Parent = Content
-
     local ToggleFrame = Instance.new("Frame")
-    ToggleFrame.Size = UDim2.new(1, 0, 0, 52)
+    ToggleFrame.Size = UDim2.new(1, 0, 0, 48)
     ToggleFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-    ToggleFrame.LayoutOrder = 5
+    ToggleFrame.LayoutOrder = 4
     ToggleFrame.Parent = Content
 
     local tfCorner = Instance.new("UICorner")
@@ -455,17 +568,17 @@ local function createUI()
     ToggleLabel.Size = UDim2.new(0.6, 0, 1, 0)
     ToggleLabel.Position = UDim2.new(0, 15, 0, 0)
     ToggleLabel.BackgroundTransparency = 1
-    ToggleLabel.Text = "Auto Reset"
+    ToggleLabel.Text = "Auto Reset Guard"
     ToggleLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
     ToggleLabel.Font = Enum.Font.GothamBold
-    ToggleLabel.TextSize = 15
+    ToggleLabel.TextSize = 14
     ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
     ToggleLabel.Parent = ToggleFrame
 
     local ToggleBtn = Instance.new("TextButton")
     ToggleBtn.Name = "ToggleSwitch"
-    ToggleBtn.Size = UDim2.new(0, 56, 0, 28)
-    ToggleBtn.Position = UDim2.new(1, -72, 0.5, -14)
+    ToggleBtn.Size = UDim2.new(0, 56, 0, 26)
+    ToggleBtn.Position = UDim2.new(1, -72, 0.5, -13)
     ToggleBtn.Text = ""
     ToggleBtn.AutoButtonColor = false
     ToggleBtn.Parent = ToggleFrame
@@ -476,7 +589,7 @@ local function createUI()
 
     local ToggleCircle = Instance.new("Frame")
     ToggleCircle.Name = "Circle"
-    ToggleCircle.Size = UDim2.new(0, 22, 0, 22)
+    ToggleCircle.Size = UDim2.new(0, 20, 0, 20)
     ToggleCircle.Parent = ToggleBtn
 
     local tcCorner = Instance.new("UICorner")
@@ -492,7 +605,7 @@ local function createUI()
 
     if State.IsActive then
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-        ToggleCircle.Position = UDim2.new(1, -25, 0.5, -11)
+        ToggleCircle.Position = UDim2.new(1, -23, 0.5, -10)
         ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         ToggleText.Text = "ON"
         ToggleText.Position = UDim2.new(0, 4, 0, 0)
@@ -502,7 +615,7 @@ local function createUI()
         StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
     else
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-        ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
+        ToggleCircle.Position = UDim2.new(0, 3, 0.5, -10)
         ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
         ToggleText.Text = "OFF"
         ToggleText.Position = UDim2.new(1, -34, 0, 0)
@@ -513,7 +626,7 @@ local function createUI()
         State.IsActive = not State.IsActive
 
         if State.IsActive then
-            local rawVal = tonumber(TimeInput.Text) or 1
+            local rawVal = tonumber(TimeInput.Text) or State.IntervalValue
             if rawVal <= 0 then rawVal = 1 end
             State.IntervalValue = rawVal
             if State.Unit == "Minutes" then
@@ -523,7 +636,7 @@ local function createUI()
             end
 
             ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-            ToggleCircle.Position = UDim2.new(1, -25, 0.5, -11)
+            ToggleCircle.Position = UDim2.new(1, -23, 0.5, -10)
             ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             ToggleText.Text = "ON"
             ToggleText.Position = UDim2.new(0, 4, 0, 0)
@@ -532,11 +645,11 @@ local function createUI()
             cdStroke.Color = Color3.fromRGB(40, 160, 80)
 
             saveSettings()
-            startTimer(CountdownLabel, StatusLabel, ToggleBtn, ToggleCircle)
+            startTracker(CountdownLabel, StatusLabel)
         else
             saveSettings()
             ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-            ToggleCircle.Position = UDim2.new(0, 3, 0.5, -11)
+            ToggleCircle.Position = UDim2.new(0, 3, 0.5, -10)
             ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
             ToggleText.Text = "OFF"
             ToggleText.Position = UDim2.new(1, -34, 0, 0)
@@ -544,40 +657,34 @@ local function createUI()
 
             cdStroke.Color = Color3.fromRGB(40, 40, 50)
 
-            stopTimer(CountdownLabel, StatusLabel)
+            stopTracker(CountdownLabel, StatusLabel)
         end
     end)
 
     if State.IsActive then
-        startTimer(CountdownLabel, StatusLabel, ToggleBtn, ToggleCircle)
+        startTracker(CountdownLabel, StatusLabel)
     end
 
-    local Spacer2 = Instance.new("Frame")
-    Spacer2.Size = UDim2.new(1, 0, 0, 5)
-    Spacer2.BackgroundTransparency = 1
-    Spacer2.LayoutOrder = 6
-    Spacer2.Parent = Content
-
     local InfoLabel = Instance.new("TextLabel")
-    InfoLabel.Size = UDim2.new(1, 0, 0, 40)
+    InfoLabel.Size = UDim2.new(1, 0, 0, 36)
     InfoLabel.BackgroundTransparency = 1
-    InfoLabel.Text = "Set the timer and press ON.\nCharacter will auto-reset when time is up."
+    InfoLabel.Text = "Anti-Stuck detects freeze & resets character only when idle/stuck."
     InfoLabel.TextColor3 = Color3.fromRGB(80, 80, 95)
     InfoLabel.Font = Enum.Font.Gotham
     InfoLabel.TextSize = 11
     InfoLabel.TextWrapped = true
-    InfoLabel.LayoutOrder = 7
+    InfoLabel.LayoutOrder = 5
     InfoLabel.Parent = Content
 
     local UnloadBtn = Instance.new("TextButton")
-    UnloadBtn.Size = UDim2.new(1, 0, 0, 38)
+    UnloadBtn.Size = UDim2.new(1, 0, 0, 36)
     UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 25, 28)
     UnloadBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
     UnloadBtn.Text = "UNLOAD SCRIPT"
     UnloadBtn.Font = Enum.Font.GothamBold
     UnloadBtn.TextSize = 12
     UnloadBtn.AutoButtonColor = false
-    UnloadBtn.LayoutOrder = 8
+    UnloadBtn.LayoutOrder = 6
     UnloadBtn.Parent = Content
 
     local ulCorner = Instance.new("UICorner")
@@ -597,7 +704,7 @@ local function createUI()
     end)
 
     UnloadBtn.MouseButton1Click:Connect(function()
-        stopTimer(CountdownLabel, StatusLabel)
+        stopTracker(CountdownLabel, StatusLabel)
         ScreenGui:Destroy()
     end)
 end
