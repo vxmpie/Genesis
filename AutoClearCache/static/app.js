@@ -285,7 +285,7 @@ function handleMessage(data) {
         case 'boost_counter_reset':
             updateSessionSummary(data.data);
             if (data.type === 'boost_counter_reset') {
-                showToast('system', '↺ Session Boosts Counter Reset to 0');
+                showToast('system', '↺ Boost Counters Reset to 0 (Session & Total Cleared)');
             }
             break;
     }

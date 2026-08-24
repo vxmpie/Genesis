@@ -388,6 +388,16 @@ def get_next_scheduled_boost_time(interval_min: int) -> str:
     return next_dt.strftime("%H:%M:%S")
 
 
+def reset_all_boost_counters() -> dict:
+    """Reset both session boosts and total lifetime boosts to 0, purging past boost history."""
+    global _boost_counter_reset_time, event_history
+    _boost_counter_reset_time = time.time()
+    event_history = [e for e in event_history if e.get("type") != "boost"]
+    _save_history(event_history)
+    add_event("system", "Boost counters reset: Session & Lifetime Total set to 0")
+    return get_session_summary()
+
+
 def get_session_summary() -> dict:
     """Calculate session-level metrics and historical counters for the Summary Card."""
     uptime_sec = int(time.time() - _server_start_time)
@@ -2340,9 +2350,7 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         await ws.send_json({"type": "observatory_update", "data": obs})
 
     elif cmd == "reset_boost_counter":
-        global _boost_counter_reset_time
-        _boost_counter_reset_time = time.time()
-        summary = get_session_summary()
+        summary = reset_all_boost_counters()
         await broadcast_event({"type": "session_summary", "data": summary})
         await ws.send_json({"type": "boost_counter_reset", "data": summary})
 
@@ -2469,9 +2477,7 @@ async def api_summary():
 async def api_reset_boosts(request: Request):
     if is_auth_enabled() and not verify_session_token(request.headers.get("X-Auth-Token")):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    global _boost_counter_reset_time
-    _boost_counter_reset_time = time.time()
-    summary = get_session_summary()
+    summary = reset_all_boost_counters()
     await broadcast_event({"type": "session_summary", "data": summary})
     return JSONResponse({"success": True, "summary": summary})
 
