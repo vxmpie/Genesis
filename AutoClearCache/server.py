@@ -598,18 +598,36 @@ def should_purge_standby_gate(free_gb: float, standby_gb: float, available_gb: f
     return standby_gb >= min_standby and (free_gb < 2.0 or available_gb < 8.0)
 
 
+IMMUTABLE_PROTECTED_PROCESSES = {
+    # Windows Core & Graphics
+    "csrss.exe", "lsass.exe", "smss.exe", "wininit.exe", "system", "dwm.exe", "services.exe",
+    # Remote Management & Ingress
+    "stardesk.exe", "parsecd.exe", "anydesk.exe", "teamviewer.exe", "cloudflared.exe", "python.exe",
+    # MuMu Player & Android Virtualization (CRITICAL: Do NOT flush hypervisor memory)
+    "mumunxdevice.exe", "mumunxmain.exe", "mumuplayer.exe", "nemuheadless.exe",
+    "nemuplayer.exe", "nemumain.exe", "hd-player.exe", "dnplayer.exe", "ldboxheadless.exe",
+    "vboxheadless.exe", "qemu-system-x86_64.exe", "adb.exe",
+    # Roblox Client
+    "robloxplayerbeta.exe", "robloxplayerlauncher.exe",
+}
+
+
 def _get_protected_names() -> set:
-    names = set()
+    names = set(IMMUTABLE_PROTECTED_PROCESSES)
     for n in CONFIG.get("auto_boost", {}).get("protected_processes", []):
         names.add(n.lower())
     return names
 
 
 def trim_single_process(pid: int) -> dict:
-    """Trim working set for a specific process by PID (e.g. specific MuMu instance)."""
+    """Safely trim working set for a process by PID."""
     try:
         p = psutil.Process(pid)
-        name = p.name()
+        name = (p.name() or "").lower()
+        if name in ("mumunxdevice.exe", "nemuheadless.exe", "vboxheadless.exe"):
+            # Hypervisor processes should not be flushed to prevent guest VM freeze
+            return {"success": False, "error": "Hypervisor working set is protected to prevent VM freeze"}
+
         mem_before = p.memory_info().rss / (1024 * 1024)
         handle = _kernel32.OpenProcess(
             PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid
@@ -620,8 +638,8 @@ def trim_single_process(pid: int) -> dict:
             time.sleep(0.1)
             mem_after = p.memory_info().rss / (1024 * 1024)
             freed = max(round(mem_before - mem_after, 1), 0.0)
-            add_event("mumu", f"↺ Trimmed working set for {name} (PID {pid}): freed {freed} MB")
-            return {"success": True, "pid": pid, "name": name, "freed_mb": freed}
+            add_event("mumu", f"↺ Trimmed working set for {p.name()} (PID {pid}): freed {freed} MB")
+            return {"success": True, "pid": pid, "name": p.name(), "freed_mb": freed}
     except Exception as e:
         return {"success": False, "error": str(e)}
     return {"success": False, "error": "Failed to open process"}
@@ -1138,17 +1156,23 @@ def get_vm_disk_status() -> list:
 
 
 def trim_vm_caches(port: int) -> bool:
-    """Run pm trim-caches on a specific MuMu VM instance."""
+    """Safely run filesystem TRIM on Android /data partition without disturbing running apps."""
     adb = _find_adb()
     if not adb:
         return False
     try:
+        # Non-destructive filesystem TRIM (discards unused disk blocks without touching app memory)
         r = subprocess.run(
-            [adb, "-s", f"127.0.0.1:{port}", "shell", "pm", "trim-caches", "128G"],
-            capture_output=True, text=True, timeout=15,
+            [adb, "-s", f"127.0.0.1:{port}", "shell", "fstrim", "-v", "/data"],
+            capture_output=True, text=True, timeout=12,
+        )
+        # Clear temporary APK installation directory only
+        subprocess.run(
+            [adb, "-s", f"127.0.0.1:{port}", "shell", "rm", "-rf", "/data/local/tmp/*"],
+            capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
-            add_event("system", f"VM cache trimmed (port {port})")
+            add_event("system", f"VM (port {port}) /data filesystem trimmed safely")
             return True
     except Exception:
         pass

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.5.1">
+    <link rel="stylesheet" href="/static/style.css?v=2.5.2">
 </head>
 <body>
     <!-- Header -->
@@ -34,51 +34,89 @@
     </header>
 
     <main class="dashboard">
-        <!-- Session & Uptime Summary Card (v2.5) -->
+        <!-- Master Operations & System Health HUD (v2.5.2) -->
         <section class="card summary-card">
-            <div class="summary-grid">
-                <div class="summary-item">
-                    <span class="summary-label">⏱️ Server Uptime</span>
-                    <span class="summary-val" id="sumUptime">0h 00m</span>
-                </div>
-                <div class="summary-item summary-item-boosts">
-                    <div class="summary-label-row">
-                        <span class="summary-label">⚡ Session Boosts</span>
-                        <button class="btn-reset-mini" id="btnResetBoosts" title="Reset Session Boosts Counter only (Preserve Total)" aria-label="Reset Session Boost Counter">↺</button>
+            <div class="summary-hud-grid">
+                <!-- Tier 1: Primary Operation & Resource Tiles -->
+                <div class="summary-tile summary-tile-uptime">
+                    <div class="summary-tile-header">
+                        <span class="summary-tile-label">⏱️ Server Uptime</span>
+                        <span class="summary-chip chip-green"><span class="pulse-dot-green"></span>Active</span>
                     </div>
-                    <div class="summary-val-wrap">
-                        <span class="summary-val" id="sumBoosts">0</span>
-                        <div class="summary-subval-group">
-                            <span class="summary-subval" id="sumTotalBoosts" title="Lifetime Total Boosts across all sessions">(Total: 0)</span>
-                            <button class="btn-reset-total-mini" id="btnResetTotalBoosts" title="Purge & Reset Lifetime Total Boosts History to 0" aria-label="Reset Lifetime Total Boosts">↺ Total</button>
+                    <div class="summary-tile-body">
+                        <span class="summary-val-hero" id="sumUptime">0h 00m</span>
+                    </div>
+                    <div class="summary-tile-footer">24/7 Unattended Engine</div>
+                </div>
+
+                <div class="summary-tile summary-tile-boosts">
+                    <div class="summary-tile-header">
+                        <span class="summary-tile-label">⚡ RAM & Cache Boosts</span>
+                        <div class="summary-actions-wrap">
+                            <button class="btn-hud-reset" id="btnResetBoosts" title="Reset Session Boost Counter only" aria-label="Reset Session Boost Counter">↺ Session</button>
+                            <button class="btn-hud-reset-total" id="btnResetTotalBoosts" title="Purge Lifetime History and Reset to 0" aria-label="Reset Lifetime Total Boosts">↺ Total</button>
                         </div>
                     </div>
+                    <div class="summary-tile-body summary-boosts-body">
+                        <div class="summary-val-hero-wrap">
+                            <span class="summary-val-hero" id="sumBoosts">0</span>
+                            <span class="summary-val-subtext">Session</span>
+                        </div>
+                        <span class="summary-subval-tag" id="sumTotalBoosts" title="Lifetime Total Boosts">(Lifetime: 0)</span>
+                    </div>
+                    <div class="summary-tile-footer">Sub-Second Parallel Trim</div>
                 </div>
-                <div class="summary-item">
-                    <span class="summary-label">🛡️ Standby Guard</span>
-                    <div class="summary-val-wrap">
-                        <span class="summary-val fresh" id="sumStandbyPurges">0</span>
-                        <span class="summary-subval" id="sumStandbyReclaimed">(0.0 GB freed)</span>
+
+                <div class="summary-tile summary-tile-standby">
+                    <div class="summary-tile-header">
+                        <span class="summary-tile-label">🛡️ Standby Guard</span>
+                        <span class="summary-chip chip-cyan"><span class="pulse-dot-cyan"></span>24/7 Micro-Purge</span>
+                    </div>
+                    <div class="summary-tile-body">
+                        <div class="summary-val-hero-wrap">
+                            <span class="summary-val-hero fresh" id="sumStandbyPurges">0</span>
+                            <span class="summary-val-subtext">Purges</span>
+                        </div>
+                        <span class="summary-subval-tag fresh" id="sumStandbyReclaimed">0.0 GB Freed</span>
+                    </div>
+                    <div class="summary-tile-footer">Kernel NtSetSystemInfo (2ms)</div>
+                </div>
+
+                <div class="summary-tile summary-tile-storage">
+                    <div class="summary-tile-header">
+                        <span class="summary-label">💾 Storage (C:)</span>
+                        <span class="summary-subval-tag" id="sumStoragePercent">--% Used</span>
+                    </div>
+                    <div class="summary-tile-body">
+                        <span class="summary-val-hero" id="sumStorageFree">-- GB</span>
+                        <span class="summary-val-subtext">Free</span>
+                    </div>
+                    <div class="summary-tile-footer">NVMe SSD Health Guard</div>
+                </div>
+
+                <!-- Tier 2: System Health & Network Sentinel Strip -->
+                <div class="summary-tile summary-tile-status">
+                    <span class="summary-tile-label">🌐 Watchdog Sentinel</span>
+                    <div class="summary-status-content">
+                        <span class="summary-status-num" id="sumRecoveries">0</span>
+                        <span class="summary-status-desc">Auto-Recoveries Today</span>
                     </div>
                 </div>
-                <div class="summary-item">
-                    <span class="summary-label">💾 Storage (C:)</span>
-                    <div class="summary-val-wrap">
-                        <span class="summary-val" id="sumStorageFree">-- GB</span>
-                        <span class="summary-subval" id="sumStoragePercent">--% Used</span>
+
+                <div class="summary-tile summary-tile-status">
+                    <span class="summary-tile-label">🧹 Last Cache Clean</span>
+                    <div class="summary-status-content">
+                        <span class="summary-status-num font-mono-sm" id="sumLastClean">None</span>
+                        <span class="summary-status-desc">Clock-Aligned Cycle</span>
                     </div>
                 </div>
-                <div class="summary-item">
-                    <span class="summary-label">🌐 Net Recoveries</span>
-                    <span class="summary-val" id="sumRecoveries">0</span>
-                </div>
-                <div class="summary-item">
-                    <span class="summary-label">🧹 Last Clean</span>
-                    <span class="summary-val" id="sumLastClean">None</span>
-                </div>
-                <div class="summary-item">
-                    <span class="summary-label">🛡️ Hardening</span>
-                    <span class="summary-val fresh" id="sumHardening">4/4 OK</span>
+
+                <div class="summary-tile summary-tile-status summary-tile-status-wide">
+                    <span class="summary-tile-label">🛡️ Windows Hardening</span>
+                    <div class="summary-status-content">
+                        <span class="summary-status-num fresh" id="sumHardening">4/4 CIM Verified</span>
+                        <span class="summary-status-desc">Zero-Drift Baseline</span>
+                    </div>
                 </div>
             </div>
         </section>
@@ -493,6 +531,6 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="/static/app.js?v=2.5.1"></script>
+    <script src="/static/app.js?v=2.5.2"></script>
 </body>
 </html>

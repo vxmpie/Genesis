@@ -1035,7 +1035,7 @@ function updateSessionSummary(sum) {
     }
 
     if (DOM.sumTotalBoosts) {
-        DOM.sumTotalBoosts.textContent = `(Total: ${sum.total_boosts || 0})`;
+        DOM.sumTotalBoosts.textContent = `(Lifetime: ${sum.total_boosts || 0})`;
     }
 
     if (DOM.sumRecoveries) {
@@ -1054,16 +1054,16 @@ function updateSessionSummary(sum) {
     if (DOM.sumHardening) {
         if (sum.drift_detected) {
             DOM.sumHardening.textContent = 'Drift Detected';
-            DOM.sumHardening.className = 'summary-val warning';
+            DOM.sumHardening.className = 'summary-status-num warning';
         } else {
-            DOM.sumHardening.textContent = '4/4 Hardened';
-            DOM.sumHardening.className = 'summary-val fresh';
+            DOM.sumHardening.textContent = '4/4 CIM Verified';
+            DOM.sumHardening.className = 'summary-status-num fresh';
         }
     }
 
     if (sum.standby_guard) {
         if (DOM.sumStandbyPurges) DOM.sumStandbyPurges.textContent = sum.standby_guard.purges || 0;
-        if (DOM.sumStandbyReclaimed) DOM.sumStandbyReclaimed.textContent = `(${sum.standby_guard.reclaimed_gb || 0.0} GB freed)`;
+        if (DOM.sumStandbyReclaimed) DOM.sumStandbyReclaimed.textContent = `${sum.standby_guard.reclaimed_gb || 0.0} GB Freed`;
     }
 
     // Display clock-aligned next scheduled boost time if in scheduled mode
