@@ -1,15 +1,15 @@
+local WashModule = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local WashModule = {}
-local washThread = nil
 local RarityCache = {}
+local washThread = nil
 
-local function normalizeRarity(r)
-    if not r then return "Common" end
-    local s = string.lower(tostring(r))
-    if string.find(s, "secret") then return "Secret" end
-    if string.find(s, "exotic") then return "Exotic" end
-    if string.find(s, "myth") then return "Mythic" end
+local function normalizeRarity(rarity)
+    if not rarity then return "Common" end
+    local s = string.lower(tostring(rarity))
+    if string.find(s, "exclusive") then return "Exclusive" end
+    if string.find(s, "lost") then return "Lost" end
+    if string.find(s, "myth") then return "Mythical" end
     if string.find(s, "legend") then return "Legendary" end
     if string.find(s, "epic") then return "Epic" end
     if string.find(s, "rare") then return "Rare" end
@@ -86,11 +86,11 @@ function WashModule.IsRarityAllowed(rarityName, State)
 end
 
 function WashModule.ProcessWash(State)
-    if not State.AutoWash then return 4 end
+    if not State.AutoWash then return end
 
     local events = ReplicatedStorage:FindFirstChild("Events")
     local washEvents = events and events:FindFirstChild("Wash")
-    if not washEvents then return 4 end
+    if not washEvents then return end
 
     local getSlotState = washEvents:FindFirstChild("GetSlotState")
     local getWashableItems = washEvents:FindFirstChild("GetWashableItems")
@@ -98,10 +98,10 @@ function WashModule.ProcessWash(State)
     local claimWashed = washEvents:FindFirstChild("ClaimWashedItem")
     local collectWash = washEvents:FindFirstChild("CollectWash")
 
-    if not getSlotState or not getWashableItems or not startWash then return 4 end
+    if not getSlotState or not getWashableItems or not startWash then return end
 
     local ok1, rawSlotState = pcall(function() return getSlotState:InvokeServer() end)
-    if not ok1 or type(rawSlotState) ~= "table" then return 4 end
+    if not ok1 or type(rawSlotState) ~= "table" then return end
 
     local unlockedCount = tonumber(rawSlotState.unlockedCount) or 3
     local activeSlots = rawSlotState.slots or {}
@@ -181,15 +181,6 @@ function WashModule.ProcessWash(State)
             end
         end
     end
-
-    return 3
-end
-
-function WashModule.QuickWash(State)
-    if not State.AutoWash then return end
-    task.spawn(function()
-        WashModule.ProcessWash(State)
-    end)
 end
 
 function WashModule.StartAutoWashLoop(State)
@@ -201,7 +192,7 @@ function WashModule.StartAutoWashLoop(State)
             pcall(function()
                 WashModule.ProcessWash(State)
             end)
-            task.wait(2.5)
+            task.wait(2.0)
         end
     end)
 end
