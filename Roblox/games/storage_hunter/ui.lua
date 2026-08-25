@@ -1,15 +1,16 @@
 local UI = {}
 local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
 
 local function loadObsidianLib()
-    local localPath = "Roblox/lib/obsidian.lua"
+    local localPath = "Roblox/libraries/obsidian.lua"
     if isfile and isfile(localPath) then
         local fn = loadstring(readfile(localPath))
         if fn then return fn() end
     end
-    local remoteUrl = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/lib/obsidian.lua"
+    local remoteUrl = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/libraries/obsidian.lua"
     local success, code = pcall(function()
         return game:HttpGet(remoteUrl)
     end)
@@ -17,18 +18,39 @@ local function loadObsidianLib()
         local fn = loadstring(code)
         if fn then return fn() end
     end
+    local fallbackUrl = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/lib/obsidian.lua"
+    local s2, code2 = pcall(function()
+        return game:HttpGet(fallbackUrl)
+    end)
+    if s2 and code2 and #code2 > 0 then
+        local fn2 = loadstring(code2)
+        if fn2 then return fn2() end
+    end
     return nil
 end
 
 function UI.Init(Config, DB, Modules)
+    print("[GENESIS] Initializing Obsidian UI Library...")
     local Obsidian = loadObsidianLib()
-    if not Obsidian then return end
+    if not Obsidian then
+        warn("[GENESIS] Failed to load Obsidian UI Library!")
+        return
+    end
 
     local Window = Obsidian:CreateWindow({
         Title = "[+] GENESIS",
         SubTitle = "Storage Hunters",
         TabWidth = 160
     })
+
+    print("[GENESIS] Obsidian Window Created Successfully!")
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "GENESIS HUB",
+            Text = "Storage Hunters UI Loaded! Press LeftControl to toggle.",
+            Duration = 5
+        })
+    end)
 
     local Tabs = {
         Info = Window:AddTab("Info", "[i]"),
@@ -53,6 +75,7 @@ function UI.Init(Config, DB, Modules)
         Callback = function(val)
             Config.Set("StopAllAutomation", val)
             Config.Save()
+            print("[GENESIS] StopAllAutomation set to:", val)
         end
     })
     farmGeneral:AddToggle("AutoPlay", {
@@ -61,6 +84,7 @@ function UI.Init(Config, DB, Modules)
         Callback = function(val)
             Config.Set("AutoPlay", val)
             Config.Save()
+            print("[GENESIS] AutoPlay set to:", val)
         end
     })
     farmGeneral:AddToggle("AutoClaimPlot", {
@@ -69,6 +93,7 @@ function UI.Init(Config, DB, Modules)
         Callback = function(val)
             Config.Set("AutoClaimPlot", val)
             Config.Save()
+            print("[GENESIS] AutoClaimPlot set to:", val)
         end
     })
 

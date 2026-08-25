@@ -1,12 +1,30 @@
 local Genesis = {}
 
+local StarterGui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
+
+print("==========================================")
+print("[GENESIS] STORAGE HUNTERS HUB STARTING...")
+print("==========================================")
+
+pcall(function()
+    StarterGui:SetCore("SendNotification", {
+        Title = "GENESIS HUB",
+        Text = "Initializing Storage Hunters Hub...",
+        Duration = 4
+    })
+end)
+
 local BASE_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/storage_hunter/"
 
 local function loadModule(relPath)
     local localPath = "Roblox/games/storage_hunter/" .. relPath
     if isfile and isfile(localPath) then
         local fn, err = loadstring(readfile(localPath))
-        if fn then return fn() end
+        if fn then
+            print("[GENESIS] Loaded local module:", relPath)
+            return fn()
+        end
     end
     local fullUrl = BASE_URL .. relPath
     local success, code = pcall(function()
@@ -14,8 +32,12 @@ local function loadModule(relPath)
     end)
     if success and code and #code > 0 then
         local fn, err = loadstring(code)
-        if fn then return fn() end
+        if fn then
+            print("[GENESIS] Loaded remote module:", relPath)
+            return fn()
+        end
     end
+    warn("[GENESIS] Failed to load module:", relPath)
     return nil
 end
 
@@ -67,5 +89,7 @@ if Optimization and Optimization.Init then Optimization.Init(Config) end
 if UI and UI.Init then
     UI.Init(Config, DB, Modules)
 end
+
+print("[GENESIS] ALL MODULES LOADED SUCCESSFULLY!")
 
 return Genesis

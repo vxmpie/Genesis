@@ -2,6 +2,16 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
+print("[GENESIS] LOADER EXECUTED - Checking game compatibility...")
+
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "GENESIS",
+        Text = "Executing Genesis Loader...",
+        Duration = 4
+    })
+end)
+
 local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/"
 
 local games = {
@@ -12,8 +22,10 @@ local games = {
 local file = games[game.PlaceId] or games[game.GameId] or games[game.CreatorId]
 
 if file then
+    print("[GENESIS] Game matched: Storage Hunters (" .. tostring(game.PlaceId) .. "). Loading main hub...")
     loadstring(game:HttpGet(BASE .. file))()
 else
+    warn("[GENESIS] Game not supported! PlaceId:", game.PlaceId, "GameId:", game.GameId)
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "GENESIS",
