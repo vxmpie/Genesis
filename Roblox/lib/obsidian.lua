@@ -47,6 +47,9 @@ function Obsidian:CreateWindow(options)
     ScreenGui.Name = "ObsidianUI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.DisplayOrder = 9999
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.Enabled = true
     ScreenGui.Parent = parent
 
     local MainFrame = Instance.new("Frame")
@@ -55,6 +58,7 @@ function Obsidian:CreateWindow(options)
     MainFrame.Position = UDim2.new(0.5, -400, 0.5, -270)
     MainFrame.BackgroundColor3 = CurrentTheme.Background
     MainFrame.BorderSizePixel = 0
+    MainFrame.Visible = true
     MainFrame.ClipsDescendants = true
     MainFrame.Parent = ScreenGui
 
