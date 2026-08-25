@@ -17,15 +17,18 @@ local RARITY_COLORS = {
 
 local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Secret" }
 
-function UI.Create(Config, ResetModule, WashModule, AuctionModule)
+function UI.Create(Config, ResetModule, WashModule, AuctionModule, TeleportModule)
     local State = Config.State
 
     if CoreGui:FindFirstChild("GenesisResetTimer") then
         CoreGui.GenesisResetTimer:Destroy()
     end
+    if CoreGui:FindFirstChild("GenesisHubGUI") then
+        CoreGui.GenesisHubGUI:Destroy()
+    end
 
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "GenesisResetTimer"
+    ScreenGui.Name = "GenesisHubGUI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     pcall(function() ScreenGui.Parent = CoreGui end)
@@ -35,13 +38,13 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
 
     local FloatingBtn = Instance.new("TextButton")
     FloatingBtn.Name = "FloatingBtn"
-    FloatingBtn.Size = UDim2.new(0, 50, 0, 50)
-    FloatingBtn.Position = UDim2.new(1, -70, 0.5, -25)
-    FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+    FloatingBtn.Size = UDim2.new(0, 48, 0, 48)
+    FloatingBtn.Position = UDim2.new(1, -65, 0.5, -24)
+    FloatingBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
     FloatingBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
     FloatingBtn.Text = "G"
     FloatingBtn.Font = Enum.Font.GothamBlack
-    FloatingBtn.TextSize = 28
+    FloatingBtn.TextSize = 26
     FloatingBtn.AutoButtonColor = false
     FloatingBtn.Draggable = true
     FloatingBtn.Parent = ScreenGui
@@ -55,20 +58,11 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
     floatStroke.Thickness = 2
     floatStroke.Parent = FloatingBtn
 
-    FloatingBtn.MouseEnter:Connect(function()
-        floatStroke.Thickness = 3
-        FloatingBtn.BackgroundColor3 = Color3.fromRGB(25, 20, 22)
-    end)
-    FloatingBtn.MouseLeave:Connect(function()
-        floatStroke.Thickness = 2
-        FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-    end)
-
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 350, 0, 520)
-    MainFrame.Position = UDim2.new(0.5, -175, 0.5, -260)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+    MainFrame.Size = UDim2.new(0, 360, 0, 560)
+    MainFrame.Position = UDim2.new(0.5, -180, 0.5, -280)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
     MainFrame.Active = true
@@ -77,11 +71,11 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
     MainFrame.Parent = ScreenGui
 
     local mainCorner = Instance.new("UICorner")
-    mainCorner.CornerRadius = UDim.new(0, 12)
+    mainCorner.CornerRadius = UDim.new(0, 10)
     mainCorner.Parent = MainFrame
 
     local mainStroke = Instance.new("UIStroke")
-    mainStroke.Color = Color3.fromRGB(35, 35, 40)
+    mainStroke.Color = Color3.fromRGB(38, 38, 48)
     mainStroke.Thickness = 1
     mainStroke.Parent = MainFrame
 
@@ -90,309 +84,148 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
     end)
 
     local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 50)
-    TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+    TitleBar.Size = UDim2.new(1, 0, 0, 48)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
     TitleBar.BorderSizePixel = 0
     TitleBar.Parent = MainFrame
 
     local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 12)
+    titleCorner.CornerRadius = UDim.new(0, 10)
     titleCorner.Parent = TitleBar
-
-    local titleFix = Instance.new("Frame")
-    titleFix.Size = UDim2.new(1, 0, 0, 12)
-    titleFix.Position = UDim2.new(0, 0, 1, -12)
-    titleFix.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-    titleFix.BorderSizePixel = 0
-    titleFix.Parent = TitleBar
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, -50, 1, 0)
-    TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+    TitleLabel.Position = UDim2.new(0, 16, 0, 0)
     TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "GENESIS"
+    TitleLabel.Text = "GENESIS HUB"
     TitleLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
     TitleLabel.Font = Enum.Font.GothamBlack
-    TitleLabel.TextSize = 18
+    TitleLabel.TextSize = 16
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = TitleBar
 
-    local SubTitle = Instance.new("TextLabel")
-    SubTitle.Size = UDim2.new(1, -15, 0, 16)
-    SubTitle.Position = UDim2.new(0, 15, 1, -20)
-    SubTitle.BackgroundTransparency = 1
-    SubTitle.Text = "Storage Hunter Multi-Tool"
-    SubTitle.TextColor3 = Color3.fromRGB(100, 100, 115)
-    SubTitle.Font = Enum.Font.GothamMedium
-    SubTitle.TextSize = 11
-    SubTitle.TextXAlignment = Enum.TextXAlignment.Left
-    SubTitle.Parent = TitleBar
-
     local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-    CloseBtn.Position = UDim2.new(1, -40, 0, 10)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 38)
+    CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+    CloseBtn.Position = UDim2.new(1, -38, 0.5, -14)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(35, 22, 25)
     CloseBtn.Text = "✕"
     CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
     CloseBtn.Font = Enum.Font.GothamBold
-    CloseBtn.TextSize = 14
+    CloseBtn.TextSize = 13
     CloseBtn.AutoButtonColor = false
     CloseBtn.Parent = TitleBar
 
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 8)
-    closeCorner.Parent = CloseBtn
+    local cbCorner = Instance.new("UICorner")
+    cbCorner.CornerRadius = UDim.new(0, 6)
+    cbCorner.Parent = CloseBtn
 
     CloseBtn.MouseButton1Click:Connect(function()
         MainFrame.Visible = false
     end)
 
-    local Content = Instance.new("ScrollingFrame")
-    Content.Size = UDim2.new(1, -20, 1, -60)
-    Content.Position = UDim2.new(0, 10, 0, 55)
-    Content.BackgroundTransparency = 1
-    Content.ScrollBarThickness = 3
-    Content.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 60)
-    Content.BorderSizePixel = 0
-    Content.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    Content.CanvasSize = UDim2.new(0, 0, 0, 0)
-    Content.Parent = MainFrame
+    local ContentScroll = Instance.new("ScrollingFrame")
+    ContentScroll.Size = UDim2.new(1, -16, 1, -58)
+    ContentScroll.Position = UDim2.new(0, 8, 0, 52)
+    ContentScroll.BackgroundTransparency = 1
+    ContentScroll.ScrollBarThickness = 3
+    ContentScroll.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 60)
+    ContentScroll.BorderSizePixel = 0
+    ContentScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    ContentScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    ContentScroll.Parent = MainFrame
 
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 8)
-    layout.Parent = Content
+    local cLayout = Instance.new("UIListLayout")
+    cLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    cLayout.Padding = UDim.new(0, 8)
+    cLayout.Parent = ContentScroll
 
-    local CountdownFrame = Instance.new("Frame")
-    CountdownFrame.Size = UDim2.new(1, 0, 0, 90)
-    CountdownFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-    CountdownFrame.LayoutOrder = 1
-    CountdownFrame.Parent = Content
+    local function createCard(titleText, order)
+        local Card = Instance.new("Frame")
+        Card.Size = UDim2.new(1, 0, 0, 0)
+        Card.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+        Card.AutomaticSize = Enum.AutomaticSize.Y
+        Card.LayoutOrder = order
+        Card.Parent = ContentScroll
 
-    local cdCorner = Instance.new("UICorner")
-    cdCorner.CornerRadius = UDim.new(0, 10)
-    cdCorner.Parent = CountdownFrame
+        local cCorner = Instance.new("UICorner")
+        cCorner.CornerRadius = UDim.new(0, 8)
+        cCorner.Parent = Card
 
-    local cdStroke = Instance.new("UIStroke")
-    cdStroke.Color = Color3.fromRGB(40, 40, 50)
-    cdStroke.Thickness = 1
-    cdStroke.Parent = CountdownFrame
+        local cStroke = Instance.new("UIStroke")
+        cStroke.Color = Color3.fromRGB(35, 35, 45)
+        cStroke.Thickness = 1
+        cStroke.Parent = Card
+
+        local Padding = Instance.new("UIPadding")
+        Padding.PaddingTop = UDim.new(0, 10)
+        Padding.PaddingBottom = UDim.new(0, 10)
+        Padding.PaddingLeft = UDim.new(0, 12)
+        Padding.PaddingRight = UDim.new(0, 12)
+        Padding.Parent = Card
+
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Padding = UDim.new(0, 8)
+        layout.Parent = Card
+
+        if titleText then
+            local Header = Instance.new("TextLabel")
+            Header.Size = UDim2.new(1, 0, 0, 18)
+            Header.BackgroundTransparency = 1
+            Header.Text = titleText:upper()
+            Header.TextColor3 = Color3.fromRGB(255, 75, 75)
+            Header.Font = Enum.Font.GothamBlack
+            Header.TextSize = 11
+            Header.TextXAlignment = Enum.TextXAlignment.Left
+            Header.LayoutOrder = 0
+            Header.Parent = Card
+        end
+
+        return Card
+    end
+
+    local statusCard = createCard("Guard & Movement Tracker", 1)
+
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Size = UDim2.new(1, 0, 0, 20)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = State.IsActive and "ACTIVE" or "INACTIVE"
+    StatusLabel.TextColor3 = State.IsActive and Color3.fromRGB(80, 255, 120) or Color3.fromRGB(150, 150, 160)
+    StatusLabel.Font = Enum.Font.GothamBold
+    StatusLabel.TextSize = 13
+    StatusLabel.LayoutOrder = 1
+    StatusLabel.Parent = statusCard
 
     local CountdownLabel = Instance.new("TextLabel")
-    CountdownLabel.Name = "Countdown"
-    CountdownLabel.Size = UDim2.new(1, 0, 0, 50)
-    CountdownLabel.Position = UDim2.new(0, 0, 0, 6)
+    CountdownLabel.Size = UDim2.new(1, 0, 0, 36)
     CountdownLabel.BackgroundTransparency = 1
     CountdownLabel.Text = "00:00"
     CountdownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     CountdownLabel.Font = Enum.Font.GothamBlack
-    CountdownLabel.TextSize = 40
-    CountdownLabel.Parent = CountdownFrame
+    CountdownLabel.TextSize = 30
+    CountdownLabel.LayoutOrder = 2
+    CountdownLabel.Parent = statusCard
 
-    local StatusLabel = Instance.new("TextLabel")
-    StatusLabel.Name = "Status"
-    StatusLabel.Size = UDim2.new(1, 0, 0, 20)
-    StatusLabel.Position = UDim2.new(0, 0, 1, -24)
-    StatusLabel.BackgroundTransparency = 1
-    StatusLabel.Text = "INACTIVE"
-    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
-    StatusLabel.Font = Enum.Font.GothamBold
-    StatusLabel.TextSize = 12
-    StatusLabel.Parent = CountdownFrame
-
-    local ModeRow = Instance.new("Frame")
-    ModeRow.Size = UDim2.new(1, 0, 0, 38)
-    ModeRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-    ModeRow.LayoutOrder = 2
-    ModeRow.Parent = Content
-
-    local mrCorner = Instance.new("UICorner")
-    mrCorner.CornerRadius = UDim.new(0, 8)
-    mrCorner.Parent = ModeRow
-
-    local ModeLabel = Instance.new("TextLabel")
-    ModeLabel.Size = UDim2.new(0, 80, 1, 0)
-    ModeLabel.Position = UDim2.new(0, 12, 0, 0)
-    ModeLabel.BackgroundTransparency = 1
-    ModeLabel.Text = "Reset Mode"
-    ModeLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
-    ModeLabel.Font = Enum.Font.GothamSemibold
-    ModeLabel.TextSize = 13
-    ModeLabel.TextXAlignment = Enum.TextXAlignment.Left
-    ModeLabel.Parent = ModeRow
-
-    local ModeBtn = Instance.new("TextButton")
-    ModeBtn.Name = "ModeToggle"
-    ModeBtn.Size = UDim2.new(0, 115, 0, 26)
-    ModeBtn.Position = UDim2.new(1, -127, 0.5, -13)
-    ModeBtn.BackgroundColor3 = Color3.fromRGB(35, 30, 48)
-    ModeBtn.TextColor3 = Color3.fromRGB(210, 160, 255)
-    ModeBtn.Text = State.Mode
-    ModeBtn.Font = Enum.Font.GothamBold
-    ModeBtn.TextSize = 12
-    ModeBtn.AutoButtonColor = false
-    ModeBtn.Parent = ModeRow
-
-    local mbCorner = Instance.new("UICorner")
-    mbCorner.CornerRadius = UDim.new(0, 6)
-    mbCorner.Parent = ModeBtn
-
-    local mbStroke = Instance.new("UIStroke")
-    mbStroke.Color = Color3.fromRGB(110, 70, 170)
-    mbStroke.Thickness = 1
-    mbStroke.Parent = ModeBtn
-
-    local InputRow = Instance.new("Frame")
-    InputRow.Size = UDim2.new(1, 0, 0, 38)
-    InputRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-    InputRow.LayoutOrder = 3
-    InputRow.Parent = Content
-
-    local irCorner = Instance.new("UICorner")
-    irCorner.CornerRadius = UDim.new(0, 8)
-    irCorner.Parent = InputRow
-
-    local InputLabel = Instance.new("TextLabel")
-    InputLabel.Size = UDim2.new(0, 90, 1, 0)
-    InputLabel.Position = UDim2.new(0, 12, 0, 0)
-    InputLabel.BackgroundTransparency = 1
-    InputLabel.Text = State.Mode == "Anti-Stuck" and "Max Idle (s)" or "Interval"
-    InputLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
-    InputLabel.Font = Enum.Font.GothamSemibold
-    InputLabel.TextSize = 13
-    InputLabel.TextXAlignment = Enum.TextXAlignment.Left
-    InputLabel.Parent = InputRow
-
-    local TimeInput = Instance.new("TextBox")
-    TimeInput.Name = "TimeInput"
-    TimeInput.Size = UDim2.new(0, 60, 0, 26)
-    TimeInput.Position = UDim2.new(0, 105, 0.5, -13)
-    TimeInput.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    TimeInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TimeInput.PlaceholderText = tostring(State.IntervalValue)
-    TimeInput.Text = tostring(State.IntervalValue)
-    TimeInput.Font = Enum.Font.GothamBold
-    TimeInput.TextSize = 13
-    TimeInput.ClearTextOnFocus = false
-    TimeInput.Parent = InputRow
-
-    local tiCorner = Instance.new("UICorner")
-    tiCorner.CornerRadius = UDim.new(0, 6)
-    tiCorner.Parent = TimeInput
-
-    local tiStroke = Instance.new("UIStroke")
-    tiStroke.Color = Color3.fromRGB(50, 50, 60)
-    tiStroke.Thickness = 1
-    tiStroke.Parent = TimeInput
-
-    local UnitBtn = Instance.new("TextButton")
-    UnitBtn.Name = "UnitToggle"
-    UnitBtn.Size = UDim2.new(0, 80, 0, 26)
-    UnitBtn.Position = UDim2.new(1, -92, 0.5, -13)
-    UnitBtn.AutoButtonColor = false
-    UnitBtn.Parent = InputRow
-
-    if State.Unit == "Seconds" then
-        UnitBtn.BackgroundColor3 = Color3.fromRGB(30, 45, 55)
-        UnitBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
-        UnitBtn.Text = "Seconds"
-    else
-        UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
-        UnitBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
-        UnitBtn.Text = "Minutes"
-    end
-
-    UnitBtn.Font = Enum.Font.GothamBold
-    UnitBtn.TextSize = 11
-
-    local ubCorner = Instance.new("UICorner")
-    ubCorner.CornerRadius = UDim.new(0, 6)
-    ubCorner.Parent = UnitBtn
-
-    local ubStroke = Instance.new("UIStroke")
-    if State.Unit == "Seconds" then
-        ubStroke.Color = Color3.fromRGB(60, 140, 200)
-    else
-        ubStroke.Color = Color3.fromRGB(120, 80, 180)
-    end
-    ubStroke.Thickness = 1
-    ubStroke.Parent = UnitBtn
-
-    ModeBtn.MouseButton1Click:Connect(function()
-        if State.Mode == "Anti-Stuck" then
-            State.Mode = "Timer"
-            InputLabel.Text = "Interval"
-        else
-            State.Mode = "Anti-Stuck"
-            InputLabel.Text = "Max Idle (s)"
-        end
-        ModeBtn.Text = State.Mode
-        Config.Save()
-        if State.IsActive then
-            ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
-        end
-    end)
-
-    UnitBtn.MouseButton1Click:Connect(function()
-        if State.Unit == "Minutes" then
-            State.Unit = "Seconds"
-            UnitBtn.Text = "Seconds"
-            UnitBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
-            UnitBtn.BackgroundColor3 = Color3.fromRGB(30, 45, 55)
-            ubStroke.Color = Color3.fromRGB(60, 140, 200)
-        else
-            State.Unit = "Minutes"
-            UnitBtn.Text = "Minutes"
-            UnitBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
-            UnitBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 50)
-            ubStroke.Color = Color3.fromRGB(120, 80, 180)
-        end
-        if State.Unit == "Minutes" then
-            State.IntervalSeconds = State.IntervalValue * 60
-        else
-            State.IntervalSeconds = State.IntervalValue
-        end
-        Config.Save()
-    end)
-
-    TimeInput.FocusLost:Connect(function()
-        local rawVal = tonumber(TimeInput.Text) or State.IntervalValue
-        if rawVal <= 0 then rawVal = 1 end
-        State.IntervalValue = rawVal
-        TimeInput.Text = tostring(rawVal)
-        if State.Unit == "Minutes" then
-            State.IntervalSeconds = rawVal * 60
-        else
-            State.IntervalSeconds = rawVal
-        end
-        Config.Save()
-    end)
-
-    local function createToggleRow(labelText, initialState, onToggle, order)
+    local function createToggle(parent, labelText, initialState, onToggle, order)
         local Row = Instance.new("Frame")
-        Row.Size = UDim2.new(1, 0, 0, 40)
-        Row.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+        Row.Size = UDim2.new(1, 0, 0, 30)
+        Row.BackgroundTransparency = 1
         Row.LayoutOrder = order
-        Row.Parent = Content
-
-        local rCorner = Instance.new("UICorner")
-        rCorner.CornerRadius = UDim.new(0, 8)
-        rCorner.Parent = Row
+        Row.Parent = parent
 
         local Label = Instance.new("TextLabel")
-        Label.Size = UDim2.new(0.65, 0, 1, 0)
-        Label.Position = UDim2.new(0, 12, 0, 0)
+        Label.Size = UDim2.new(0.7, 0, 1, 0)
         Label.BackgroundTransparency = 1
         Label.Text = labelText
-        Label.TextColor3 = Color3.fromRGB(230, 230, 235)
-        Label.Font = Enum.Font.GothamBold
+        Label.TextColor3 = Color3.fromRGB(225, 225, 235)
+        Label.Font = Enum.Font.GothamMedium
         Label.TextSize = 13
         Label.TextXAlignment = Enum.TextXAlignment.Left
         Label.Parent = Row
 
         local Btn = Instance.new("TextButton")
-        Btn.Size = UDim2.new(0, 52, 0, 24)
-        Btn.Position = UDim2.new(1, -64, 0.5, -12)
+        Btn.Size = UDim2.new(0, 46, 0, 22)
+        Btn.Position = UDim2.new(1, -46, 0.5, -11)
         Btn.Text = ""
         Btn.AutoButtonColor = false
         Btn.Parent = Row
@@ -402,70 +235,92 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
         bCorner.Parent = Btn
 
         local Circle = Instance.new("Frame")
-        Circle.Size = UDim2.new(0, 18, 0, 18)
+        Circle.Size = UDim2.new(0, 16, 0, 16)
         Circle.Parent = Btn
 
         local cCorner = Instance.new("UICorner")
         cCorner.CornerRadius = UDim.new(1, 0)
         cCorner.Parent = Circle
 
-        local Text = Instance.new("TextLabel")
-        Text.Size = UDim2.new(0, 26, 1, 0)
-        Text.BackgroundTransparency = 1
-        Text.Font = Enum.Font.GothamBold
-        Text.TextSize = 9
-        Text.Parent = Btn
-
-        local function updateVisual(val)
+        local function update(val)
             if val then
                 Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-                Circle.Position = UDim2.new(1, -21, 0.5, -9)
+                Circle.Position = UDim2.new(1, -19, 0.5, -8)
                 Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                Text.Text = "ON"
-                Text.Position = UDim2.new(0, 3, 0, 0)
-                Text.TextColor3 = Color3.fromRGB(255, 255, 255)
             else
-                Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-                Circle.Position = UDim2.new(0, 3, 0.5, -9)
-                Circle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
-                Text.Text = "OFF"
-                Text.Position = UDim2.new(1, -29, 0, 0)
-                Text.TextColor3 = Color3.fromRGB(150, 150, 160)
+                Btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+                Circle.Position = UDim2.new(0, 3, 0.5, -8)
+                Circle.BackgroundColor3 = Color3.fromRGB(160, 160, 170)
             end
         end
 
-        updateVisual(initialState)
+        update(initialState)
 
         Btn.MouseButton1Click:Connect(function()
             local newState = onToggle()
-            updateVisual(newState)
+            update(newState)
             Config.Save()
         end)
 
-        return Row, updateVisual
+        return Row
     end
 
-    createToggleRow("Auto Reset Guard", State.IsActive, function()
+    createToggle(statusCard, "Anti-Stuck Guard", State.IsActive, function()
         State.IsActive = not State.IsActive
         if State.IsActive then
-            local rawVal = tonumber(TimeInput.Text) or State.IntervalValue
-            if rawVal <= 0 then rawVal = 1 end
-            State.IntervalValue = rawVal
-            if State.Unit == "Minutes" then
-                State.IntervalSeconds = rawVal * 60
-            else
-                State.IntervalSeconds = rawVal
-            end
-            cdStroke.Color = Color3.fromRGB(40, 160, 80)
             ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
         else
-            cdStroke.Color = Color3.fromRGB(40, 40, 50)
             ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
         end
         return State.IsActive
-    end, 4)
+    end, 3)
 
-    createToggleRow("Auto Wash Items (Send & Claim)", State.AutoWash, function()
+    local InputRow = Instance.new("Frame")
+    InputRow.Size = UDim2.new(1, 0, 0, 30)
+    InputRow.BackgroundTransparency = 1
+    InputRow.LayoutOrder = 4
+    InputRow.Parent = statusCard
+
+    local InpLabel = Instance.new("TextLabel")
+    InpLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    InpLabel.BackgroundTransparency = 1
+    InpLabel.Text = "Idle Threshold (Seconds)"
+    InpLabel.TextColor3 = Color3.fromRGB(225, 225, 235)
+    InpLabel.Font = Enum.Font.GothamMedium
+    InpLabel.TextSize = 13
+    InpLabel.TextXAlignment = Enum.TextXAlignment.Left
+    InpLabel.Parent = InputRow
+
+    local Box = Instance.new("TextBox")
+    Box.Size = UDim2.new(0, 80, 0, 24)
+    Box.Position = UDim2.new(1, -80, 0.5, -12)
+    Box.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+    Box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Box.Text = tostring(State.IntervalValue)
+    Box.Font = Enum.Font.GothamBold
+    Box.TextSize = 12
+    Box.ClearTextOnFocus = false
+    Box.Parent = InputRow
+
+    local bxCorner = Instance.new("UICorner")
+    bxCorner.CornerRadius = UDim.new(0, 5)
+    bxCorner.Parent = Box
+
+    local bxStroke = Instance.new("UIStroke")
+    bxStroke.Color = Color3.fromRGB(45, 45, 55)
+    bxStroke.Thickness = 1
+    bxStroke.Parent = Box
+
+    Box.FocusLost:Connect(function()
+        local val = tonumber(Box.Text) or 15
+        State.IntervalValue = val
+        State.IntervalSeconds = val
+        Box.Text = tostring(val)
+        Config.Save()
+    end)
+
+    local washCard = createCard("Auto Wash Items (Cleaning)", 2)
+    createToggle(washCard, "Auto Wash (Send & Claim)", State.AutoWash, function()
         State.AutoWash = not State.AutoWash
         if State.AutoWash then
             WashModule.StartAutoWashLoop(State)
@@ -473,34 +328,13 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
             WashModule.StopAutoWashLoop()
         end
         return State.AutoWash
-    end, 5)
-
-    local RaritySection = Instance.new("Frame")
-    RaritySection.Size = UDim2.new(1, 0, 0, 105)
-    RaritySection.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
-    RaritySection.LayoutOrder = 6
-    RaritySection.Parent = Content
-
-    local rsCorner = Instance.new("UICorner")
-    rsCorner.CornerRadius = UDim.new(0, 8)
-    rsCorner.Parent = RaritySection
-
-    local RarityTitle = Instance.new("TextLabel")
-    RarityTitle.Size = UDim2.new(1, -20, 0, 20)
-    RarityTitle.Position = UDim2.new(0, 10, 0, 6)
-    RarityTitle.BackgroundTransparency = 1
-    RarityTitle.Text = "WASH RARITY FILTER"
-    RarityTitle.TextColor3 = Color3.fromRGB(150, 150, 170)
-    RarityTitle.Font = Enum.Font.GothamBold
-    RarityTitle.TextSize = 11
-    RarityTitle.TextXAlignment = Enum.TextXAlignment.Left
-    RarityTitle.Parent = RaritySection
+    end, 1)
 
     local RarityGrid = Instance.new("Frame")
-    RarityGrid.Size = UDim2.new(1, -16, 0, 70)
-    RarityGrid.Position = UDim2.new(0, 8, 0, 28)
+    RarityGrid.Size = UDim2.new(1, 0, 0, 68)
     RarityGrid.BackgroundTransparency = 1
-    RarityGrid.Parent = RaritySection
+    RarityGrid.LayoutOrder = 2
+    RarityGrid.Parent = washCard
 
     local gridLayout = Instance.new("UIGridLayout")
     gridLayout.CellSize = UDim2.new(0.23, 0, 0, 30)
@@ -510,7 +344,7 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
 
     for idx, rarity in ipairs(RARITY_LIST) do
         local rBtn = Instance.new("TextButton")
-        rBtn.Name = rarity
+        rBtn.Size = UDim2.new(1, 0, 1, 0)
         rBtn.Text = rarity
         rBtn.Font = Enum.Font.GothamBold
         rBtn.TextSize = 10
@@ -519,38 +353,39 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
         rBtn.Parent = RarityGrid
 
         local rbCorner = Instance.new("UICorner")
-        rbCorner.CornerRadius = UDim.new(0, 6)
+        rbCorner.CornerRadius = UDim.new(0, 5)
         rbCorner.Parent = rBtn
 
         local rbStroke = Instance.new("UIStroke")
         rbStroke.Thickness = 1
         rbStroke.Parent = rBtn
 
-        local color = RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
+        local col = RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
 
-        local function updateRBtn(enabled)
-            if enabled then
-                rBtn.BackgroundColor3 = Color3.fromRGB(35, 38, 45)
-                rBtn.TextColor3 = color
-                rbStroke.Color = color
+        local function updateR()
+            local on = State.WashRarities[rarity] == true
+            if on then
+                rBtn.BackgroundColor3 = Color3.fromRGB(30, 35, 42)
+                rBtn.TextColor3 = col
+                rbStroke.Color = col
             else
-                rBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-                rBtn.TextColor3 = Color3.fromRGB(80, 80, 90)
-                rbStroke.Color = Color3.fromRGB(40, 40, 48)
+                rBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+                rBtn.TextColor3 = Color3.fromRGB(75, 75, 85)
+                rbStroke.Color = Color3.fromRGB(35, 35, 45)
             end
         end
 
-        local isEnabled = State.WashRarities[rarity] == true
-        updateRBtn(isEnabled)
+        updateR()
 
         rBtn.MouseButton1Click:Connect(function()
             State.WashRarities[rarity] = not State.WashRarities[rarity]
-            updateRBtn(State.WashRarities[rarity])
             Config.Save()
+            updateR()
         end)
     end
 
-    createToggleRow("Fast Auction Pickup (Instant Loot)", State.FastPickup, function()
+    local aucCard = createCard("Fast Auction Looting", 3)
+    createToggle(aucCard, "Fast Loot (Auto-Vehicle & Instant Pickup)", State.FastPickup, function()
         State.FastPickup = not State.FastPickup
         if State.FastPickup then
             AuctionModule.StartFastPickupLoop(State)
@@ -558,7 +393,127 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
             AuctionModule.StopFastPickupLoop()
         end
         return State.FastPickup
-    end, 7)
+    end, 1)
+
+    local tpCard = createCard("Map Locations & Teleport", 4)
+    local locList = TeleportModule.GetLocationList()
+    local selectedLoc = State.TeleportTarget or locList[1]
+
+    local TpSelectBtn = Instance.new("TextButton")
+    TpSelectBtn.Size = UDim2.new(1, 0, 0, 32)
+    TpSelectBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    TpSelectBtn.Text = "  " .. selectedLoc
+    TpSelectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TpSelectBtn.Font = Enum.Font.GothamBold
+    TpSelectBtn.TextSize = 12
+    TpSelectBtn.TextXAlignment = Enum.TextXAlignment.Left
+    TpSelectBtn.AutoButtonColor = false
+    TpSelectBtn.LayoutOrder = 1
+    TpSelectBtn.Parent = tpCard
+
+    local tpsCorner = Instance.new("UICorner")
+    tpsCorner.CornerRadius = UDim.new(0, 6)
+    tpsCorner.Parent = TpSelectBtn
+
+    local tpsStroke = Instance.new("UIStroke")
+    tpsStroke.Color = Color3.fromRGB(45, 45, 55)
+    tpsStroke.Thickness = 1
+    tpsStroke.Parent = TpSelectBtn
+
+    local TpListScroll = Instance.new("ScrollingFrame")
+    TpListScroll.Size = UDim2.new(1, 0, 0, 140)
+    TpListScroll.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+    TpListScroll.BorderSizePixel = 0
+    TpListScroll.ScrollBarThickness = 3
+    TpListScroll.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 60)
+    TpListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    TpListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    TpListScroll.Visible = false
+    TpListScroll.LayoutOrder = 2
+    TpListScroll.Parent = tpCard
+
+    local tplsCorner = Instance.new("UICorner")
+    tplsCorner.CornerRadius = UDim.new(0, 6)
+    tplsCorner.Parent = TpListScroll
+
+    local tplsLayout = Instance.new("UIListLayout")
+    tplsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    tplsLayout.Padding = UDim.new(0, 2)
+    tplsLayout.Parent = TpListScroll
+
+    for idx, locName in ipairs(locList) do
+        local lBtn = Instance.new("TextButton")
+        lBtn.Size = UDim2.new(1, 0, 0, 26)
+        lBtn.BackgroundTransparency = 1
+        lBtn.Text = "   " .. locName
+        lBtn.TextColor3 = (locName == selectedLoc) and Color3.fromRGB(255, 75, 75) or Color3.fromRGB(180, 180, 190)
+        lBtn.Font = Enum.Font.GothamMedium
+        lBtn.TextSize = 12
+        lBtn.TextXAlignment = Enum.TextXAlignment.Left
+        lBtn.AutoButtonColor = false
+        lBtn.LayoutOrder = idx
+        lBtn.Parent = TpListScroll
+
+        lBtn.MouseButton1Click:Connect(function()
+            selectedLoc = locName
+            State.TeleportTarget = locName
+            Config.Save()
+            TpSelectBtn.Text = "  " .. selectedLoc
+            TpListScroll.Visible = false
+        end)
+    end
+
+    TpSelectBtn.MouseButton1Click:Connect(function()
+        TpListScroll.Visible = not TpListScroll.Visible
+    end)
+
+    local TeleportActionBtn = Instance.new("TextButton")
+    TeleportActionBtn.Size = UDim2.new(1, 0, 0, 36)
+    TeleportActionBtn.BackgroundColor3 = Color3.fromRGB(210, 45, 50)
+    TeleportActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TeleportActionBtn.Text = "TELEPORT NOW"
+    TeleportActionBtn.Font = Enum.Font.GothamBold
+    TeleportActionBtn.TextSize = 13
+    TeleportActionBtn.AutoButtonColor = false
+    TeleportActionBtn.LayoutOrder = 3
+    TeleportActionBtn.Parent = tpCard
+
+    local tabCorner = Instance.new("UICorner")
+    tabCorner.CornerRadius = UDim.new(0, 6)
+    tabCorner.Parent = TeleportActionBtn
+
+    TeleportActionBtn.MouseButton1Click:Connect(function()
+        local ok = TeleportModule.TeleportTo(selectedLoc)
+        TeleportActionBtn.Text = ok and "TELEPORTED!" or "LOCATION NOT FOUND"
+        task.wait(1.5)
+        TeleportActionBtn.Text = "TELEPORT NOW"
+    end)
+
+    local setCard = createCard("Script Control", 5)
+
+    local UnloadBtn = Instance.new("TextButton")
+    UnloadBtn.Size = UDim2.new(1, 0, 0, 36)
+    UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 22, 26)
+    UnloadBtn.TextColor3 = Color3.fromRGB(255, 110, 110)
+    UnloadBtn.Text = "UNLOAD GENESIS"
+    UnloadBtn.Font = Enum.Font.GothamBold
+    UnloadBtn.TextSize = 13
+    UnloadBtn.AutoButtonColor = false
+    UnloadBtn.LayoutOrder = 1
+    UnloadBtn.Parent = setCard
+
+    local ubCorner = Instance.new("UICorner")
+    ubCorner.CornerRadius = UDim.new(0, 6)
+    ubCorner.Parent = UnloadBtn
+
+    UnloadBtn.MouseButton1Click:Connect(function()
+        AuctionModule.StopFastPickupLoop()
+        WashModule.StopAutoWashLoop()
+        ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
+        _G.GenesisRunning = nil
+        shared.GenesisRunning = nil
+        ScreenGui:Destroy()
+    end)
 
     if State.IsActive then
         ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
@@ -569,40 +524,6 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule)
     if State.FastPickup then
         AuctionModule.StartFastPickupLoop(State)
     end
-
-    local UnloadBtn = Instance.new("TextButton")
-    UnloadBtn.Size = UDim2.new(1, 0, 0, 36)
-    UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 25, 28)
-    UnloadBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
-    UnloadBtn.Text = "UNLOAD SCRIPT"
-    UnloadBtn.Font = Enum.Font.GothamBold
-    UnloadBtn.TextSize = 12
-    UnloadBtn.AutoButtonColor = false
-    UnloadBtn.LayoutOrder = 8
-    UnloadBtn.Parent = Content
-
-    local ulCorner = Instance.new("UICorner")
-    ulCorner.CornerRadius = UDim.new(0, 8)
-    ulCorner.Parent = UnloadBtn
-
-    local ulStroke = Instance.new("UIStroke")
-    ulStroke.Color = Color3.fromRGB(150, 40, 40)
-    ulStroke.Thickness = 1
-    ulStroke.Parent = UnloadBtn
-
-    UnloadBtn.MouseEnter:Connect(function()
-        UnloadBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 35)
-    end)
-    UnloadBtn.MouseLeave:Connect(function()
-        UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 25, 28)
-    end)
-
-    UnloadBtn.MouseButton1Click:Connect(function()
-        ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
-        WashModule.StopAutoWashLoop()
-        AuctionModule.StopFastPickupLoop()
-        ScreenGui:Destroy()
-    end)
 end
 
 return UI

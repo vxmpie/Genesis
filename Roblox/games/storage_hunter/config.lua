@@ -14,6 +14,7 @@ Config.State = {
     IntervalValue = 15,
     TimeRemaining = 0,
     Unit = "Seconds",
+    TeleportTarget = "Auction: Shipyard",
     WashRarities = {
         Common = true,
         Uncommon = true,
@@ -45,6 +46,7 @@ function Config.Save()
             AutoWash = Config.State.AutoWash,
             FastPickup = Config.State.FastPickup,
             WashRarities = Config.State.WashRarities,
+            TeleportTarget = Config.State.TeleportTarget,
         })
         writefile(SETTINGS_FILE, data)
     end)
@@ -76,6 +78,9 @@ function Config.Load()
             end
             if decoded.FastPickup ~= nil then
                 Config.State.FastPickup = decoded.FastPickup
+            end
+            if decoded.TeleportTarget then
+                Config.State.TeleportTarget = tostring(decoded.TeleportTarget)
             end
             if decoded.WashRarities and type(decoded.WashRarities) == "table" then
                 for k, v in pairs(decoded.WashRarities) do
