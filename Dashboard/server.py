@@ -425,7 +425,8 @@ def get_session_summary() -> dict:
     last_clean_time = "None"
     
     for e in reversed(event_history):
-        if e.get("type") == "boost":
+        msg = e.get("message", "").lower()
+        if e.get("type") == "boost" and "triggered" not in msg and "scheduled clock-aligned boost" not in msg:
             total_boosts += 1
             if last_clean_time == "None":
                 last_clean_time = e.get("time", "")
@@ -811,7 +812,7 @@ def deep_clean_execute(targets: list | None = None) -> dict:
         pass
 
     total_freed_mb = round(total_freed / (1024 * 1024), 1)
-    add_event("boost", f"Deep Clean: {total_freed_mb} MB freed ({total_deleted} files)")
+    add_event("clean", f"🧹 Deep Clean: {total_freed_mb} MB freed ({total_deleted} files)")
 
     return {
         "total_freed_mb": total_freed_mb,
@@ -1984,7 +1985,7 @@ async def auto_boost_loop():
 
                     if needs_ram_trim or needs_standby_purge:
                         should_boost = True
-                        add_event("boost", f"Scheduled Clock-Aligned Boost {slot_desc} triggered — Gate Passed: RAM {mem.percent}%, Standby {ram_breakdown.get('standby_gb', 0)}GB")
+                        add_event("info", f"Scheduled Clock-Aligned Boost {slot_desc} triggered — Gate Passed: RAM {mem.percent}%, Standby {ram_breakdown.get('standby_gb', 0)}GB")
                     else:
                         add_event("info", f"Scheduled Boost {slot_desc} skipped — Memory Healthy: RAM {mem.percent}%, Available {ram_breakdown.get('available_gb', 0)}GB, Standby {ram_breakdown.get('standby_gb', 0)}GB")
 
@@ -2558,13 +2559,13 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         save_config(CONFIG)
         await ws.send_json({"type": "config_updated", "config": CONFIG})
 
-    elif cmd == "deep_clean_preview":
-        preview = deep_clean_preview()
+    elif cmd in ("deep_clean_preview", "scan_deep_clean", "scan_targets"):
+        preview = await asyncio.to_thread(deep_clean_preview)
         await ws.send_json({"type": "deep_clean_preview", "data": preview})
 
-    elif cmd == "deep_clean_execute":
+    elif cmd in ("deep_clean_execute", "clean_all"):
         targets = data.get("targets")
-        result = deep_clean_execute(targets)
+        result = await asyncio.to_thread(deep_clean_execute, targets)
         await ws.send_json({"type": "deep_clean_result", "data": result})
 
     elif cmd == "vm_disk_refresh":
@@ -2577,7 +2578,7 @@ async def handle_ws_command(ws: WebSocket, data: dict):
             success = trim_vm_caches(port)
             await ws.send_json({"type": "vm_trim_result", "port": port, "success": success})
 
-    elif cmd == "check_hardening":
+    elif cmd in ("check_hardening", "refresh_hardening"):
         result = check_hardening_drift()
         await ws.send_json({"type": "hardening_status", "data": result})
 

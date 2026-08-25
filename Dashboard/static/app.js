@@ -1008,25 +1008,29 @@ function runDispatchedAction(cmdId) {
             showToast('system', '⚡ RAM Boost triggered via Command Palette');
             break;
         case 'scan_deep_clean':
-            sendCommand('scan_deep_clean');
-            showToast('info', '🧹 Scanning system caches...');
+            sendCommand('deep_clean_preview');
+            showToast('info', '🧹 Scanning system caches and dump files...');
             break;
         case 'refresh_hardening':
-            sendCommand('refresh_hardening');
-            showToast('info', '🛡️ Auditing system hardening...');
+            sendCommand('check_hardening');
+            showToast('info', '🛡️ Auditing system hardening (4/4 CIM)...');
             break;
         case 'flush_dns':
             sendCommand('flush_dns');
+            showToast('info', '🌐 Flushing DNS resolver...');
             break;
         case 'quick_scan':
             sendCommand('quick_scan');
+            showToast('info', '🔍 Defender quick scan initiated...');
             break;
         case 'reset_session':
             sendCommand('reset_session_boosts');
+            showToast('info', '↺ Resetting session metrics...');
             break;
         case 'reset_total':
             if (requireAuth(() => sendCommand('reset_total_boosts'))) return;
             sendCommand('reset_total_boosts');
+            showToast('info', '🗑️ Resetting lifetime boost history...');
             break;
     }
 }
@@ -1098,24 +1102,12 @@ function updateHardeningStatus(data) {
     items.forEach(({ el, key }) => {
         if (!el) return;
         const status = data.checks[key];
-        const icon = el.querySelector('.hardening-icon');
         const statusEl = el.querySelector('.hardening-status');
+        const iconEl = el.querySelector('.hardening-icon');
 
-        el.className = 'hardening-item';
-        if (status === 'ok') {
-            icon.textContent = '✅';
-            const okText = key === 'defender_exclusion' ? 'Excluded' : 'Disabled';
-            statusEl.textContent = okText;
-            el.classList.add('ok');
-        } else if (status === 'drift') {
-            icon.textContent = '⚠️';
-            statusEl.textContent = 'DRIFT!';
-            el.classList.add('drift');
-        } else {
-            icon.textContent = '🛡️';
-            statusEl.textContent = status ? (status.includes('Admin') ? 'Protected' : status) : 'Configured';
-            el.classList.add('ok');
-        }
+        el.className = `hardening-item ${status}`;
+        if (statusEl) statusEl.textContent = status === 'ok' ? 'Protected' : (status === 'disabled' ? 'Disabled' : 'Drift');
+        if (iconEl) iconEl.textContent = status === 'ok' ? '✅' : (status === 'disabled' ? '⚠️' : '❌');
     });
 
     if (data.last_check) {
@@ -1135,9 +1127,10 @@ function renderDeepCleanPreview(preview) {
     STATE.deepCleanPreview = preview;
 
     if (!preview || preview.length === 0) {
-        DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">No cleanable files found</div>';
+        DOM.deepCleanPreview.innerHTML = '<div class="deep-clean-empty">No cleanable files found (All clean)</div>';
         DOM.deepCleanExecBtn.disabled = true;
         DOM.deepCleanTotal.style.display = 'none';
+        showToast('info', '🧹 Target Scan: No cleanable cache files found');
         return;
     }
 
@@ -1169,6 +1162,13 @@ function renderDeepCleanPreview(preview) {
     DOM.deepCleanTotal.style.display = 'flex';
     DOM.deepCleanExecBtn.textContent = 'Clean All';
     DOM.deepCleanExecBtn.disabled = false;
+
+    showToast('boost', `🧹 Scan complete: ${totalSize.toFixed(1)} MB in ${totalFiles} cleanable files found`);
+    addLogEntry({
+        time: new Date().toLocaleTimeString(),
+        type: 'clean',
+        message: `Scanned deep clean targets: ${totalSize.toFixed(1)} MB (${totalFiles} files)`
+    });
 }
 
 function onDeepCleanResult(result) {
@@ -1180,6 +1180,11 @@ function onDeepCleanResult(result) {
     DOM.deepCleanTotal.style.display = 'none';
     DOM.deepCleanScanBtn.textContent = 'Scan';
     DOM.deepCleanScanBtn.disabled = false;
+    addLogEntry({
+        time: new Date().toLocaleTimeString(),
+        type: 'clean',
+        message: `Deep Clean finished: ${result.total_freed_mb} MB freed (${result.total_deleted} files)`
+    });
 }
 
 // ============================================================
