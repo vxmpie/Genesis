@@ -10,15 +10,22 @@ local function buildRarityCache()
         if mod then
             local items = require(mod)
             if type(items) == "table" then
-                for name, data in pairs(items) do
-                    if type(data) == "table" and data.Rarity then
-                        RarityCache[name] = tostring(data.Rarity)
-                        if data.ItemId then
-                            RarityCache[tostring(data.ItemId)] = tostring(data.Rarity)
+                local list = items.Items or items
+                for k, data in pairs(list) do
+                    if type(data) == "table" then
+                        local rarityVal = data.Rarity or data.rarity or data.Tier or data.tier
+                        if rarityVal then
+                            local rStr = tostring(rarityVal)
+                            RarityCache[tostring(k)] = rStr
+                            if data.Name then RarityCache[tostring(data.Name)] = rStr end
+                            if data.name then RarityCache[tostring(data.name)] = rStr end
+                            if data.ItemId then RarityCache[tostring(data.ItemId)] = rStr end
+                            if data.itemId then RarityCache[tostring(data.itemId)] = rStr end
+                            if data.Id then RarityCache[tostring(data.Id)] = rStr end
+                            if data.id then RarityCache[tostring(data.id)] = rStr end
                         end
-                        if data.Id then
-                            RarityCache[tostring(data.Id)] = tostring(data.Rarity)
-                        end
+                    elseif type(data) == "string" then
+                        RarityCache[tostring(k)] = tostring(data)
                     end
                 end
             end
@@ -33,8 +40,13 @@ function WashModule.GetItemRarity(itemEntry)
         local data = itemEntry.data or itemEntry
         if data.Rarity then return tostring(data.Rarity) end
         if data.rarity then return tostring(data.rarity) end
-        if data.Name and RarityCache[data.Name] then return RarityCache[data.Name] end
+        if data.Tier then return tostring(data.Tier) end
+        if data.tier then return tostring(data.tier) end
+
+        if data.Name and RarityCache[tostring(data.Name)] then return RarityCache[tostring(data.Name)] end
         if data.ItemId and RarityCache[tostring(data.ItemId)] then return RarityCache[tostring(data.ItemId)] end
+        if data.Id and RarityCache[tostring(data.Id)] then return RarityCache[tostring(data.Id)] end
+        if data.id and RarityCache[tostring(data.id)] then return RarityCache[tostring(data.id)] end
     end
     if type(itemEntry) == "string" and RarityCache[itemEntry] then
         return RarityCache[itemEntry]
@@ -73,9 +85,11 @@ function WashModule.ProcessWash(State)
                 task.spawn(function()
                     if claimWashed then
                         pcall(function() claimWashed:InvokeServer(slotIdx) end)
+                        pcall(function() claimWashed:InvokeServer(tostring(slotIdx)) end)
                     end
                     if collectWash then
                         pcall(function() collectWash:InvokeServer(slotIdx) end)
+                        pcall(function() collectWash:InvokeServer(tostring(slotIdx)) end)
                     end
                 end)
             elseif slotData.EndTime then
@@ -118,6 +132,7 @@ function WashModule.ProcessWash(State)
                         task.spawn(function()
                             pcall(function() startWash:InvokeServer(slotIdx, guid) end)
                             pcall(function() startWash:InvokeServer(tostring(slotIdx), guid) end)
+                            pcall(function() startWash:InvokeServer(slotIdx, target) end)
                         end)
                     end
                 end
