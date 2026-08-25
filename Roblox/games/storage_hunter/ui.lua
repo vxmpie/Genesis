@@ -304,7 +304,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     end
 
     local washPage = createTab("wash", "Auto Wash", 1)
-    local gradePage = createTab("grade", "Auto Grade", 2)
+    local gradePage = createTab("grade", "Grade Safes", 2)
     local resetPage = createTab("reset", "Anti-Stuck", 3)
     local settingsPage = createTab("settings", "Settings", 4)
 
@@ -445,8 +445,8 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         end)
     end
 
-    local gradeCard = createCard(gradePage, "Safe & Item Grading Control")
-    gradeCard:AddToggle("Auto Grade Loop", Config.Get("AutoGrade", false), function(val)
+    local gradeCard = createCard(gradePage, "Safe Grading Master Control")
+    gradeCard:AddToggle("Auto Grade Safes Loop", Config.Get("AutoGrade", false), function(val)
         Config.Set("AutoGrade", val)
         Config.Save()
         if val then
@@ -455,20 +455,30 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
             GradingModule.StopAutoGradeLoop()
         end
     end)
-    gradeCard:AddToggle("Grade Items/Safes from Vehicle", Config.Get("GradeFromVehicle", true), function(val)
+    gradeCard:AddToggle("Grade Safes Directly from Vehicle", Config.Get("GradeFromVehicle", true), function(val)
         Config.Set("GradeFromVehicle", val)
         Config.Save()
     end)
-    gradeCard:AddButton("Quick Grade (1-Shot Instant)", function()
+    gradeCard:AddButton("Quick Grade Safes (1-Shot)", function()
         GradingModule.ProcessGrading(Config.GetState())
     end)
 
-    local gradeRarityCard = createCard(gradePage, "Grading Rarities Matrix")
-    for _, r in ipairs(rarities) do
-        local isAllowed = (state.GradingRarities and state.GradingRarities[r] ~= nil) and state.GradingRarities[r] or true
-        gradeRarityCard:AddToggle(r, isAllowed, function(val)
-            if not state.GradingRarities then state.GradingRarities = {} end
-            state.GradingRarities[r] = val
+    local safeListCard = createCard(gradePage, "Safes Selection (UltraFullDump)")
+    local safeNames = {
+        {"Junk Safe", "Epic (ID: 117)"},
+        {"Wooden Safe", "Rare (ID: 354)"},
+        {"Metal Safe", "Epic (ID: 355)"},
+        {"Code Safe", "Epic (ID: 356)"},
+        {"Diamond Safe", "Epic (ID: 357)"},
+        {"Diamond Vault", "Legendary (ID: 358)"}
+    }
+    for _, safeInfo in ipairs(safeNames) do
+        local sName = safeInfo[1]
+        local sDesc = safeInfo[2]
+        local isAllowed = (state.AllowedSafes and state.AllowedSafes[sName] ~= nil) and state.AllowedSafes[sName] or true
+        safeListCard:AddToggle(sName .. " - " .. sDesc, isAllowed, function(val)
+            if not state.AllowedSafes then state.AllowedSafes = {} end
+            state.AllowedSafes[sName] = val
             Config.Save()
         end)
     end

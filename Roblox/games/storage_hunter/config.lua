@@ -21,15 +21,13 @@ Config.State = {
         Lost = true,
         Exclusive = true
     },
-    GradingRarities = {
-        Common = true,
-        Uncommon = true,
-        Rare = true,
-        Epic = true,
-        Legendary = true,
-        Mythical = true,
-        Lost = true,
-        Exclusive = true
+    AllowedSafes = {
+        ["Junk Safe"] = true,
+        ["Wooden Safe"] = true,
+        ["Metal Safe"] = true,
+        ["Code Safe"] = true,
+        ["Diamond Safe"] = true,
+        ["Diamond Vault"] = true
     }
 }
 
