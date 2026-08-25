@@ -23,7 +23,8 @@ local file = games[game.PlaceId] or games[game.GameId] or games[game.CreatorId]
 
 if file then
     print("[GENESIS] Game matched: Storage Hunters (" .. tostring(game.PlaceId) .. "). Loading main hub...")
-    loadstring(game:HttpGet(BASE .. file))()
+    local url = BASE .. file .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+    loadstring(game:HttpGet(url))()
 else
     warn("[GENESIS] Game not supported! PlaceId:", game.PlaceId, "GameId:", game.GameId)
     pcall(function()

@@ -571,8 +571,10 @@ function UI.Create(Config, ResetModule, WashModule)
     end
 
     local keybindConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftShift then
-            MainFrame.Visible = not MainFrame.Visible
+        if not gameProcessed then
+            if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+                MainFrame.Visible = not MainFrame.Visible
+            end
         end
     end)
     table.insert(connections, keybindConn)

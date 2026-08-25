@@ -6,7 +6,7 @@ local function loadModule(relPath)
         local fn, err = loadstring(readfile(localPath))
         if fn then return fn() end
     end
-    local fullUrl = BASE_URL .. relPath
+    local fullUrl = BASE_URL .. relPath .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
     local success, code = pcall(function()
         return game:HttpGet(fullUrl)
     end)
