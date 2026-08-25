@@ -22,12 +22,17 @@ Config.Load()
 
 local ResetModule = loadModule("functions/reset.lua")
 local WashModule = loadModule("functions/wash.lua")
+local GradingModule = loadModule("functions/grading.lua")
 local UI = loadModule("ui.lua")
 
 if UI and UI.Create then
-    UI.Create(Config, ResetModule, WashModule)
+    UI.Create(Config, ResetModule, WashModule, GradingModule)
 end
 
 if Config.Get("AutoWash", false) and WashModule and WashModule.StartAutoWashLoop then
     WashModule.StartAutoWashLoop(Config.GetState())
+end
+
+if Config.Get("AutoGrade", false) and GradingModule and GradingModule.StartAutoGradeLoop then
+    GradingModule.StartAutoGradeLoop(Config.GetState())
 end

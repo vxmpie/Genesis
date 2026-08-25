@@ -5,11 +5,23 @@ local FILE_NAME = "Genesis_StorageHunter_Config.json"
 
 Config.State = {
     AutoWash = false,
+    AutoGrade = false,
+    GradeFromVehicle = true,
     IsActive = false,
     Mode = "Anti-Stuck",
     IntervalSeconds = 15,
     IntervalValue = 15,
     WashRarities = {
+        Common = true,
+        Uncommon = true,
+        Rare = true,
+        Epic = true,
+        Legendary = true,
+        Mythical = true,
+        Lost = true,
+        Exclusive = true
+    },
+    GradingRarities = {
         Common = true,
         Uncommon = true,
         Rare = true,

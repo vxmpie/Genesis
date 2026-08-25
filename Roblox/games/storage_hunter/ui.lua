@@ -24,17 +24,6 @@ local THEME = {
     ToggleOn = Color3.fromRGB(255, 60, 75)
 }
 
-local RARITY_COLORS = {
-    Common = Color3.fromRGB(170, 170, 170),
-    Uncommon = Color3.fromRGB(75, 215, 95),
-    Rare = Color3.fromRGB(55, 145, 255),
-    Epic = Color3.fromRGB(175, 75, 255),
-    Legendary = Color3.fromRGB(255, 175, 35),
-    Mythical = Color3.fromRGB(255, 55, 115),
-    Lost = Color3.fromRGB(0, 225, 225),
-    Exclusive = Color3.fromRGB(255, 215, 75)
-}
-
 local function getGuiParent()
     local success, parent = pcall(function()
         return gethui and gethui() or CoreGui
@@ -43,7 +32,7 @@ local function getGuiParent()
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 
-function UI.Create(Config, ResetModule, WashModule)
+function UI.Create(Config, ResetModule, WashModule, GradingModule)
     local State = Config.GetState()
     local parent = getGuiParent()
     local connections = {}
@@ -268,12 +257,12 @@ function UI.Create(Config, ResetModule, WashModule)
 
     local function createTab(id, name, order)
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, 0, 0, 32)
+        btn.Size = UDim2.new(1, 0, 0, 30)
         btn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
         btn.TextColor3 = THEME.TextSecondary
         btn.Text = "  " .. name
         btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 11
+        btn.TextSize = 10
         btn.TextXAlignment = Enum.TextXAlignment.Left
         btn.AutoButtonColor = false
         btn.LayoutOrder = order
@@ -315,8 +304,9 @@ function UI.Create(Config, ResetModule, WashModule)
     end
 
     local washPage = createTab("wash", "Auto Wash", 1)
-    local resetPage = createTab("reset", "Anti-Stuck", 2)
-    local settingsPage = createTab("settings", "Settings", 3)
+    local gradePage = createTab("grade", "Auto Grade", 2)
+    local resetPage = createTab("reset", "Anti-Stuck", 3)
+    local settingsPage = createTab("settings", "Settings", 4)
 
     local function createCard(parentPage, title)
         local card = Instance.new("Frame")
@@ -443,14 +433,42 @@ function UI.Create(Config, ResetModule, WashModule)
         WashModule.ProcessWash(Config.GetState())
     end)
 
-    local rarityCard = createCard(washPage, "Wash Rarities Matrix")
+    local washRarityCard = createCard(washPage, "Wash Rarities Matrix")
     local state = Config.GetState()
     local rarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Lost", "Exclusive"}
     for _, r in ipairs(rarities) do
         local isAllowed = (state.WashRarities and state.WashRarities[r] ~= nil) and state.WashRarities[r] or true
-        rarityCard:AddToggle(r, isAllowed, function(val)
+        washRarityCard:AddToggle(r, isAllowed, function(val)
             if not state.WashRarities then state.WashRarities = {} end
             state.WashRarities[r] = val
+            Config.Save()
+        end)
+    end
+
+    local gradeCard = createCard(gradePage, "Safe & Item Grading Control")
+    gradeCard:AddToggle("Auto Grade Loop", Config.Get("AutoGrade", false), function(val)
+        Config.Set("AutoGrade", val)
+        Config.Save()
+        if val then
+            GradingModule.StartAutoGradeLoop(Config.GetState())
+        else
+            GradingModule.StopAutoGradeLoop()
+        end
+    end)
+    gradeCard:AddToggle("Grade Items/Safes from Vehicle", Config.Get("GradeFromVehicle", true), function(val)
+        Config.Set("GradeFromVehicle", val)
+        Config.Save()
+    end)
+    gradeCard:AddButton("Quick Grade (1-Shot Instant)", function()
+        GradingModule.ProcessGrading(Config.GetState())
+    end)
+
+    local gradeRarityCard = createCard(gradePage, "Grading Rarities Matrix")
+    for _, r in ipairs(rarities) do
+        local isAllowed = (state.GradingRarities and state.GradingRarities[r] ~= nil) and state.GradingRarities[r] or true
+        gradeRarityCard:AddToggle(r, isAllowed, function(val)
+            if not state.GradingRarities then state.GradingRarities = {} end
+            state.GradingRarities[r] = val
             Config.Save()
         end)
     end
@@ -540,6 +558,7 @@ function UI.Create(Config, ResetModule, WashModule)
     end)
     settingsCard:AddButton("Unload Genesis Hub", function()
         WashModule.StopAutoWashLoop()
+        GradingModule.StopAutoGradeLoop()
         ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
         for _, conn in ipairs(connections) do
             pcall(function() conn:Disconnect() end)
@@ -568,6 +587,9 @@ function UI.Create(Config, ResetModule, WashModule)
     end
     if State.AutoWash then
         WashModule.StartAutoWashLoop(State)
+    end
+    if State.AutoGrade then
+        GradingModule.StartAutoGradeLoop(State)
     end
 
     local keybindConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
