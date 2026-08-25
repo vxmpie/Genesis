@@ -6,6 +6,7 @@ local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games
 
 local games = {
     [9640154] = "storage-hunter.lua",
+    [98800969324557] = "storage-hunter.lua",
 }
 
 local file = games[game.PlaceId] or games[game.GameId] or games[game.CreatorId]

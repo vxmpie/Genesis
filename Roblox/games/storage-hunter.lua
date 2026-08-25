@@ -3,6 +3,7 @@ local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 local SETTINGS_FOLDER = "Genesis"
@@ -10,6 +11,8 @@ local SETTINGS_FILE = SETTINGS_FOLDER .. "/settings.json"
 
 local State = {
     IsActive = false,
+    AutoWash = false,
+    FastPickup = true,
     Mode = "Anti-Stuck",
     IntervalSeconds = 15,
     IntervalValue = 15,
@@ -18,6 +21,8 @@ local State = {
 }
 
 local trackerThread = nil
+local washThread = nil
+local pickupThread = nil
 
 local function ensureFolder()
     pcall(function()
@@ -35,6 +40,8 @@ local function saveSettings()
             Unit = State.Unit,
             Mode = State.Mode,
             IsActive = State.IsActive,
+            AutoWash = State.AutoWash,
+            FastPickup = State.FastPickup,
         })
         writefile(SETTINGS_FILE, data)
     end)
@@ -60,6 +67,12 @@ local function loadSettings()
             end
             if decoded.IsActive == true then
                 State.IsActive = true
+            end
+            if decoded.AutoWash ~= nil then
+                State.AutoWash = decoded.AutoWash
+            end
+            if decoded.FastPickup ~= nil then
+                State.FastPickup = decoded.FastPickup
             end
         end
     end
@@ -94,6 +107,124 @@ local function resetCharacter()
         pcall(function()
             character.HumanoidRootPart:Destroy()
         end)
+    end
+end
+
+local function runAutoWash()
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    local washEvents = events and events:FindFirstChild("Wash")
+    if not washEvents then return end
+
+    local getSlotState = washEvents:FindFirstChild("GetSlotState")
+    local getWashableItems = washEvents:FindFirstChild("GetWashableItems")
+    local startWash = washEvents:FindFirstChild("StartWash")
+    local claimWashed = washEvents:FindFirstChild("ClaimWashedItem") or washEvents:FindFirstChild("CollectWash")
+
+    if not getSlotState or not getWashableItems or not startWash then return end
+
+    local ok, slotState = pcall(function() return getSlotState:InvokeServer() end)
+    if ok and type(slotState) == "table" then
+        for slotIndex, slotData in pairs(slotState) do
+            if type(slotData) == "table" then
+                local isDone = slotData.IsComplete or slotData.Status == "Complete" or slotData.Status == "Ready" or (slotData.EndTime and os.time() >= tonumber(slotData.EndTime or 0))
+                if isDone and claimWashed then
+                    pcall(function()
+                        claimWashed:InvokeServer(slotIndex)
+                    end)
+                    task.wait(0.15)
+                end
+            end
+        end
+    end
+
+    local ok2, refreshedSlots = pcall(function() return getSlotState:InvokeServer() end)
+    if ok2 and type(refreshedSlots) == "table" then
+        local ok3, washable = pcall(function() return getWashableItems:InvokeServer() end)
+        if ok3 and type(washable) == "table" and #washable > 0 then
+            local itemIdx = 1
+            for slotIndex, slotData in pairs(refreshedSlots) do
+                local isEmpty = false
+                if slotData == nil or slotData == false then
+                    isEmpty = true
+                elseif type(slotData) == "table" then
+                    isEmpty = slotData.IsEmpty or not slotData.Item or slotData.Status == "Empty" or slotData.Status == nil
+                end
+
+                if isEmpty and washable[itemIdx] then
+                    local target = washable[itemIdx]
+                    local targetId = (type(target) == "table" and (target.Id or target.ItemId or target.UUID or target.id)) or target
+                    pcall(function()
+                        startWash:InvokeServer(slotIndex, targetId)
+                    end)
+                    itemIdx = itemIdx + 1
+                    task.wait(0.15)
+                end
+            end
+        end
+    end
+end
+
+local function fastAuctionPickup()
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    local auctionEvents = events and events:FindFirstChild("Auction")
+    local draggingEvents = events and events:FindFirstChild("Dragging")
+
+    local auctionPickupItem = auctionEvents and auctionEvents:FindFirstChild("AuctionPickupItem")
+    local pickUpItem = draggingEvents and draggingEvents:FindFirstChild("PickUpItem")
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("BasePart") then
+            local isWon = obj:GetAttribute("AuctionItemId") or obj:GetAttribute("WonItem") or obj:GetAttribute("ItemId")
+            local isAuctionParent = obj.Parent and (obj.Parent.Name == "AuctionItems" or obj.Parent.Name == "WonItems" or obj.Parent.Name == "StorageItems")
+            local hasPrompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("PromptPart")
+
+            if isWon or isAuctionParent or hasPrompt then
+                if auctionPickupItem then
+                    pcall(function() auctionPickupItem:FireServer(obj) end)
+                end
+                if pickUpItem then
+                    pcall(function() pickUpItem:FireServer(obj) end)
+                end
+            end
+        end
+    end
+end
+
+local function startAutoWashLoop()
+    if washThread then
+        pcall(function() task.cancel(washThread) end)
+    end
+    washThread = task.spawn(function()
+        while State.AutoWash do
+            pcall(runAutoWash)
+            task.wait(3)
+        end
+    end)
+end
+
+local function stopAutoWashLoop()
+    if washThread then
+        pcall(function() task.cancel(washThread) end)
+        washThread = nil
+    end
+end
+
+local function startFastPickupLoop()
+    if pickupThread then
+        pcall(function() task.cancel(pickupThread) end)
+    end
+    pickupThread = task.spawn(function()
+        while State.FastPickup do
+            pcall(fastAuctionPickup)
+            task.wait(0.3)
+        end
+    end)
+end
+
+local function stopFastPickupLoop()
+    if pickupThread then
+        pcall(function() task.cancel(pickupThread) end)
+        pickupThread = nil
     end
 end
 
@@ -257,8 +388,8 @@ local function createUI()
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 340, 0, 480)
-    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -240)
+    MainFrame.Size = UDim2.new(0, 340, 0, 500)
+    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -250)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
@@ -312,7 +443,7 @@ local function createUI()
     SubTitle.Size = UDim2.new(1, -15, 0, 16)
     SubTitle.Position = UDim2.new(0, 15, 1, -20)
     SubTitle.BackgroundTransparency = 1
-    SubTitle.Text = "Storage Hunter | Anti-Stuck"
+    SubTitle.Text = "Storage Hunter Multi-Tool"
     SubTitle.TextColor3 = Color3.fromRGB(100, 100, 115)
     SubTitle.Font = Enum.Font.GothamMedium
     SubTitle.TextSize = 11
@@ -338,10 +469,15 @@ local function createUI()
         MainFrame.Visible = false
     end)
 
-    local Content = Instance.new("Frame")
-    Content.Size = UDim2.new(1, -30, 1, -65)
-    Content.Position = UDim2.new(0, 15, 0, 55)
+    local Content = Instance.new("ScrollingFrame")
+    Content.Size = UDim2.new(1, -20, 1, -60)
+    Content.Position = UDim2.new(0, 10, 0, 55)
     Content.BackgroundTransparency = 1
+    Content.ScrollBarThickness = 3
+    Content.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 60)
+    Content.BorderSizePixel = 0
+    Content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Content.CanvasSize = UDim2.new(0, 0, 0, 0)
     Content.Parent = MainFrame
 
     local layout = Instance.new("UIListLayout")
@@ -350,7 +486,7 @@ local function createUI()
     layout.Parent = Content
 
     local CountdownFrame = Instance.new("Frame")
-    CountdownFrame.Size = UDim2.new(1, 0, 0, 95)
+    CountdownFrame.Size = UDim2.new(1, 0, 0, 90)
     CountdownFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
     CountdownFrame.LayoutOrder = 1
     CountdownFrame.Parent = Content
@@ -366,19 +502,19 @@ local function createUI()
 
     local CountdownLabel = Instance.new("TextLabel")
     CountdownLabel.Name = "Countdown"
-    CountdownLabel.Size = UDim2.new(1, 0, 0, 55)
-    CountdownLabel.Position = UDim2.new(0, 0, 0, 8)
+    CountdownLabel.Size = UDim2.new(1, 0, 0, 50)
+    CountdownLabel.Position = UDim2.new(0, 0, 0, 6)
     CountdownLabel.BackgroundTransparency = 1
     CountdownLabel.Text = "00:00"
     CountdownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     CountdownLabel.Font = Enum.Font.GothamBlack
-    CountdownLabel.TextSize = 44
+    CountdownLabel.TextSize = 40
     CountdownLabel.Parent = CountdownFrame
 
     local StatusLabel = Instance.new("TextLabel")
     StatusLabel.Name = "Status"
     StatusLabel.Size = UDim2.new(1, 0, 0, 20)
-    StatusLabel.Position = UDim2.new(0, 0, 1, -26)
+    StatusLabel.Position = UDim2.new(0, 0, 1, -24)
     StatusLabel.BackgroundTransparency = 1
     StatusLabel.Text = "INACTIVE"
     StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
@@ -387,7 +523,7 @@ local function createUI()
     StatusLabel.Parent = CountdownFrame
 
     local ModeRow = Instance.new("Frame")
-    ModeRow.Size = UDim2.new(1, 0, 0, 40)
+    ModeRow.Size = UDim2.new(1, 0, 0, 38)
     ModeRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
     ModeRow.LayoutOrder = 2
     ModeRow.Parent = Content
@@ -400,7 +536,7 @@ local function createUI()
     ModeLabel.Size = UDim2.new(0, 80, 1, 0)
     ModeLabel.Position = UDim2.new(0, 12, 0, 0)
     ModeLabel.BackgroundTransparency = 1
-    ModeLabel.Text = "Mode"
+    ModeLabel.Text = "Reset Mode"
     ModeLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
     ModeLabel.Font = Enum.Font.GothamSemibold
     ModeLabel.TextSize = 13
@@ -409,8 +545,8 @@ local function createUI()
 
     local ModeBtn = Instance.new("TextButton")
     ModeBtn.Name = "ModeToggle"
-    ModeBtn.Size = UDim2.new(0, 120, 0, 28)
-    ModeBtn.Position = UDim2.new(1, -132, 0.5, -14)
+    ModeBtn.Size = UDim2.new(0, 115, 0, 26)
+    ModeBtn.Position = UDim2.new(1, -127, 0.5, -13)
     ModeBtn.BackgroundColor3 = Color3.fromRGB(35, 30, 48)
     ModeBtn.TextColor3 = Color3.fromRGB(210, 160, 255)
     ModeBtn.Text = State.Mode
@@ -429,7 +565,7 @@ local function createUI()
     mbStroke.Parent = ModeBtn
 
     local InputRow = Instance.new("Frame")
-    InputRow.Size = UDim2.new(1, 0, 0, 42)
+    InputRow.Size = UDim2.new(1, 0, 0, 38)
     InputRow.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
     InputRow.LayoutOrder = 3
     InputRow.Parent = Content
@@ -451,8 +587,8 @@ local function createUI()
 
     local TimeInput = Instance.new("TextBox")
     TimeInput.Name = "TimeInput"
-    TimeInput.Size = UDim2.new(0, 65, 0, 28)
-    TimeInput.Position = UDim2.new(0, 105, 0.5, -14)
+    TimeInput.Size = UDim2.new(0, 60, 0, 26)
+    TimeInput.Position = UDim2.new(0, 105, 0.5, -13)
     TimeInput.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     TimeInput.TextColor3 = Color3.fromRGB(255, 255, 255)
     TimeInput.PlaceholderText = tostring(State.IntervalValue)
@@ -473,8 +609,8 @@ local function createUI()
 
     local UnitBtn = Instance.new("TextButton")
     UnitBtn.Name = "UnitToggle"
-    UnitBtn.Size = UDim2.new(0, 85, 0, 28)
-    UnitBtn.Position = UDim2.new(1, -97, 0.5, -14)
+    UnitBtn.Size = UDim2.new(0, 80, 0, 26)
+    UnitBtn.Position = UDim2.new(1, -92, 0.5, -13)
     UnitBtn.AutoButtonColor = false
     UnitBtn.Parent = InputRow
 
@@ -554,77 +690,85 @@ local function createUI()
         saveSettings()
     end)
 
-    local ToggleFrame = Instance.new("Frame")
-    ToggleFrame.Size = UDim2.new(1, 0, 0, 48)
-    ToggleFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-    ToggleFrame.LayoutOrder = 4
-    ToggleFrame.Parent = Content
+    local function createToggleRow(labelText, initialState, onToggle, order)
+        local Row = Instance.new("Frame")
+        Row.Size = UDim2.new(1, 0, 0, 42)
+        Row.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+        Row.LayoutOrder = order
+        Row.Parent = Content
 
-    local tfCorner = Instance.new("UICorner")
-    tfCorner.CornerRadius = UDim.new(0, 8)
-    tfCorner.Parent = ToggleFrame
+        local rCorner = Instance.new("UICorner")
+        rCorner.CornerRadius = UDim.new(0, 8)
+        rCorner.Parent = Row
 
-    local ToggleLabel = Instance.new("TextLabel")
-    ToggleLabel.Size = UDim2.new(0.6, 0, 1, 0)
-    ToggleLabel.Position = UDim2.new(0, 15, 0, 0)
-    ToggleLabel.BackgroundTransparency = 1
-    ToggleLabel.Text = "Auto Reset Guard"
-    ToggleLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
-    ToggleLabel.Font = Enum.Font.GothamBold
-    ToggleLabel.TextSize = 14
-    ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    ToggleLabel.Parent = ToggleFrame
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.new(0.65, 0, 1, 0)
+        Label.Position = UDim2.new(0, 12, 0, 0)
+        Label.BackgroundTransparency = 1
+        Label.Text = labelText
+        Label.TextColor3 = Color3.fromRGB(230, 230, 235)
+        Label.Font = Enum.Font.GothamBold
+        Label.TextSize = 13
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+        Label.Parent = Row
 
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Name = "ToggleSwitch"
-    ToggleBtn.Size = UDim2.new(0, 56, 0, 26)
-    ToggleBtn.Position = UDim2.new(1, -72, 0.5, -13)
-    ToggleBtn.Text = ""
-    ToggleBtn.AutoButtonColor = false
-    ToggleBtn.Parent = ToggleFrame
+        local Btn = Instance.new("TextButton")
+        Btn.Size = UDim2.new(0, 52, 0, 24)
+        Btn.Position = UDim2.new(1, -64, 0.5, -12)
+        Btn.Text = ""
+        Btn.AutoButtonColor = false
+        Btn.Parent = Row
 
-    local tbCorner = Instance.new("UICorner")
-    tbCorner.CornerRadius = UDim.new(1, 0)
-    tbCorner.Parent = ToggleBtn
+        local bCorner = Instance.new("UICorner")
+        bCorner.CornerRadius = UDim.new(1, 0)
+        bCorner.Parent = Btn
 
-    local ToggleCircle = Instance.new("Frame")
-    ToggleCircle.Name = "Circle"
-    ToggleCircle.Size = UDim2.new(0, 20, 0, 20)
-    ToggleCircle.Parent = ToggleBtn
+        local Circle = Instance.new("Frame")
+        Circle.Size = UDim2.new(0, 18, 0, 18)
+        Circle.Parent = Btn
 
-    local tcCorner = Instance.new("UICorner")
-    tcCorner.CornerRadius = UDim.new(1, 0)
-    tcCorner.Parent = ToggleCircle
+        local cCorner = Instance.new("UICorner")
+        cCorner.CornerRadius = UDim.new(1, 0)
+        cCorner.Parent = Circle
 
-    local ToggleText = Instance.new("TextLabel")
-    ToggleText.Size = UDim2.new(0, 30, 1, 0)
-    ToggleText.BackgroundTransparency = 1
-    ToggleText.Font = Enum.Font.GothamBold
-    ToggleText.TextSize = 10
-    ToggleText.Parent = ToggleBtn
+        local Text = Instance.new("TextLabel")
+        Text.Size = UDim2.new(0, 26, 1, 0)
+        Text.BackgroundTransparency = 1
+        Text.Font = Enum.Font.GothamBold
+        Text.TextSize = 9
+        Text.Parent = Btn
 
-    if State.IsActive then
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-        ToggleCircle.Position = UDim2.new(1, -23, 0.5, -10)
-        ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        ToggleText.Text = "ON"
-        ToggleText.Position = UDim2.new(0, 4, 0, 0)
-        ToggleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        cdStroke.Color = Color3.fromRGB(40, 160, 80)
-        StatusLabel.Text = "ACTIVE"
-        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
-    else
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-        ToggleCircle.Position = UDim2.new(0, 3, 0.5, -10)
-        ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
-        ToggleText.Text = "OFF"
-        ToggleText.Position = UDim2.new(1, -34, 0, 0)
-        ToggleText.TextColor3 = Color3.fromRGB(150, 150, 160)
+        local function updateVisual(val)
+            if val then
+                Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+                Circle.Position = UDim2.new(1, -21, 0.5, -9)
+                Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                Text.Text = "ON"
+                Text.Position = UDim2.new(0, 3, 0, 0)
+                Text.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+                Circle.Position = UDim2.new(0, 3, 0.5, -9)
+                Circle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+                Text.Text = "OFF"
+                Text.Position = UDim2.new(1, -29, 0, 0)
+                Text.TextColor3 = Color3.fromRGB(150, 150, 160)
+            end
+        end
+
+        updateVisual(initialState)
+
+        Btn.MouseButton1Click:Connect(function()
+            local newState = onToggle()
+            updateVisual(newState)
+            saveSettings()
+        end)
+
+        return Row, updateVisual
     end
 
-    ToggleBtn.MouseButton1Click:Connect(function()
+    createToggleRow("Auto Reset Guard", State.IsActive, function()
         State.IsActive = not State.IsActive
-
         if State.IsActive then
             local rawVal = tonumber(TimeInput.Text) or State.IntervalValue
             if rawVal <= 0 then rawVal = 1 end
@@ -634,47 +778,44 @@ local function createUI()
             else
                 State.IntervalSeconds = rawVal
             end
-
-            ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-            ToggleCircle.Position = UDim2.new(1, -23, 0.5, -10)
-            ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            ToggleText.Text = "ON"
-            ToggleText.Position = UDim2.new(0, 4, 0, 0)
-            ToggleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-
             cdStroke.Color = Color3.fromRGB(40, 160, 80)
-
-            saveSettings()
             startTracker(CountdownLabel, StatusLabel)
         else
-            saveSettings()
-            ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-            ToggleCircle.Position = UDim2.new(0, 3, 0.5, -10)
-            ToggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
-            ToggleText.Text = "OFF"
-            ToggleText.Position = UDim2.new(1, -34, 0, 0)
-            ToggleText.TextColor3 = Color3.fromRGB(150, 150, 160)
-
             cdStroke.Color = Color3.fromRGB(40, 40, 50)
-
             stopTracker(CountdownLabel, StatusLabel)
         end
-    end)
+        return State.IsActive
+    end, 4)
+
+    createToggleRow("Auto Wash Items (Send & Claim)", State.AutoWash, function()
+        State.AutoWash = not State.AutoWash
+        if State.AutoWash then
+            startAutoWashLoop()
+        else
+            stopAutoWashLoop()
+        end
+        return State.AutoWash
+    end, 5)
+
+    createToggleRow("Fast Auction Pickup (Instant Loot)", State.FastPickup, function()
+        State.FastPickup = not State.FastPickup
+        if State.FastPickup then
+            startFastPickupLoop()
+        else
+            stopFastPickupLoop()
+        end
+        return State.FastPickup
+    end, 6)
 
     if State.IsActive then
         startTracker(CountdownLabel, StatusLabel)
     end
-
-    local InfoLabel = Instance.new("TextLabel")
-    InfoLabel.Size = UDim2.new(1, 0, 0, 36)
-    InfoLabel.BackgroundTransparency = 1
-    InfoLabel.Text = "Anti-Stuck detects freeze & resets character only when idle/stuck."
-    InfoLabel.TextColor3 = Color3.fromRGB(80, 80, 95)
-    InfoLabel.Font = Enum.Font.Gotham
-    InfoLabel.TextSize = 11
-    InfoLabel.TextWrapped = true
-    InfoLabel.LayoutOrder = 5
-    InfoLabel.Parent = Content
+    if State.AutoWash then
+        startAutoWashLoop()
+    end
+    if State.FastPickup then
+        startFastPickupLoop()
+    end
 
     local UnloadBtn = Instance.new("TextButton")
     UnloadBtn.Size = UDim2.new(1, 0, 0, 36)
@@ -684,7 +825,7 @@ local function createUI()
     UnloadBtn.Font = Enum.Font.GothamBold
     UnloadBtn.TextSize = 12
     UnloadBtn.AutoButtonColor = false
-    UnloadBtn.LayoutOrder = 6
+    UnloadBtn.LayoutOrder = 7
     UnloadBtn.Parent = Content
 
     local ulCorner = Instance.new("UICorner")
@@ -705,6 +846,8 @@ local function createUI()
 
     UnloadBtn.MouseButton1Click:Connect(function()
         stopTracker(CountdownLabel, StatusLabel)
+        stopAutoWashLoop()
+        stopFastPickupLoop()
         ScreenGui:Destroy()
     end)
 end
