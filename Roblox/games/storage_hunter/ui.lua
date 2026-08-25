@@ -530,20 +530,20 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         GradingModule.ProcessGrading(Config.GetState())
     end)
 
-    local safeListCard = createCard(gradePage, "Safes Selection (UltraFullDump)")
+    local safeListCard = createCard(gradePage, "Safes Selection")
     local safeNames = {
-        {"Junk Safe", "Epic (ID: 117)"},
-        {"Wooden Safe", "Rare (ID: 354)"},
-        {"Metal Safe", "Epic (ID: 355)"},
-        {"Code Safe", "Epic (ID: 356)"},
-        {"Diamond Safe", "Epic (ID: 357)"},
-        {"Diamond Vault", "Legendary (ID: 358)"}
+        {"Junk Safe", "Epic"},
+        {"Wooden Safe", "Rare"},
+        {"Metal Safe", "Epic"},
+        {"Code Safe", "Epic"},
+        {"Diamond Safe", "Epic"},
+        {"Diamond Vault", "Legendary"}
     }
     for _, safeInfo in ipairs(safeNames) do
         local sName = safeInfo[1]
-        local sDesc = safeInfo[2]
+        local sRarity = safeInfo[2]
         local isAllowed = (state.AllowedSafes and state.AllowedSafes[sName] ~= nil) and state.AllowedSafes[sName] or true
-        safeListCard:AddToggle(sName .. " - " .. sDesc, isAllowed, function(val)
+        safeListCard:AddToggle(sName .. " (" .. sRarity .. ")", isAllowed, function(val)
             if not state.AllowedSafes then state.AllowedSafes = {} end
             state.AllowedSafes[sName] = val
             Config.Save()
