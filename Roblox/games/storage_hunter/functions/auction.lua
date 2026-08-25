@@ -6,6 +6,8 @@ local AuctionModule = {}
 local pickupThread = nil
 local smartWarpThread = nil
 local boundWashModule = nil
+local lastWonTime = 0
+local isLooting = false
 
 local TARGET_FOLDERS = { "AuctionItems", "WonItems", "StorageItems", "Auction", "WonStorage" }
 
@@ -65,6 +67,7 @@ end
 
 function AuctionModule.InstantLootAll(items, State)
     if not items or #items == 0 then return end
+    isLooting = true
 
     AuctionModule.EnsureInVehicle()
 
@@ -106,9 +109,14 @@ function AuctionModule.InstantLootAll(items, State)
 
     if boundWashModule and State and State.AutoWash then
         task.spawn(function()
+            task.wait(0.2)
             boundWashModule.QuickWash(State)
         end)
     end
+
+    task.delay(0.5, function()
+        isLooting = false
+    end)
 end
 
 function AuctionModule.ScanAndLoot(State)
@@ -132,7 +140,7 @@ function AuctionModule.ScanAndLoot(State)
     end
 
     if myPos then
-        local bounds = workspace:GetPartBoundsInRadius(myPos, 60)
+        local bounds = workspace:GetPartBoundsInRadius(myPos, 80)
         for _, part in ipairs(bounds) do
             local model = part:FindFirstAncestorOfClass("Model")
             local target = model or part
@@ -150,35 +158,9 @@ function AuctionModule.ScanAndLoot(State)
     end
 
     if #itemsToPick > 0 then
+        lastWonTime = os.time()
         AuctionModule.InstantLootAll(itemsToPick, State)
     end
-end
-
-function AuctionModule.HasItemsToStock()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    local plotEvents = events and events:FindFirstChild("Plot")
-    if plotEvents and plotEvents:FindFirstChild("GetDraggingInventory") then
-        local ok, list = pcall(function() return plotEvents.GetDraggingInventory:InvokeServer() end)
-        if ok and type(list) == "table" and #list > 0 then
-            return true
-        end
-    end
-
-    local invEvents = events and events:FindFirstChild("Inventory")
-    if invEvents and invEvents:FindFirstChild("GetPlayerInventory") then
-        local ok2, inv = pcall(function() return invEvents.GetPlayerInventory:InvokeServer() end)
-        if ok2 and type(inv) == "table" then
-            local count = 0
-            for _, _ in pairs(inv) do
-                count = count + 1
-            end
-            if count > 0 then
-                return true
-            end
-        end
-    end
-
-    return false
 end
 
 function AuctionModule.TeleportToNextAuction()
@@ -194,7 +176,7 @@ function AuctionModule.TeleportToNextAuction()
     end
 end
 
-function AuctionModule.IsAtPlot()
+function AuctionModule.IsAtPlotArea()
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
@@ -205,16 +187,22 @@ function AuctionModule.IsAtPlot()
         local myPlot = plots:FindFirstChild(LocalPlayer.Name) or plots:FindFirstChild(LocalPlayer.Name .. "'s Plot")
         if myPlot then
             local plotPart = myPlot:FindFirstChildWhichIsA("BasePart", true)
-            if plotPart and (plotPart.Position - myPos).Magnitude < 120 then
+            if plotPart and (plotPart.Position - myPos).Magnitude < 150 then
+                return true
+            end
+        end
+        for _, p in ipairs(plots:GetChildren()) do
+            local pPart = p:FindFirstChildWhichIsA("BasePart", true)
+            if pPart and (pPart.Position - myPos).Magnitude < 120 then
                 return true
             end
         end
     end
 
     for _, obj in ipairs(workspace:GetChildren()) do
-        if string.find(obj.Name, "Plot") and obj:IsA("Model") then
+        if string.find(string.lower(obj.Name), "plot") and obj:IsA("Model") then
             local pPart = obj:FindFirstChildWhichIsA("BasePart", true)
-            if pPart and (pPart.Position - myPos).Magnitude < 100 then
+            if pPart and (pPart.Position - myPos).Magnitude < 120 then
                 return true
             end
         end
@@ -223,32 +211,87 @@ function AuctionModule.IsAtPlot()
     return false
 end
 
+function AuctionModule.SetupAuctionHooks(State)
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    local auctionEvents = events and events:FindFirstChild("Auction")
+    local plotEvents = events and events:FindFirstChild("Plot")
+
+    if auctionEvents then
+        local feePaid = auctionEvents:FindFirstChild("AuctionFeePaid")
+        if feePaid then
+            feePaid.OnClientEvent:Connect(function()
+                if State.FastPickup then
+                    lastWonTime = os.time()
+                    task.spawn(function()
+                        AuctionModule.ScanAndLoot(State)
+                    end)
+                end
+            end)
+        end
+
+        local winBid = auctionEvents:FindFirstChild("UpdateCurrentWinningBid")
+        if winBid then
+            winBid.OnClientEvent:Connect(function(bidder)
+                if tostring(bidder) == LocalPlayer.Name and State.FastPickup then
+                    lastWonTime = os.time()
+                    task.spawn(function()
+                        task.wait(0.05)
+                        AuctionModule.ScanAndLoot(State)
+                    end)
+                end
+            end)
+        end
+
+        local toggleBidding = auctionEvents:FindFirstChild("ToggleBiddingUI")
+        if toggleBidding then
+            toggleBidding.OnClientEvent:Connect(function(isOpen)
+                if not isOpen and State.FastPickup then
+                    task.spawn(function()
+                        AuctionModule.ScanAndLoot(State)
+                    end)
+                end
+            end)
+        end
+    end
+
+    if plotEvents then
+        local getShopStock = plotEvents:FindFirstChild("GetShopStock")
+        if getShopStock and getShopStock:IsA("RemoteFunction") then
+            pcall(function()
+                local oldInvoke = getShopStock.InvokeServer
+            end)
+        end
+    end
+end
+
 function AuctionModule.StartFastPickupLoop(State, washMod)
     if washMod then
         boundWashModule = washMod
     end
 
     AuctionModule.StopFastPickupLoop()
+    AuctionModule.SetupAuctionHooks(State)
 
     pickupThread = task.spawn(function()
         while State.FastPickup do
             pcall(function() AuctionModule.ScanAndLoot(State) end)
-            task.wait(0.8)
+            task.wait(0.25)
         end
     end)
 
     smartWarpThread = task.spawn(function()
         while State.SmartWarp do
             pcall(function()
-                if AuctionModule.IsAtPlot() then
-                    if not AuctionModule.HasItemsToStock() then
+                if AuctionModule.IsAtPlotArea() then
+                    local timeSinceWon = os.time() - lastWonTime
+                    if timeSinceWon > 15 then
                         task.wait(0.2)
                         AuctionModule.TeleportToNextAuction()
                         task.wait(2)
                     end
                 end
             end)
-            task.wait(1)
+            task.wait(0.5)
         end
     end)
 end
