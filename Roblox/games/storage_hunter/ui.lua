@@ -1,11 +1,39 @@
-local UI = {}
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
+
+local UI = {}
+
+local THEME = {
+    Background = Color3.fromRGB(13, 13, 17),
+    Sidebar = Color3.fromRGB(18, 18, 24),
+    ContentBg = Color3.fromRGB(15, 15, 20),
+    CardBg = Color3.fromRGB(22, 22, 30),
+    CardBorder = Color3.fromRGB(35, 35, 48),
+    Primary = Color3.fromRGB(255, 60, 75),
+    PrimaryGlow = Color3.fromRGB(255, 90, 105),
+    TextPrimary = Color3.fromRGB(250, 250, 255),
+    TextSecondary = Color3.fromRGB(140, 140, 155),
+    Success = Color3.fromRGB(45, 200, 105),
+    Danger = Color3.fromRGB(240, 60, 70),
+    ToggleOff = Color3.fromRGB(40, 40, 52),
+    ToggleOn = Color3.fromRGB(255, 60, 75)
+}
+
+local RARITY_COLORS = {
+    Common = Color3.fromRGB(170, 170, 170),
+    Uncommon = Color3.fromRGB(75, 215, 95),
+    Rare = Color3.fromRGB(55, 145, 255),
+    Epic = Color3.fromRGB(175, 75, 255),
+    Legendary = Color3.fromRGB(255, 175, 35),
+    Mythical = Color3.fromRGB(255, 55, 115),
+    Lost = Color3.fromRGB(0, 225, 225),
+    Exclusive = Color3.fromRGB(255, 215, 75)
+}
 
 local function getGuiParent()
     local success, parent = pcall(function()
@@ -16,227 +44,348 @@ local function getGuiParent()
 end
 
 function UI.Create(Config, WashModule, AntiAFK)
+    local State = Config.GetState()
     local parent = getGuiParent()
-    local existing = parent:FindFirstChild("GenesisCustomUI")
+
+    local existing = parent:FindFirstChild("GenesisRedUI")
     if existing then existing:Destroy() end
 
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "GenesisCustomUI"
+    ScreenGui.Name = "GenesisRedUI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.DisplayOrder = 9999
     ScreenGui.IgnoreGuiInset = true
     ScreenGui.Parent = parent
 
+    local FloatingBtn = Instance.new("TextButton")
+    FloatingBtn.Name = "FloatingBtn"
+    FloatingBtn.Size = UDim2.new(0, 48, 0, 48)
+    FloatingBtn.Position = UDim2.new(1, -65, 0.5, -24)
+    FloatingBtn.BackgroundColor3 = THEME.Sidebar
+    FloatingBtn.TextColor3 = THEME.Primary
+    FloatingBtn.Text = "G"
+    FloatingBtn.Font = Enum.Font.GothamBlack
+    FloatingBtn.TextSize = 24
+    FloatingBtn.AutoButtonColor = false
+    FloatingBtn.Parent = ScreenGui
+
+    local floatCorner = Instance.new("UICorner")
+    floatCorner.CornerRadius = UDim.new(1, 0)
+    floatCorner.Parent = FloatingBtn
+
+    local floatStroke = Instance.new("UIStroke")
+    floatStroke.Color = THEME.Primary
+    floatStroke.Thickness = 2
+    floatStroke.Parent = FloatingBtn
+
+    local draggingFloat, floatDragInput, floatDragStart, floatStartPos
+    FloatingBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingFloat = true
+            floatDragStart = input.Position
+            floatStartPos = FloatingBtn.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    draggingFloat = false
+                end
+            end)
+        end
+    end)
+    FloatingBtn.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            floatDragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == floatDragInput and draggingFloat then
+            local delta = input.Position - floatDragStart
+            FloatingBtn.Position = UDim2.new(floatStartPos.X.Scale, floatStartPos.X.Offset + delta.X, floatStartPos.Y.Scale, floatStartPos.Y.Offset + delta.Y)
+        end
+    end)
+
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 480, 0, 420)
-    MainFrame.Position = UDim2.new(0.5, -240, 0.5, -210)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    MainFrame.Size = UDim2.new(0, 540, 0, 390)
+    MainFrame.Position = UDim2.new(0.5, -270, 0.5, -195)
+    MainFrame.BackgroundColor3 = THEME.Background
     MainFrame.BorderSizePixel = 0
+    MainFrame.Visible = true
     MainFrame.ClipsDescendants = true
     MainFrame.Parent = ScreenGui
 
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 10)
-    MainCorner.Parent = MainFrame
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 10)
+    mainCorner.Parent = MainFrame
 
-    local MainStroke = Instance.new("UIStroke")
-    MainStroke.Thickness = 1.5
-    MainStroke.Color = Color3.fromRGB(38, 38, 50)
-    MainStroke.Parent = MainFrame
+    local mainStroke = Instance.new("UIStroke")
+    mainStroke.Color = THEME.CardBorder
+    mainStroke.Thickness = 1.5
+    mainStroke.Parent = MainFrame
 
-    local dragging, dragInput, dragStart, startPos
+    FloatingBtn.MouseButton1Click:Connect(function()
+        MainFrame.Visible = not MainFrame.Visible
+    end)
+
+    local draggingMain, mainDragInput, mainDragStart, mainStartPos
     MainFrame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainFrame.Position
+            draggingMain = true
+            mainDragStart = input.Position
+            mainStartPos = MainFrame.Position
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+                    draggingMain = false
                 end
             end)
         end
     end)
     MainFrame.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
+            mainDragInput = input
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        if input == mainDragInput and draggingMain then
+            local delta = input.Position - mainDragStart
+            MainFrame.Position = UDim2.new(mainStartPos.X.Scale, mainStartPos.X.Offset + delta.X, mainStartPos.Y.Scale, mainStartPos.Y.Offset + delta.Y)
         end
     end)
 
-    local TopBar = Instance.new("Frame")
-    TopBar.Name = "TopBar"
-    TopBar.Size = UDim2.new(1, 0, 0, 40)
-    TopBar.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-    TopBar.BorderSizePixel = 0
-    TopBar.Parent = MainFrame
+    local Sidebar = Instance.new("Frame")
+    Sidebar.Name = "Sidebar"
+    Sidebar.Size = UDim2.new(0, 150, 1, 0)
+    Sidebar.BackgroundColor3 = THEME.Sidebar
+    Sidebar.BorderSizePixel = 0
+    Sidebar.Parent = MainFrame
 
-    local TopCorner = Instance.new("UICorner")
-    TopCorner.CornerRadius = UDim.new(0, 10)
-    TopCorner.Parent = TopBar
+    local sbCorner = Instance.new("UICorner")
+    sbCorner.CornerRadius = UDim.new(0, 10)
+    sbCorner.Parent = Sidebar
 
-    local TitleLbl = Instance.new("TextLabel")
-    TitleLbl.Size = UDim2.new(1, -50, 1, 0)
-    TitleLbl.Position = UDim2.new(0, 16, 0, 0)
-    TitleLbl.BackgroundTransparency = 1
-    TitleLbl.Font = Enum.Font.GothamBold
-    TitleLbl.Text = "[+] GENESIS  |  Storage Hunters"
-    TitleLbl.TextColor3 = Color3.fromRGB(240, 240, 245)
-    TitleLbl.TextSize = 13
-    TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLbl.Parent = TopBar
+    local BrandFrame = Instance.new("Frame")
+    BrandFrame.Size = UDim2.new(1, 0, 0, 52)
+    BrandFrame.BackgroundTransparency = 1
+    BrandFrame.Parent = Sidebar
+
+    local LogoBadge = Instance.new("TextLabel")
+    LogoBadge.Size = UDim2.new(0, 28, 0, 28)
+    LogoBadge.Position = UDim2.new(0, 12, 0, 12)
+    LogoBadge.BackgroundColor3 = Color3.fromRGB(35, 20, 25)
+    LogoBadge.TextColor3 = THEME.Primary
+    LogoBadge.Text = "G"
+    LogoBadge.Font = Enum.Font.GothamBlack
+    LogoBadge.TextSize = 16
+    LogoBadge.Parent = BrandFrame
+
+    local badgeCorner = Instance.new("UICorner")
+    badgeCorner.CornerRadius = UDim.new(0, 6)
+    badgeCorner.Parent = LogoBadge
+
+    local badgeStroke = Instance.new("UIStroke")
+    badgeStroke.Color = THEME.Primary
+    badgeStroke.Thickness = 1
+    badgeStroke.Parent = LogoBadge
+
+    local BrandTitle = Instance.new("TextLabel")
+    BrandTitle.Size = UDim2.new(1, -50, 0, 18)
+    BrandTitle.Position = UDim2.new(0, 46, 0, 11)
+    BrandTitle.BackgroundTransparency = 1
+    BrandTitle.Text = "GENESIS"
+    BrandTitle.TextColor3 = THEME.TextPrimary
+    BrandTitle.Font = Enum.Font.GothamBlack
+    BrandTitle.TextSize = 14
+    BrandTitle.TextXAlignment = Enum.TextXAlignment.Left
+    BrandTitle.Parent = BrandFrame
+
+    local BrandSub = Instance.new("TextLabel")
+    BrandSub.Size = UDim2.new(1, -50, 0, 14)
+    BrandSub.Position = UDim2.new(0, 46, 0, 28)
+    BrandSub.BackgroundTransparency = 1
+    BrandSub.Text = "STORAGE HUNTER"
+    BrandSub.TextColor3 = THEME.TextSecondary
+    BrandSub.Font = Enum.Font.GothamBold
+    BrandSub.TextSize = 8
+    BrandSub.TextXAlignment = Enum.TextXAlignment.Left
+    BrandSub.Parent = BrandFrame
+
+    local NavContainer = Instance.new("Frame")
+    NavContainer.Size = UDim2.new(1, -16, 1, -64)
+    NavContainer.Position = UDim2.new(0, 8, 0, 56)
+    NavContainer.BackgroundTransparency = 1
+    NavContainer.Parent = Sidebar
+
+    local navLayout = Instance.new("UIListLayout")
+    navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    navLayout.Padding = UDim.new(0, 4)
+    navLayout.Parent = NavContainer
+
+    local ContentArea = Instance.new("Frame")
+    ContentArea.Name = "ContentArea"
+    ContentArea.Size = UDim2.new(1, -158, 1, -16)
+    ContentArea.Position = UDim2.new(0, 154, 0, 8)
+    ContentArea.BackgroundColor3 = THEME.ContentBg
+    ContentArea.BorderSizePixel = 0
+    ContentArea.Parent = MainFrame
+
+    local caCorner = Instance.new("UICorner")
+    caCorner.CornerRadius = UDim.new(0, 8)
+    caCorner.Parent = ContentArea
+
+    local caStroke = Instance.new("UIStroke")
+    caStroke.Color = THEME.CardBorder
+    caStroke.Thickness = 1
+    caStroke.Parent = ContentArea
+
+    local TopBarRight = Instance.new("Frame")
+    TopBarRight.Size = UDim2.new(1, 0, 0, 32)
+    TopBarRight.BackgroundTransparency = 1
+    TopBarRight.Parent = ContentArea
 
     local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Size = UDim2.new(0, 26, 0, 26)
-    CloseBtn.Position = UDim2.new(1, -34, 0.5, -13)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(32, 32, 42)
-    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.Size = UDim2.new(0, 24, 0, 24)
+    CloseBtn.Position = UDim2.new(1, -30, 0, 4)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(30, 20, 24)
+    CloseBtn.TextColor3 = THEME.Danger
     CloseBtn.Text = "X"
-    CloseBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
-    CloseBtn.TextSize = 12
-    CloseBtn.Parent = TopBar
+    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.TextSize = 11
+    CloseBtn.Parent = TopBarRight
 
-    local CloseCorner = Instance.new("UICorner")
-    CloseCorner.CornerRadius = UDim.new(0, 6)
-    CloseCorner.Parent = CloseBtn
+    local cbCorner = Instance.new("UICorner")
+    cbCorner.CornerRadius = UDim.new(0, 5)
+    cbCorner.Parent = CloseBtn
 
     CloseBtn.MouseButton1Click:Connect(function()
-        MainFrame.Visible = not MainFrame.Visible
+        MainFrame.Visible = false
     end)
 
-    local ScrollContainer = Instance.new("ScrollingFrame")
-    ScrollContainer.Size = UDim2.new(1, -20, 1, -54)
-    ScrollContainer.Position = UDim2.new(0, 10, 0, 48)
-    ScrollContainer.BackgroundTransparency = 1
-    ScrollContainer.ScrollBarThickness = 4
-    ScrollContainer.ScrollBarImageColor3 = Color3.fromRGB(55, 55, 70)
-    ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, 460)
-    ScrollContainer.Parent = MainFrame
+    local TabPages = {}
+    local TabButtons = {}
 
-    local ContentLayout = Instance.new("UIListLayout")
-    ContentLayout.FillDirection = Enum.FillDirection.Vertical
-    ContentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    ContentLayout.Padding = UDim.new(0, 10)
-    ContentLayout.Parent = ScrollContainer
+    local function createTab(id, name, order)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, 0, 0, 32)
+        btn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+        btn.TextColor3 = THEME.TextSecondary
+        btn.Text = "  " .. name
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 11
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        btn.AutoButtonColor = false
+        btn.LayoutOrder = order
+        btn.Parent = NavContainer
 
-    local function createCard(title)
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 6)
+        btnCorner.Parent = btn
+
+        local page = Instance.new("ScrollingFrame")
+        page.Size = UDim2.new(1, -16, 1, -44)
+        page.Position = UDim2.new(0, 8, 0, 36)
+        page.BackgroundTransparency = 1
+        page.ScrollBarThickness = 3
+        page.ScrollBarImageColor3 = THEME.Primary
+        page.CanvasSize = UDim2.new(0, 0, 0, 0)
+        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        page.Visible = false
+        page.Parent = ContentArea
+
+        local pageLayout = Instance.new("UIListLayout")
+        pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        pageLayout.Padding = UDim.new(0, 8)
+        pageLayout.Parent = page
+
+        btn.MouseButton1Click:Connect(function()
+            for k, p in pairs(TabPages) do
+                p.Visible = (k == id)
+            end
+            for k, b in pairs(TabButtons) do
+                b.BackgroundColor3 = (k == id) and THEME.Primary or Color3.fromRGB(22, 22, 28)
+                b.TextColor3 = (k == id) and Color3.fromRGB(255, 255, 255) or THEME.TextSecondary
+            end
+        end)
+
+        TabPages[id] = page
+        TabButtons[id] = btn
+        return page
+    end
+
+    local washPage = createTab("wash", "Auto Wash", 1)
+    local safetyPage = createTab("safety", "Settings", 2)
+
+    local function createCard(parentPage, title)
         local card = Instance.new("Frame")
-        card.Size = UDim2.new(1, 0, 0, 36)
-        card.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+        card.Size = UDim2.new(1, 0, 0, 0)
+        card.AutomaticSize = Enum.AutomaticSize.Y
+        card.BackgroundColor3 = THEME.CardBg
         card.BorderSizePixel = 0
-        card.ClipsDescendants = true
-        card.Parent = ScrollContainer
+        card.Parent = parentPage
 
         local cardCorner = Instance.new("UICorner")
-        cardCorner.CornerRadius = UDim.new(0, 8)
+        cardCorner.CornerRadius = UDim.new(0, 7)
         cardCorner.Parent = card
 
         local cardStroke = Instance.new("UIStroke")
+        cardStroke.Color = THEME.CardBorder
         cardStroke.Thickness = 1
-        cardStroke.Color = Color3.fromRGB(35, 35, 45)
         cardStroke.Parent = card
 
-        local header = Instance.new("TextButton")
-        header.Size = UDim2.new(1, 0, 0, 36)
+        local cardPad = Instance.new("UIPadding")
+        cardPad.PaddingTop = UDim.new(0, 8)
+        cardPad.PaddingBottom = UDim.new(0, 8)
+        cardPad.PaddingLeft = UDim.new(0, 10)
+        cardPad.PaddingRight = UDim.new(0, 10)
+        cardPad.Parent = card
+
+        local cLayout = Instance.new("UIListLayout")
+        cLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        cLayout.Padding = UDim.new(0, 6)
+        cLayout.Parent = card
+
+        local header = Instance.new("TextLabel")
+        header.Size = UDim2.new(1, 0, 0, 20)
         header.BackgroundTransparency = 1
+        header.Text = title
+        header.TextColor3 = THEME.TextPrimary
         header.Font = Enum.Font.GothamBold
-        header.Text = "   [*] " .. title
-        header.TextColor3 = Color3.fromRGB(230, 230, 235)
-        header.TextSize = 13
+        header.TextSize = 12
         header.TextXAlignment = Enum.TextXAlignment.Left
         header.Parent = card
 
-        local arrow = Instance.new("TextLabel")
-        arrow.Size = UDim2.new(0, 30, 1, 0)
-        arrow.Position = UDim2.new(1, -30, 0, 0)
-        arrow.BackgroundTransparency = 1
-        arrow.Font = Enum.Font.GothamBold
-        arrow.Text = "^"
-        arrow.TextColor3 = Color3.fromRGB(150, 150, 160)
-        arrow.TextSize = 12
-        arrow.Parent = header
-
-        local content = Instance.new("Frame")
-        content.Size = UDim2.new(1, 0, 0, 0)
-        content.Position = UDim2.new(0, 0, 0, 36)
-        content.BackgroundTransparency = 1
-        content.Parent = card
-
-        local contentLayout = Instance.new("UIListLayout")
-        contentLayout.FillDirection = Enum.FillDirection.Vertical
-        contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        contentLayout.Padding = UDim.new(0, 6)
-        contentLayout.Parent = content
-
-        local contentPad = Instance.new("UIPadding")
-        contentPad.PaddingTop = UDim.new(0, 6)
-        contentPad.PaddingBottom = UDim.new(0, 10)
-        contentPad.PaddingLeft = UDim.new(0, 12)
-        contentPad.PaddingRight = UDim.new(0, 12)
-        contentPad.Parent = content
-
-        local isOpen = true
-        local function updateCardSize()
-            if isOpen then
-                local h = contentLayout.AbsoluteContentSize.Y + 50
-                card.Size = UDim2.new(1, 0, 0, h)
-                arrow.Text = "^"
-            else
-                card.Size = UDim2.new(1, 0, 0, 36)
-                arrow.Text = "v"
-            end
-        end
-
-        header.MouseButton1Click:Connect(function()
-            isOpen = not isOpen
-            updateCardSize()
-        end)
-
-        contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCardSize)
-
-        local CardObj = {
-            Content = content,
-            Card = card
-        }
+        local CardObj = { Card = card }
 
         function CardObj:AddToggle(text, default, callback)
             local row = Instance.new("Frame")
             row.Size = UDim2.new(1, 0, 0, 26)
             row.BackgroundTransparency = 1
-            row.Parent = content
+            row.Parent = card
 
             local lbl = Instance.new("TextLabel")
             lbl.Size = UDim2.new(1, -45, 1, 0)
             lbl.BackgroundTransparency = 1
             lbl.Font = Enum.Font.GothamMedium
             lbl.Text = text
-            lbl.TextColor3 = Color3.fromRGB(220, 220, 225)
-            lbl.TextSize = 12
+            lbl.TextColor3 = THEME.TextPrimary
+            lbl.TextSize = 11
             lbl.TextXAlignment = Enum.TextXAlignment.Left
             lbl.Parent = row
 
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, 38, 0, 20)
-            btn.Position = UDim2.new(1, -38, 0.5, -10)
-            btn.BackgroundColor3 = default and Color3.fromRGB(220, 220, 225) or Color3.fromRGB(45, 45, 55)
+            btn.Size = UDim2.new(0, 36, 0, 18)
+            btn.Position = UDim2.new(1, -36, 0.5, -9)
+            btn.BackgroundColor3 = default and THEME.ToggleOn or THEME.ToggleOff
             btn.Text = ""
             btn.Parent = row
 
             local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 10)
+            btnCorner.CornerRadius = UDim.new(0, 9)
             btnCorner.Parent = btn
 
             local knob = Instance.new("Frame")
-            knob.Size = UDim2.new(0, 16, 0, 16)
-            knob.Position = default and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-            knob.BackgroundColor3 = default and Color3.fromRGB(20, 20, 25) or Color3.fromRGB(200, 200, 200)
+            knob.Size = UDim2.new(0, 14, 0, 14)
+            knob.Position = default and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+            knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             knob.Parent = btn
 
             local knobCorner = Instance.new("UICorner")
@@ -247,11 +396,10 @@ function UI.Create(Config, WashModule, AntiAFK)
             btn.MouseButton1Click:Connect(function()
                 state = not state
                 TweenService:Create(btn, TweenInfo.new(0.15), {
-                    BackgroundColor3 = state and Color3.fromRGB(220, 220, 225) or Color3.fromRGB(45, 45, 55)
+                    BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff
                 }):Play()
                 TweenService:Create(knob, TweenInfo.new(0.15), {
-                    Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-                    BackgroundColor3 = state and Color3.fromRGB(20, 20, 25) or Color3.fromRGB(200, 200, 200)
+                    Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
                 }):Play()
                 callback(state)
             end)
@@ -260,38 +408,25 @@ function UI.Create(Config, WashModule, AntiAFK)
         function CardObj:AddButton(text, callback)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1, 0, 0, 28)
-            btn.BackgroundColor3 = Color3.fromRGB(32, 32, 44)
+            btn.BackgroundColor3 = THEME.Primary
             btn.Font = Enum.Font.GothamBold
             btn.Text = text
-            btn.TextColor3 = Color3.fromRGB(230, 230, 235)
-            btn.TextSize = 12
-            btn.Parent = content
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.TextSize = 11
+            btn.Parent = card
 
             local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 6)
+            btnCorner.CornerRadius = UDim.new(0, 5)
             btnCorner.Parent = btn
 
             btn.MouseButton1Click:Connect(callback)
         end
 
-        function CardObj:AddLabel(text)
-            local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(1, 0, 0, 20)
-            lbl.BackgroundTransparency = 1
-            lbl.Font = Enum.Font.GothamMedium
-            lbl.Text = text
-            lbl.TextColor3 = Color3.fromRGB(150, 150, 160)
-            lbl.TextSize = 12
-            lbl.TextXAlignment = Enum.TextXAlignment.Left
-            lbl.Parent = content
-            return lbl
-        end
-
         return CardObj
     end
 
-    local washCard = createCard("Auto Wash Automation")
-    washCard:AddToggle("Enable Auto Wash Loop", Config.Get("AutoWash", false), function(val)
+    local washCard = createCard(washPage, "Auto Wash Master Control")
+    washCard:AddToggle("Auto Wash Loop", Config.Get("AutoWash", false), function(val)
         Config.Set("AutoWash", val)
         Config.Save()
         if val then
@@ -300,32 +435,36 @@ function UI.Create(Config, WashModule, AntiAFK)
             WashModule.StopAutoWashLoop()
         end
     end)
-    washCard:AddButton("Instant Quick Wash (1-Shot)", function()
+    washCard:AddButton("Quick Wash (1-Shot Instant)", function()
         WashModule.ProcessWash(Config.GetState())
     end)
 
-    local rarityCard = createCard("Wash Rarities Filter")
+    local rarityCard = createCard(washPage, "Wash Rarities Matrix")
     local state = Config.GetState()
     local rarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Lost", "Exclusive"}
     for _, r in ipairs(rarities) do
         local isAllowed = (state.WashRarities and state.WashRarities[r] ~= nil) and state.WashRarities[r] or true
-        rarityCard:AddToggle(r .. " Items", isAllowed, function(val)
+        rarityCard:AddToggle(r, isAllowed, function(val)
             if not state.WashRarities then state.WashRarities = {} end
             state.WashRarities[r] = val
             Config.Save()
         end)
     end
 
-    local safetyCard = createCard("Safety & System Guard")
+    local safetyCard = createCard(safetyPage, "Safety & Guard Settings")
     safetyCard:AddToggle("Anti-AFK (ตรวจตัวยืนนิ่ง)", Config.Get("AntiAFK", true), function(val)
         Config.Set("AntiAFK", val)
         Config.Save()
     end)
-    safetyCard:AddButton("Unload Genesis", function()
+    safetyCard:AddButton("Unload Genesis Hub", function()
         WashModule.StopAutoWashLoop()
         AntiAFK.Destroy()
         ScreenGui:Destroy()
     end)
+
+    TabButtons["wash"].BackgroundColor3 = THEME.Primary
+    TabButtons["wash"].TextColor3 = Color3.fromRGB(255, 255, 255)
+    TabPages["wash"].Visible = true
 
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftControl then
@@ -336,7 +475,7 @@ function UI.Create(Config, WashModule, AntiAFK)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
             Title = "GENESIS",
-            Text = "Genesis Custom UI Loaded! Press LeftControl to Toggle.",
+            Text = "Genesis Red UI Loaded! Press 'G' button to Toggle.",
             Duration = 5
         })
     end)
