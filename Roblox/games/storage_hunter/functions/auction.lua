@@ -1,7 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
 local AuctionModule = {}
 local pickupThread = nil
+
+local TARGET_FOLDERS = { "AuctionItems", "WonItems", "StorageItems", "Auction", "WonStorage" }
 
 function AuctionModule.FastPickup()
     local events = ReplicatedStorage:FindFirstChild("Events")
@@ -11,19 +15,49 @@ function AuctionModule.FastPickup()
     local auctionPickupItem = auctionEvents and auctionEvents:FindFirstChild("AuctionPickupItem")
     local pickUpItem = draggingEvents and draggingEvents:FindFirstChild("PickUpItem")
 
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("BasePart") then
-            local isWon = obj:GetAttribute("AuctionItemId") or obj:GetAttribute("WonItem") or obj:GetAttribute("ItemId")
-            local isAuctionParent = obj.Parent and (obj.Parent.Name == "AuctionItems" or obj.Parent.Name == "WonItems" or obj.Parent.Name == "StorageItems")
-            local hasPrompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("PromptPart")
+    if not auctionPickupItem and not pickUpItem then return end
 
-            if isWon or isAuctionParent or hasPrompt then
-                if auctionPickupItem then
-                    pcall(function() auctionPickupItem:FireServer(obj) end)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local myPos = hrp and hrp.Position
+
+    local itemsToPick = {}
+
+    for _, folderName in ipairs(TARGET_FOLDERS) do
+        local folder = workspace:FindFirstChild(folderName)
+        if folder then
+            for _, obj in ipairs(folder:GetChildren()) do
+                table.insert(itemsToPick, obj)
+            end
+        end
+    end
+
+    if myPos then
+        local bounds = workspace:GetPartBoundsInRadius(myPos, 35)
+        for _, part in ipairs(bounds) do
+            local parentModel = part:FindFirstAncestorOfClass("Model")
+            local target = parentModel or part
+
+            if target and target ~= character and not target:IsDescendantOf(character) then
+                local isWon = target:GetAttribute("AuctionItemId") or target:GetAttribute("WonItem") or target:GetAttribute("ItemId")
+                local hasPrompt = target:FindFirstChildOfClass("ProximityPrompt") or part:FindFirstChildOfClass("ProximityPrompt")
+
+                if isWon or hasPrompt then
+                    table.insert(itemsToPick, target)
                 end
-                if pickUpItem then
-                    pcall(function() pickUpItem:FireServer(obj) end)
-                end
+            end
+        end
+    end
+
+    local processed = {}
+    for _, obj in ipairs(itemsToPick) do
+        if not processed[obj] then
+            processed[obj] = true
+            if auctionPickupItem then
+                pcall(function() auctionPickupItem:FireServer(obj) end)
+            end
+            if pickUpItem then
+                pcall(function() pickUpItem:FireServer(obj) end)
             end
         end
     end
@@ -36,7 +70,7 @@ function AuctionModule.StartFastPickupLoop(State)
     pickupThread = task.spawn(function()
         while State.FastPickup do
             pcall(AuctionModule.FastPickup)
-            task.wait(0.3)
+            task.wait(1)
         end
     end)
 end

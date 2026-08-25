@@ -35,6 +35,8 @@ function WashModule.GetItemRarity(item)
 end
 
 function WashModule.RunAutoWash(State)
+    if not State.AutoWash then return end
+
     local events = ReplicatedStorage:FindFirstChild("Events")
     local washEvents = events and events:FindFirstChild("Wash")
     if not washEvents then return end
@@ -55,7 +57,7 @@ function WashModule.RunAutoWash(State)
                     pcall(function()
                         claimWashed:InvokeServer(slotIndex)
                     end)
-                    task.wait(0.15)
+                    task.wait(0.2)
                 end
             end
         end
@@ -89,7 +91,7 @@ function WashModule.RunAutoWash(State)
                         startWash:InvokeServer(slotIndex, targetId)
                     end)
                     itemIdx = itemIdx + 1
-                    task.wait(0.15)
+                    task.wait(0.2)
                 end
             end
         end
@@ -105,7 +107,7 @@ function WashModule.StartAutoWashLoop(State)
             pcall(function()
                 WashModule.RunAutoWash(State)
             end)
-            task.wait(3)
+            task.wait(4)
         end
     end)
 end
