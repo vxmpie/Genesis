@@ -5,8 +5,13 @@ local LocalPlayer = Players.LocalPlayer
 local AuctionModule = {}
 local pickupThread = nil
 local connections = {}
+local boundWashModule = nil
 
 local TARGET_FOLDERS = { "AuctionItems", "WonItems", "StorageItems", "Auction", "WonStorage" }
+
+function AuctionModule.SetWashModule(washMod)
+    boundWashModule = washMod
+end
 
 function AuctionModule.GetPlayerVehicle()
     local vehiclesFolder = workspace:FindFirstChild("Vehicles")
@@ -58,7 +63,7 @@ function AuctionModule.EnsureInVehicle()
     return false
 end
 
-function AuctionModule.InstantLootAll(items)
+function AuctionModule.InstantLootAll(items, State)
     if not items or #items == 0 then return end
 
     local events = ReplicatedStorage:FindFirstChild("Events")
@@ -90,9 +95,15 @@ function AuctionModule.InstantLootAll(items)
             pcall(function() pickupEnd:FireServer() end)
         end)
     end
+
+    if boundWashModule and State and State.AutoWash then
+        task.spawn(function()
+            boundWashModule.QuickWash(State)
+        end)
+    end
 end
 
-function AuctionModule.ScanAndLoot()
+function AuctionModule.ScanAndLoot(State)
     AuctionModule.EnsureInVehicle()
 
     local character = LocalPlayer.Character
@@ -133,7 +144,7 @@ function AuctionModule.ScanAndLoot()
     end
 
     if #itemsToPick > 0 then
-        AuctionModule.InstantLootAll(itemsToPick)
+        AuctionModule.InstantLootAll(itemsToPick, State)
     end
 end
 
@@ -150,7 +161,7 @@ function AuctionModule.SetupEventListeners(State)
                 if State.FastPickup then
                     task.spawn(function()
                         AuctionModule.EnsureInVehicle()
-                        AuctionModule.InstantLootAll({ child })
+                        AuctionModule.InstantLootAll({ child }, State)
                     end)
                 end
             end)
@@ -166,7 +177,7 @@ function AuctionModule.SetupEventListeners(State)
                         if State.FastPickup then
                             task.spawn(function()
                                 AuctionModule.EnsureInVehicle()
-                                AuctionModule.InstantLootAll({ subChild })
+                                AuctionModule.InstantLootAll({ subChild }, State)
                             end)
                         end
                     end)
@@ -178,13 +189,17 @@ function AuctionModule.SetupEventListeners(State)
     table.insert(connections, cMain)
 end
 
-function AuctionModule.StartFastPickupLoop(State)
+function AuctionModule.StartFastPickupLoop(State, washMod)
+    if washMod then
+        boundWashModule = washMod
+    end
+
     AuctionModule.StopFastPickupLoop()
     AuctionModule.SetupEventListeners(State)
 
     pickupThread = task.spawn(function()
         while State.FastPickup do
-            pcall(AuctionModule.ScanAndLoot)
+            pcall(function() AuctionModule.ScanAndLoot(State) end)
             task.wait(1.5)
         end
     end)

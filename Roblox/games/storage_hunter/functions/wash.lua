@@ -40,6 +40,81 @@ local function extractItemId(target)
     return target
 end
 
+function WashModule.QuickWash(State)
+    if not State.AutoWash then return end
+
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    local washEvents = events and events:FindFirstChild("Wash")
+    if not washEvents then return end
+
+    local getSlotState = washEvents:FindFirstChild("GetSlotState")
+    local getWashableItems = washEvents:FindFirstChild("GetWashableItems")
+    local startWash = washEvents:FindFirstChild("StartWash")
+    local claimWashed = washEvents:FindFirstChild("ClaimWashedItem")
+    local collectWash = washEvents:FindFirstChild("CollectWash")
+
+    if not getSlotState or not getWashableItems or not startWash then return end
+
+    task.spawn(function()
+        local ok, slotState = pcall(function() return getSlotState:InvokeServer() end)
+        if ok and type(slotState) == "table" then
+            local now = os.time()
+            for slotIndex, slotData in pairs(slotState) do
+                if type(slotData) == "table" then
+                    local isDone = slotData.IsComplete or slotData.Status == "Complete" or slotData.Status == "Ready" or (slotData.EndTime and now >= tonumber(slotData.EndTime or 0))
+                    if isDone then
+                        task.spawn(function()
+                            if claimWashed then
+                                pcall(function() claimWashed:InvokeServer(slotIndex) end)
+                                pcall(function() claimWashed:InvokeServer(tonumber(slotIndex) or slotIndex) end)
+                            end
+                            if collectWash then
+                                pcall(function() collectWash:InvokeServer(slotIndex) end)
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+
+        local ok2, refreshedSlots = pcall(function() return getSlotState:InvokeServer() end)
+        if ok2 and type(refreshedSlots) == "table" then
+            local ok3, washable = pcall(function() return getWashableItems:InvokeServer() end)
+            if ok3 and type(washable) == "table" and #washable > 0 then
+                local eligibleItems = {}
+                for _, item in ipairs(washable) do
+                    local rarity = WashModule.GetItemRarity(item)
+                    if State.WashRarities == nil or State.WashRarities[rarity] == true then
+                        table.insert(eligibleItems, item)
+                    end
+                end
+
+                local itemIdx = 1
+                for slotIndex, slotData in pairs(refreshedSlots) do
+                    local isEmpty = false
+                    if slotData == nil or slotData == false then
+                        isEmpty = true
+                    elseif type(slotData) == "table" then
+                        isEmpty = slotData.IsEmpty or not slotData.Item or slotData.Status == "Empty" or slotData.Status == nil
+                    end
+
+                    if isEmpty and eligibleItems[itemIdx] then
+                        local target = eligibleItems[itemIdx]
+                        local targetId = extractItemId(target)
+                        local sIdx = slotIndex
+                        task.spawn(function()
+                            pcall(function() startWash:InvokeServer(sIdx, targetId) end)
+                            pcall(function() startWash:InvokeServer(tonumber(sIdx) or sIdx, targetId) end)
+                            pcall(function() startWash:InvokeServer(sIdx, target) end)
+                        end)
+                        itemIdx = itemIdx + 1
+                    end
+                end
+            end
+        end
+    end)
+end
+
 function WashModule.RunCycle(State)
     if not State.AutoWash then return 5 end
 
@@ -71,7 +146,7 @@ function WashModule.RunCycle(State)
                     if collectWash then
                         pcall(function() collectWash:InvokeServer(slotIndex) end)
                     end
-                    task.wait(0.15)
+                    task.wait(0.1)
                 elseif slotData.EndTime then
                     local rem = tonumber(slotData.EndTime) - now
                     if rem > 0 and rem < minSleep then
@@ -110,7 +185,7 @@ function WashModule.RunCycle(State)
                     pcall(function() startWash:InvokeServer(tonumber(slotIndex) or slotIndex, targetId) end)
                     pcall(function() startWash:InvokeServer(slotIndex, target) end)
                     itemIdx = itemIdx + 1
-                    task.wait(0.2)
+                    task.wait(0.1)
                 end
             end
         end

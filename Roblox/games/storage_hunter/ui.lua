@@ -388,7 +388,7 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule, TeleportModul
     createToggle(aucCard, "Fast Loot (Auto-Vehicle & Instant Pickup)", State.FastPickup, function()
         State.FastPickup = not State.FastPickup
         if State.FastPickup then
-            AuctionModule.StartFastPickupLoop(State)
+            AuctionModule.StartFastPickupLoop(State, WashModule)
         else
             AuctionModule.StopFastPickupLoop()
         end
@@ -522,7 +522,7 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule, TeleportModul
         WashModule.StartAutoWashLoop(State)
     end
     if State.FastPickup then
-        AuctionModule.StartFastPickupLoop(State)
+        AuctionModule.StartFastPickupLoop(State, WashModule)
     end
 end
 
