@@ -9,6 +9,7 @@ Config.State = {
     IsActive = false,
     AutoWash = false,
     FastPickup = false,
+    SmartWarp = true,
     Mode = "Anti-Stuck",
     IntervalSeconds = 15,
     IntervalValue = 15,
@@ -45,6 +46,7 @@ function Config.Save()
             IsActive = Config.State.IsActive,
             AutoWash = Config.State.AutoWash,
             FastPickup = Config.State.FastPickup,
+            SmartWarp = Config.State.SmartWarp,
             WashRarities = Config.State.WashRarities,
             TeleportTarget = Config.State.TeleportTarget,
         })
@@ -78,6 +80,9 @@ function Config.Load()
             end
             if decoded.FastPickup ~= nil then
                 Config.State.FastPickup = decoded.FastPickup
+            end
+            if decoded.SmartWarp ~= nil then
+                Config.State.SmartWarp = decoded.SmartWarp
             end
             if decoded.TeleportTarget then
                 Config.State.TeleportTarget = tostring(decoded.TeleportTarget)

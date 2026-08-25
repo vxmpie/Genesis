@@ -395,6 +395,12 @@ function UI.Create(Config, ResetModule, WashModule, AuctionModule, TeleportModul
         return State.FastPickup
     end, 1)
 
+    createToggle(aucCard, "Smart Warp (Skip Empty Base Return)", State.SmartWarp, function()
+        State.SmartWarp = not State.SmartWarp
+        Config.Save()
+        return State.SmartWarp
+    end, 2)
+
     local tpCard = createCard("Map Locations & Teleport", 4)
     local locList = TeleportModule.GetLocationList()
     local selectedLoc = State.TeleportTarget or locList[1]
