@@ -553,7 +553,7 @@ function UI.Create(Config, ResetModule, WashModule)
     end
 
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftControl then
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftShift then
             MainFrame.Visible = not MainFrame.Visible
         end
     end)
@@ -561,7 +561,7 @@ function UI.Create(Config, ResetModule, WashModule)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
             Title = "GENESIS",
-            Text = "Genesis Red UI Loaded! Press 'G' button to Toggle.",
+            Text = "Genesis Red UI Loaded! Press LeftShift or 'G' button to Toggle.",
             Duration = 5
         })
     end)
