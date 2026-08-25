@@ -80,11 +80,6 @@ function Config.Reset()
     for k, v in pairs(fresh) do
         Config.State[k] = v
     end
-    if delfile and isfile and isfile(FILE_NAME) then
-        pcall(function() delfile(FILE_NAME) end)
-    elseif writefile then
-        pcall(function() writefile(FILE_NAME, HttpService:JSONEncode(DEFAULT_STATE)) end)
-    end
     return Config.State
 end
 

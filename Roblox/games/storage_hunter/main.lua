@@ -5,12 +5,7 @@ end
 local BASE_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/storage_hunter/"
 
 local function loadModule(relPath)
-    local localPath = "Roblox/games/storage_hunter/" .. relPath
-    if isfile and isfile(localPath) then
-        local fn, err = loadstring(readfile(localPath))
-        if fn then return fn() end
-    end
-    local fullUrl = BASE_URL .. relPath .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+    local fullUrl = BASE_URL .. relPath .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
     local success, code = pcall(function()
         return game:HttpGet(fullUrl)
     end)
