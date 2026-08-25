@@ -3,7 +3,7 @@ local HttpService = game:GetService("HttpService")
 
 local FILE_NAME = "Genesis_StorageHunter_Config.json"
 
-Config.State = {
+local DEFAULT_STATE = {
     AutoWash = false,
     AutoGrade = false,
     GradeFromVehicle = true,
@@ -30,6 +30,8 @@ Config.State = {
         ["Diamond Vault"] = true
     }
 }
+
+Config.State = HttpService:JSONDecode(HttpService:JSONEncode(DEFAULT_STATE))
 
 function Config.Get(key, default)
     if Config.State[key] ~= nil then
@@ -66,6 +68,22 @@ function Config.Load()
                 end
             end
         end)
+    end
+    return Config.State
+end
+
+function Config.Reset()
+    local fresh = HttpService:JSONDecode(HttpService:JSONEncode(DEFAULT_STATE))
+    for k in pairs(Config.State) do
+        Config.State[k] = nil
+    end
+    for k, v in pairs(fresh) do
+        Config.State[k] = v
+    end
+    if delfile and isfile and isfile(FILE_NAME) then
+        pcall(function() delfile(FILE_NAME) end)
+    elseif writefile then
+        pcall(function() writefile(FILE_NAME, HttpService:JSONEncode(DEFAULT_STATE)) end)
     end
     return Config.State
 end

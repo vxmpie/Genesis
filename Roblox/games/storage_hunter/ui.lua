@@ -75,6 +75,10 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     ScreenGui.Parent = parent
 
     local function fullUnload()
+        if Config and Config.Reset then
+            pcall(function() Config.Reset() end)
+        end
+
         State.AutoWash = false
         State.AutoGrade = false
         State.IsActive = false
@@ -106,7 +110,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         pcall(function()
             StarterGui:SetCore("SendNotification", {
                 Title = "GENESIS",
-                Text = "Genesis Hub completely unloaded!",
+                Text = "Genesis Hub completely unloaded & settings cleared!",
                 Duration = 3
             })
         end)
@@ -630,6 +634,14 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         StarterGui:SetCore("SendNotification", {
             Title = "GENESIS",
             Text = "Settings Saved Successfully!",
+            Duration = 3
+        })
+    end)
+    settingsCard:AddButton("Reset All Settings to Default", function()
+        Config.Reset()
+        StarterGui:SetCore("SendNotification", {
+            Title = "GENESIS",
+            Text = "All settings reset to defaults!",
             Duration = 3
         })
     end)
