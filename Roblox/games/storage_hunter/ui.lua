@@ -1,347 +1,25 @@
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
-local RunService = game:GetService("RunService")
-local StarterGui = game:GetService("StarterGui")
-local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local SETTINGS_FOLDER = "Genesis"
-local SETTINGS_FILE = SETTINGS_FOLDER .. "/settings.json"
+local UI = {}
 
-local State = {
-    IsActive = false,
-    AutoWash = false,
-    FastPickup = true,
-    Mode = "Anti-Stuck",
-    IntervalSeconds = 15,
-    IntervalValue = 15,
-    TimeRemaining = 0,
-    Unit = "Seconds",
+local RARITY_COLORS = {
+    Common = Color3.fromRGB(180, 180, 180),
+    Uncommon = Color3.fromRGB(80, 220, 100),
+    Rare = Color3.fromRGB(60, 150, 255),
+    Epic = Color3.fromRGB(180, 80, 255),
+    Legendary = Color3.fromRGB(255, 180, 40),
+    Mythic = Color3.fromRGB(255, 60, 120),
+    Exotic = Color3.fromRGB(0, 230, 230),
+    Secret = Color3.fromRGB(255, 220, 80),
 }
 
-local trackerThread = nil
-local washThread = nil
-local pickupThread = nil
+local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Secret" }
 
-local function ensureFolder()
-    pcall(function()
-        if not isfolder(SETTINGS_FOLDER) then
-            makefolder(SETTINGS_FOLDER)
-        end
-    end)
-end
+function UI.Create(Config, ResetModule, WashModule, AuctionModule)
+    local State = Config.State
 
-local function saveSettings()
-    pcall(function()
-        ensureFolder()
-        local data = HttpService:JSONEncode({
-            IntervalValue = State.IntervalValue,
-            Unit = State.Unit,
-            Mode = State.Mode,
-            IsActive = State.IsActive,
-            AutoWash = State.AutoWash,
-            FastPickup = State.FastPickup,
-        })
-        writefile(SETTINGS_FILE, data)
-    end)
-end
-
-local function loadSettings()
-    local ok, data = pcall(function()
-        return readfile(SETTINGS_FILE)
-    end)
-    if ok and data then
-        local success, decoded = pcall(function()
-            return HttpService:JSONDecode(data)
-        end)
-        if success and decoded then
-            if decoded.IntervalValue then
-                State.IntervalValue = tonumber(decoded.IntervalValue) or 15
-            end
-            if decoded.Unit == "Minutes" or decoded.Unit == "Seconds" then
-                State.Unit = decoded.Unit
-            end
-            if decoded.Mode == "Anti-Stuck" or decoded.Mode == "Timer" then
-                State.Mode = decoded.Mode
-            end
-            if decoded.IsActive == true then
-                State.IsActive = true
-            end
-            if decoded.AutoWash ~= nil then
-                State.AutoWash = decoded.AutoWash
-            end
-            if decoded.FastPickup ~= nil then
-                State.FastPickup = decoded.FastPickup
-            end
-        end
-    end
-end
-
-loadSettings()
-
-if State.Unit == "Minutes" then
-    State.IntervalSeconds = State.IntervalValue * 60
-else
-    State.IntervalSeconds = State.IntervalValue
-end
-
-local function resetCharacter()
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    local success = pcall(function()
-        character:BreakJoints()
-    end)
-
-    if not success then
-        pcall(function()
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.Health = 0
-            end
-        end)
-    end
-
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        pcall(function()
-            character.HumanoidRootPart:Destroy()
-        end)
-    end
-end
-
-local function runAutoWash()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    local washEvents = events and events:FindFirstChild("Wash")
-    if not washEvents then return end
-
-    local getSlotState = washEvents:FindFirstChild("GetSlotState")
-    local getWashableItems = washEvents:FindFirstChild("GetWashableItems")
-    local startWash = washEvents:FindFirstChild("StartWash")
-    local claimWashed = washEvents:FindFirstChild("ClaimWashedItem") or washEvents:FindFirstChild("CollectWash")
-
-    if not getSlotState or not getWashableItems or not startWash then return end
-
-    local ok, slotState = pcall(function() return getSlotState:InvokeServer() end)
-    if ok and type(slotState) == "table" then
-        for slotIndex, slotData in pairs(slotState) do
-            if type(slotData) == "table" then
-                local isDone = slotData.IsComplete or slotData.Status == "Complete" or slotData.Status == "Ready" or (slotData.EndTime and os.time() >= tonumber(slotData.EndTime or 0))
-                if isDone and claimWashed then
-                    pcall(function()
-                        claimWashed:InvokeServer(slotIndex)
-                    end)
-                    task.wait(0.15)
-                end
-            end
-        end
-    end
-
-    local ok2, refreshedSlots = pcall(function() return getSlotState:InvokeServer() end)
-    if ok2 and type(refreshedSlots) == "table" then
-        local ok3, washable = pcall(function() return getWashableItems:InvokeServer() end)
-        if ok3 and type(washable) == "table" and #washable > 0 then
-            local itemIdx = 1
-            for slotIndex, slotData in pairs(refreshedSlots) do
-                local isEmpty = false
-                if slotData == nil or slotData == false then
-                    isEmpty = true
-                elseif type(slotData) == "table" then
-                    isEmpty = slotData.IsEmpty or not slotData.Item or slotData.Status == "Empty" or slotData.Status == nil
-                end
-
-                if isEmpty and washable[itemIdx] then
-                    local target = washable[itemIdx]
-                    local targetId = (type(target) == "table" and (target.Id or target.ItemId or target.UUID or target.id)) or target
-                    pcall(function()
-                        startWash:InvokeServer(slotIndex, targetId)
-                    end)
-                    itemIdx = itemIdx + 1
-                    task.wait(0.15)
-                end
-            end
-        end
-    end
-end
-
-local function fastAuctionPickup()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    local auctionEvents = events and events:FindFirstChild("Auction")
-    local draggingEvents = events and events:FindFirstChild("Dragging")
-
-    local auctionPickupItem = auctionEvents and auctionEvents:FindFirstChild("AuctionPickupItem")
-    local pickUpItem = draggingEvents and draggingEvents:FindFirstChild("PickUpItem")
-
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("BasePart") then
-            local isWon = obj:GetAttribute("AuctionItemId") or obj:GetAttribute("WonItem") or obj:GetAttribute("ItemId")
-            local isAuctionParent = obj.Parent and (obj.Parent.Name == "AuctionItems" or obj.Parent.Name == "WonItems" or obj.Parent.Name == "StorageItems")
-            local hasPrompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("PromptPart")
-
-            if isWon or isAuctionParent or hasPrompt then
-                if auctionPickupItem then
-                    pcall(function() auctionPickupItem:FireServer(obj) end)
-                end
-                if pickUpItem then
-                    pcall(function() pickUpItem:FireServer(obj) end)
-                end
-            end
-        end
-    end
-end
-
-local function startAutoWashLoop()
-    if washThread then
-        pcall(function() task.cancel(washThread) end)
-    end
-    washThread = task.spawn(function()
-        while State.AutoWash do
-            pcall(runAutoWash)
-            task.wait(3)
-        end
-    end)
-end
-
-local function stopAutoWashLoop()
-    if washThread then
-        pcall(function() task.cancel(washThread) end)
-        washThread = nil
-    end
-end
-
-local function startFastPickupLoop()
-    if pickupThread then
-        pcall(function() task.cancel(pickupThread) end)
-    end
-    pickupThread = task.spawn(function()
-        while State.FastPickup do
-            pcall(fastAuctionPickup)
-            task.wait(0.3)
-        end
-    end)
-end
-
-local function stopFastPickupLoop()
-    if pickupThread then
-        pcall(function() task.cancel(pickupThread) end)
-        pickupThread = nil
-    end
-end
-
-local function startTracker(countdownLabel, statusLabel)
-    if trackerThread then
-        pcall(function() task.cancel(trackerThread) end)
-    end
-
-    trackerThread = task.spawn(function()
-        local lastPos = nil
-        local idleSeconds = 0
-        local timerCountdown = State.IntervalSeconds
-
-        while State.IsActive do
-            local character = LocalPlayer.Character
-            local hrp = character and character:FindFirstChild("HumanoidRootPart")
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
-            if not hrp or not humanoid or humanoid.Health <= 0 then
-                if statusLabel then
-                    statusLabel.Text = "RESPAWNING..."
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
-                end
-                lastPos = nil
-                idleSeconds = 0
-                task.wait(1)
-            else
-                if State.Mode == "Anti-Stuck" then
-                    local currentPos = hrp.Position
-
-                    if not lastPos then
-                        lastPos = currentPos
-                        idleSeconds = 0
-                    end
-
-                    local distance = (currentPos - lastPos).Magnitude
-
-                    if distance > 3 then
-                        lastPos = currentPos
-                        idleSeconds = 0
-                        if statusLabel then
-                            statusLabel.Text = "FARMING (MOVING)"
-                            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
-                        end
-                        if countdownLabel then
-                            countdownLabel.Text = "00:00"
-                        end
-                    else
-                        idleSeconds = idleSeconds + 1
-                        local remaining = math.max(0, State.IntervalSeconds - idleSeconds)
-
-                        if countdownLabel then
-                            local mins = math.floor(remaining / 60)
-                            local secs = remaining % 60
-                            countdownLabel.Text = string.format("%02d:%02d", mins, secs)
-                        end
-
-                        if remaining <= 0 then
-                            if statusLabel then
-                                statusLabel.Text = "STUCK! RESETTING..."
-                                statusLabel.TextColor3 = Color3.fromRGB(255, 70, 70)
-                            end
-                            resetCharacter()
-                            task.wait(3)
-                            lastPos = nil
-                            idleSeconds = 0
-                        else
-                            if statusLabel then
-                                statusLabel.Text = string.format("IDLE (%ds / %ds)", idleSeconds, State.IntervalSeconds)
-                                statusLabel.TextColor3 = Color3.fromRGB(255, 180, 60)
-                            end
-                        end
-                    end
-                else
-                    if timerCountdown <= 0 then
-                        if statusLabel then
-                            statusLabel.Text = "RESETTING..."
-                            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
-                        end
-                        resetCharacter()
-                        task.wait(3)
-                        timerCountdown = State.IntervalSeconds
-                        if statusLabel then
-                            statusLabel.Text = "ACTIVE"
-                            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
-                        end
-                    end
-
-                    if countdownLabel then
-                        local mins = math.floor(timerCountdown / 60)
-                        local secs = timerCountdown % 60
-                        countdownLabel.Text = string.format("%02d:%02d", mins, secs)
-                    end
-
-                    timerCountdown = timerCountdown - 1
-                end
-
-                task.wait(1)
-            end
-        end
-    end)
-end
-
-local function stopTracker(countdownLabel, statusLabel)
-    State.IsActive = false
-    if trackerThread then
-        pcall(function() task.cancel(trackerThread) end)
-        trackerThread = nil
-    end
-    if countdownLabel then countdownLabel.Text = "00:00" end
-    if statusLabel then
-        statusLabel.Text = "INACTIVE"
-        statusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
-    end
-end
-
-local function createUI()
     if CoreGui:FindFirstChild("GenesisResetTimer") then
         CoreGui.GenesisResetTimer:Destroy()
     end
@@ -388,8 +66,8 @@ local function createUI()
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 340, 0, 500)
-    MainFrame.Position = UDim2.new(0.5, -170, 0.5, -250)
+    MainFrame.Size = UDim2.new(0, 350, 0, 520)
+    MainFrame.Position = UDim2.new(0.5, -175, 0.5, -260)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
@@ -649,9 +327,9 @@ local function createUI()
             InputLabel.Text = "Max Idle (s)"
         end
         ModeBtn.Text = State.Mode
-        saveSettings()
+        Config.Save()
         if State.IsActive then
-            startTracker(CountdownLabel, StatusLabel)
+            ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
         end
     end)
 
@@ -674,7 +352,7 @@ local function createUI()
         else
             State.IntervalSeconds = State.IntervalValue
         end
-        saveSettings()
+        Config.Save()
     end)
 
     TimeInput.FocusLost:Connect(function()
@@ -687,12 +365,12 @@ local function createUI()
         else
             State.IntervalSeconds = rawVal
         end
-        saveSettings()
+        Config.Save()
     end)
 
     local function createToggleRow(labelText, initialState, onToggle, order)
         local Row = Instance.new("Frame")
-        Row.Size = UDim2.new(1, 0, 0, 42)
+        Row.Size = UDim2.new(1, 0, 0, 40)
         Row.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
         Row.LayoutOrder = order
         Row.Parent = Content
@@ -761,7 +439,7 @@ local function createUI()
         Btn.MouseButton1Click:Connect(function()
             local newState = onToggle()
             updateVisual(newState)
-            saveSettings()
+            Config.Save()
         end)
 
         return Row, updateVisual
@@ -779,10 +457,10 @@ local function createUI()
                 State.IntervalSeconds = rawVal
             end
             cdStroke.Color = Color3.fromRGB(40, 160, 80)
-            startTracker(CountdownLabel, StatusLabel)
+            ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
         else
             cdStroke.Color = Color3.fromRGB(40, 40, 50)
-            stopTracker(CountdownLabel, StatusLabel)
+            ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
         end
         return State.IsActive
     end, 4)
@@ -790,31 +468,106 @@ local function createUI()
     createToggleRow("Auto Wash Items (Send & Claim)", State.AutoWash, function()
         State.AutoWash = not State.AutoWash
         if State.AutoWash then
-            startAutoWashLoop()
+            WashModule.StartAutoWashLoop(State)
         else
-            stopAutoWashLoop()
+            WashModule.StopAutoWashLoop()
         end
         return State.AutoWash
     end, 5)
 
+    local RaritySection = Instance.new("Frame")
+    RaritySection.Size = UDim2.new(1, 0, 0, 105)
+    RaritySection.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
+    RaritySection.LayoutOrder = 6
+    RaritySection.Parent = Content
+
+    local rsCorner = Instance.new("UICorner")
+    rsCorner.CornerRadius = UDim.new(0, 8)
+    rsCorner.Parent = RaritySection
+
+    local RarityTitle = Instance.new("TextLabel")
+    RarityTitle.Size = UDim2.new(1, -20, 0, 20)
+    RarityTitle.Position = UDim2.new(0, 10, 0, 6)
+    RarityTitle.BackgroundTransparency = 1
+    RarityTitle.Text = "WASH RARITY FILTER"
+    RarityTitle.TextColor3 = Color3.fromRGB(150, 150, 170)
+    RarityTitle.Font = Enum.Font.GothamBold
+    RarityTitle.TextSize = 11
+    RarityTitle.TextXAlignment = Enum.TextXAlignment.Left
+    RarityTitle.Parent = RaritySection
+
+    local RarityGrid = Instance.new("Frame")
+    RarityGrid.Size = UDim2.new(1, -16, 0, 70)
+    RarityGrid.Position = UDim2.new(0, 8, 0, 28)
+    RarityGrid.BackgroundTransparency = 1
+    RarityGrid.Parent = RaritySection
+
+    local gridLayout = Instance.new("UIGridLayout")
+    gridLayout.CellSize = UDim2.new(0.23, 0, 0, 30)
+    gridLayout.CellPadding = UDim2.new(0.02, 0, 0, 6)
+    gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    gridLayout.Parent = RarityGrid
+
+    for idx, rarity in ipairs(RARITY_LIST) do
+        local rBtn = Instance.new("TextButton")
+        rBtn.Name = rarity
+        rBtn.Text = rarity
+        rBtn.Font = Enum.Font.GothamBold
+        rBtn.TextSize = 10
+        rBtn.AutoButtonColor = false
+        rBtn.LayoutOrder = idx
+        rBtn.Parent = RarityGrid
+
+        local rbCorner = Instance.new("UICorner")
+        rbCorner.CornerRadius = UDim.new(0, 6)
+        rbCorner.Parent = rBtn
+
+        local rbStroke = Instance.new("UIStroke")
+        rbStroke.Thickness = 1
+        rbStroke.Parent = rBtn
+
+        local color = RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
+
+        local function updateRBtn(enabled)
+            if enabled then
+                rBtn.BackgroundColor3 = Color3.fromRGB(35, 38, 45)
+                rBtn.TextColor3 = color
+                rbStroke.Color = color
+            else
+                rBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+                rBtn.TextColor3 = Color3.fromRGB(80, 80, 90)
+                rbStroke.Color = Color3.fromRGB(40, 40, 48)
+            end
+        end
+
+        local isEnabled = State.WashRarities[rarity] == true
+        updateRBtn(isEnabled)
+
+        rBtn.MouseButton1Click:Connect(function()
+            State.WashRarities[rarity] = not State.WashRarities[rarity]
+            updateRBtn(State.WashRarities[rarity])
+            Config.Save()
+        end)
+    end
+
     createToggleRow("Fast Auction Pickup (Instant Loot)", State.FastPickup, function()
         State.FastPickup = not State.FastPickup
         if State.FastPickup then
-            startFastPickupLoop()
+            AuctionModule.StartFastPickupLoop(State)
         else
-            stopFastPickupLoop()
+            AuctionModule.StopFastPickupLoop()
         end
         return State.FastPickup
-    end, 6)
+    end, 7)
 
     if State.IsActive then
-        startTracker(CountdownLabel, StatusLabel)
+        ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
     end
     if State.AutoWash then
-        startAutoWashLoop()
+        WashModule.StartAutoWashLoop(State)
     end
     if State.FastPickup then
-        startFastPickupLoop()
+        AuctionModule.StartFastPickupLoop(State)
     end
 
     local UnloadBtn = Instance.new("TextButton")
@@ -825,7 +578,7 @@ local function createUI()
     UnloadBtn.Font = Enum.Font.GothamBold
     UnloadBtn.TextSize = 12
     UnloadBtn.AutoButtonColor = false
-    UnloadBtn.LayoutOrder = 7
+    UnloadBtn.LayoutOrder = 8
     UnloadBtn.Parent = Content
 
     local ulCorner = Instance.new("UICorner")
@@ -845,12 +598,11 @@ local function createUI()
     end)
 
     UnloadBtn.MouseButton1Click:Connect(function()
-        stopTracker(CountdownLabel, StatusLabel)
-        stopAutoWashLoop()
-        stopFastPickupLoop()
+        ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
+        WashModule.StopAutoWashLoop()
+        AuctionModule.StopFastPickupLoop()
         ScreenGui:Destroy()
     end)
 end
 
-createUI()
-warn("[GENESIS] Character Reset Timer loaded successfully!")
+return UI
