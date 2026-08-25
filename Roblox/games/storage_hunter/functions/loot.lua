@@ -4,102 +4,97 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
-local ItemsDB = nil
 
-Loot.Status = {
-    TruckPercent = 0,
-    Collected = 0,
-    BoxesOpened = 0,
-    Unloaded = 0,
-    BestLockpick = "Master Lockpick"
-}
-
-local function getDraggingFolder()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    return events and events:FindFirstChild("Dragging")
-end
-
-local function getLocksmithFolder()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    return events and events:FindFirstChild("Locksmith")
-end
-
-local function getAuctionFolder()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    return events and events:FindFirstChild("Auction")
+local function getCharacterPosition()
+    if LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then return hrp.Position end
+    end
+    return Vector3.new(0, 0, 0)
 end
 
 function Loot.Init(Config, DB)
-    ItemsDB = DB
+    local eventsFolder = ReplicatedStorage:WaitForChild("Events")
+    local dragEvents = eventsFolder:WaitForChild("Dragging")
+    local pickupRemote = dragEvents:WaitForChild("PickUpItem")
+    local auctionEvents = eventsFolder:FindFirstChild("Auction")
+    local auctionPickup = auctionEvents and auctionEvents:FindFirstChild("AuctionPickupItem")
+
+    local function vacuumItem(item)
+        if not item or not item:IsA("Instance") then return end
+        pcall(function()
+            if auctionPickup then
+                auctionPickup:FireServer(item)
+            end
+            pickupRemote:FireServer(item)
+        end)
+    end
+
     task.spawn(function()
-        while task.wait(0.2) do
-            if not Config.Get("StopAllAutomation", false) then
-                if Config.Get("AutoCollectWorldLoot", false) then
-                    pcall(function()
-                        local char = LocalPlayer.Character
-                        local root = char and char:FindFirstChild("HumanoidRootPart")
-                        if root then
-                            local range = Config.Get("LootRange", 150)
-                            local dragging = getDraggingFolder()
-                            local pickupEvent = dragging and dragging:FindFirstChild("PickUpItem")
+        while task.wait(0.1) do
+            if Config.Get("AutoCollectWorldLoot", false) and not Config.Get("StopAllAutomation", false) then
+                local charPos = getCharacterPosition()
+                local maxDist = Config.Get("LootRange", 150)
+                local minRarity = Config.Get("LootMinRarity", "Any")
+                local alwaysGrabMutated = Config.Get("AlwaysGrabMutatedLoot", true)
 
-                            for _, item in ipairs(Workspace:GetChildren()) do
-                                if item:IsA("Model") and item:FindFirstChild("PrimaryPart") or item:FindFirstChild("Handle") then
-                                    local part = item.PrimaryPart or item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart")
-                                    if part then
-                                        local dist = (part.Position - root.Position).Magnitude
-                                        if dist <= range then
-                                            local itemInfo = ItemsDB and ItemsDB.GetItemByName(item.Name)
-                                            local allow = true
+                local lootFolders = {
+                    Workspace:FindFirstChild("Debris"),
+                    Workspace:FindFirstChild("Loot"),
+                    Workspace:FindFirstChild("DroppedItems"),
+                    Workspace:FindFirstChild("Garages")
+                }
 
-                                            if Config.Get("LootMinRarity", "Any") ~= "Any" and itemInfo then
-                                                allow = (itemInfo.Rarity == Config.Get("LootMinRarity"))
-                                            end
+                for _, folder in ipairs(lootFolders) do
+                    if folder then
+                        for _, item in ipairs(folder:GetChildren()) do
+                            if item:IsA("Model") or item:IsA("BasePart") then
+                                local primaryPart = item:IsA("Model") and (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")) or item
+                                if primaryPart then
+                                    local dist = (primaryPart.Position - charPos).Magnitude
+                                    if dist <= maxDist then
+                                        local isMutated = item:GetAttribute("Mutation") ~= nil or item:GetAttribute("Variant") ~= nil
+                                        local itemData = DB.GetItem(item.Name)
+                                        local itemRarity = itemData and itemData.Rarity or "Junk"
+                                        
+                                        local shouldGrab = false
+                                        if alwaysGrabMutated and isMutated then
+                                            shouldGrab = true
+                                        elseif minRarity == "Any" then
+                                            shouldGrab = true
+                                        else
+                                            local r1 = DB.GetRarityMultiplier(itemRarity)
+                                            local r2 = DB.GetRarityMultiplier(minRarity)
+                                            if r1 >= r2 then shouldGrab = true end
+                                        end
 
-                                            if allow and pickupEvent then
-                                                pickupEvent:FireServer(item)
-                                                Loot.Status.Collected = Loot.Status.Collected + 1
-                                            end
+                                        if shouldGrab then
+                                            task.spawn(vacuumItem, item)
                                         end
                                     end
                                 end
                             end
                         end
-                    end)
+                    end
                 end
+            end
+        end
+    end)
 
-                if Config.Get("AutoClaimAuctionWinnings", true) then
-                    pcall(function()
-                        local auction = getAuctionFolder()
-                        local claimEvent = auction and (auction:FindFirstChild("AuctionPickupItem") or auction:FindFirstChild("ClaimWinnings"))
-                        if claimEvent then
-                            claimEvent:FireServer()
-                        end
-                    end)
-                end
-
-                if Config.Get("AutoOpenSafes", false) or Config.Get("AutoPicklockSafes", false) then
-                    pcall(function()
-                        local lockFolder = getLocksmithFolder()
-                        if lockFolder then
-                            local openSafe = lockFolder:FindFirstChild("StartLockpick") or lockFolder:FindFirstChild("OpenSafe")
-                            local claimSafe = lockFolder:FindFirstChild("ClaimItem")
-                            if claimSafe then
-                                for slot = 1, 5 do
-                                    claimSafe:InvokeServer(slot)
-                                end
-                            end
-                            if Config.Get("SpeedUpSafes", false) then
-                                local speedup = lockFolder:FindFirstChild("SpeedUpSafe")
-                                if speedup then
-                                    for slot = 1, 5 do
-                                        speedup:InvokeServer(slot)
-                                    end
-                                end
+    task.spawn(function()
+        while task.wait(0.5) do
+            if Config.Get("AutoOpenSafes", false) and not Config.Get("StopAllAutomation", false) then
+                pcall(function()
+                    local safesFolder = Workspace:FindFirstChild("Safes") or Workspace
+                    for _, safe in ipairs(safesFolder:GetDescendants()) do
+                        if safe:IsA("Model") and string.find(string.lower(safe.Name), "safe") then
+                            local prompt = safe:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt and fireproximityprompt then
+                                fireproximityprompt(prompt)
                             end
                         end
-                    end)
-                end
+                    end
+                end)
             end
         end
     end)

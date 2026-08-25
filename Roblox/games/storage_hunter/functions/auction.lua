@@ -1,127 +1,137 @@
 local Auction = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
-local ItemsDB = nil
 
-Auction.Status = {
-    CurrentAuction = "idle",
-    WinningBid = 0,
-    NextBid = 0,
-    LotValue = 0,
-    Powers = {XRay = 0, Calc = 0, Kick = 0},
-    Events = {
-        Moonlit = "in 0:00",
-        Rain = "in 0:00",
-        Sandstorm = "in 0:00",
-        CargoShip = "in 0:00",
-        AlienInvasion = "in 0:00",
-        FishingSeason = "in 0:00"
-    },
-    LostAndFound = 0,
-    Filters = {Kept = 0, Skipped = 0}
+local RateLimiter = {
+    Tokens = 10,
+    MaxTokens = 10,
+    RefillRate = 10,
+    LastRefill = os.clock()
 }
 
-local function getAuctionFolder()
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    return events and events:FindFirstChild("Auction")
-end
-
-local function scanAuctionUnits()
-    local units = {}
-    local auctionsFolder = Workspace:FindFirstChild("Auctions") or Workspace:FindFirstChild("Garages") or Workspace:FindFirstChild("Map")
-    if auctionsFolder then
-        for _, obj in ipairs(auctionsFolder:GetDescendants()) do
-            if obj.Name == "AuctionPad" or obj.Name == "AuctionZone" or obj:FindFirstChild("AuctionTrigger") then
-                table.insert(units, obj)
-            end
-        end
+function RateLimiter:Consume()
+    local now = os.clock()
+    local delta = now - self.LastRefill
+    self.Tokens = math.min(self.MaxTokens, self.Tokens + delta * self.RefillRate)
+    self.LastRefill = now
+    if self.Tokens >= 1 then
+        self.Tokens = self.Tokens - 1
+        return true
     end
-    return units
+    return false
 end
 
 function Auction.Init(Config, DB)
-    ItemsDB = DB
-    task.spawn(function()
-        while task.wait(0.5) do
-            if not Config.Get("StopAllAutomation", false) then
-                local auctionFolder = getAuctionFolder()
-                if auctionFolder then
-                    if Config.Get("AutoBuyPowers", false) then
-                        pcall(function()
-                            local buyPower = auctionFolder:FindFirstChild("BuyPower") or auctionFolder:FindFirstChild("BuyPowerPack")
-                            if buyPower then
-                                local targetPower = Config.Get("PowersToBuy", "Calculator")
-                                local threshold = Config.Get("BuyPowersBelow", 5)
-                                local currentCount = Auction.Status.Powers[targetPower] or 0
-                                if currentCount < threshold then
-                                    buyPower:InvokeServer(targetPower)
-                                end
-                            end
-                        end)
+    local eventsFolder = ReplicatedStorage:WaitForChild("Events")
+    local auctionEvents = eventsFolder:WaitForChild("Auction")
+    local bidRemote = auctionEvents:WaitForChild("Bid")
+    local leaveRemote = auctionEvents:WaitForChild("LeaveAuction")
+    local xrayRemote = auctionEvents:WaitForChild("UseXRay")
+    local calcRemote = auctionEvents:WaitForChild("UseCalculator")
+    local kickRemote = auctionEvents:WaitForChild("UseKickNPC")
+    local buyPowerRemote = auctionEvents:WaitForChild("BuyPower")
+
+    local activeAuction = {
+        IsRunning = false,
+        CurrentBid = 0,
+        TopBidder = nil,
+        LotValue = 0,
+        LotItemsCount = 0,
+        LastBidTime = 0
+    }
+
+    local function computeLotValue(garageModel)
+        if not garageModel then return 0 end
+        local totalVal = 0
+        local count = 0
+        local itemsFolder = garageModel:FindFirstChild("Items") or garageModel:FindFirstChild("Storage") or garageModel
+        for _, item in ipairs(itemsFolder:GetDescendants()) do
+            if item:IsA("Model") or item:IsA("BasePart") then
+                local itemName = item.Name
+                local itemData = DB.GetItem(itemName)
+                if itemData then
+                    local basePrice = itemData.Price or 50
+                    local rarityMult = DB.GetRarityMultiplier(itemData.Rarity)
+                    local mutMult = 1.0
+                    local mutAttr = item:GetAttribute("Mutation") or item:GetAttribute("Variant")
+                    if mutAttr and typeof(mutAttr) == "string" then
+                        mutMult = 2.5
                     end
+                    totalVal = totalVal + math.floor(basePrice * rarityMult * mutMult)
+                    count = count + 1
+                end
+            end
+        end
+        return totalVal, count
+    end
 
-                    if Config.Get("AutoXRay", false) then
+    if auctionEvents:FindFirstChild("UpdateCurrentWinningBid") then
+        auctionEvents.UpdateCurrentWinningBid.OnClientEvent:Connect(function(bidAmount, bidderName)
+            activeAuction.IsRunning = true
+            activeAuction.CurrentBid = tonumber(bidAmount) or activeAuction.CurrentBid
+            activeAuction.TopBidder = tostring(bidderName or "")
+            
+            if Config.Get("AutoBid", false) and not Config.Get("StopAllAutomation", false) then
+                local maxBid = Config.Get("MaxBid", 0)
+                local minBid = Config.Get("MinBid", 10000)
+                local minLotVal = Config.Get("MinLotValue", 0)
+                local bidDelay = Config.Get("BidDelay", 0.5)
+
+                if Config.Get("LeaveIfBidOverMax", true) and maxBid > 0 and activeAuction.CurrentBid >= maxBid then
+                    pcall(function() leaveRemote:InvokeServer() end)
+                    return
+                end
+
+                if Config.Get("LeaveIfLotUnderValue", false) and minLotVal > 0 and activeAuction.LotValue > 0 and activeAuction.LotValue < minLotVal then
+                    pcall(function() leaveRemote:InvokeServer() end)
+                    return
+                end
+
+                if activeAuction.TopBidder ~= LocalPlayer.Name and os.clock() - activeAuction.LastBidTime >= bidDelay then
+                    if RateLimiter:Consume() then
+                        activeAuction.LastBidTime = os.clock()
                         pcall(function()
-                            local xRay = auctionFolder:FindFirstChild("UseXRay")
-                            if xRay then
-                                xRay:InvokeServer()
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoCalculator", false) then
-                        pcall(function()
-                            local calc = auctionFolder:FindFirstChild("UseCalculator")
-                            if calc then
-                                calc:InvokeServer()
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoKickTopBidder", false) then
-                        pcall(function()
-                            local kick = auctionFolder:FindFirstChild("UseKickNPC")
-                            if kick then
-                                kick:InvokeServer()
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoBid", false) then
-                        pcall(function()
-                            local bidEvent = auctionFolder:FindFirstChild("Bid")
-                            if bidEvent then
-                                local minBid = Config.Get("MinBid", 10000)
-                                local maxBid = Config.Get("MaxBid", 0)
-                                local currentBid = Auction.Status.WinningBid or 0
-                                local shouldBid = true
-
-                                if maxBid > 0 and currentBid >= maxBid then
-                                    shouldBid = false
-                                    if Config.Get("LeaveIfBidOverMax", true) then
-                                        task.wait(Config.Get("LeaveDelay", 0))
-                                    end
-                                end
-
-                                if shouldBid then
-                                    local mode = Config.Get("StopNPCBidMode", "Consistent")
-                                    if mode == "Potentially Bugged" then
-                                        for i = 1, 3 do
-                                            bidEvent:FireServer()
-                                        end
-                                    else
-                                        bidEvent:FireServer()
-                                    end
-                                end
-                            end
+                            bidRemote:FireServer()
                         end)
                     end
                 end
             end
-            task.wait(Config.Get("BidDelay", 0.5))
+        end)
+    end
+
+    if auctionEvents:FindFirstChild("ToggleBiddingUI") then
+        auctionEvents.ToggleBiddingUI.OnClientEvent:Connect(function(isOpen, garageData)
+            activeAuction.IsRunning = isOpen
+            if isOpen and typeof(garageData) == "Instance" then
+                local val, count = computeLotValue(garageData)
+                activeAuction.LotValue = val
+                activeAuction.LotItemsCount = count
+
+                if Config.Get("AutoXRay", false) then
+                    task.spawn(function() pcall(function() xrayRemote:InvokeServer() end) end)
+                end
+                if Config.Get("AutoCalculator", false) then
+                    task.spawn(function() pcall(function() calcRemote:InvokeServer() end) end)
+                end
+                if Config.Get("AutoKickTopBidder", false) then
+                    task.spawn(function() pcall(function() kickRemote:InvokeServer() end) end)
+                end
+            end
+        end)
+    end
+
+    task.spawn(function()
+        while task.wait(5) do
+            if Config.Get("AutoBuyPowers", false) and not Config.Get("StopAllAutomation", false) then
+                local powerType = Config.Get("PowersToBuy", "Calculator")
+                pcall(function()
+                    buyPowerRemote:InvokeServer(powerType, 1)
+                end)
+            end
         end
     end)
 end

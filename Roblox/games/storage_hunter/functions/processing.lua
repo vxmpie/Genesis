@@ -3,114 +3,68 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
-local ItemsDB = nil
-
-Processing.Status = {
-    Started = 0,
-    Claimed = 0,
-    Capsuled = 0,
-    Certified = 0,
-    UnlockedSlots = 0,
-    SpedUpSlots = 0
-}
-
-local function getEventsFolder()
-    return ReplicatedStorage:FindFirstChild("Events")
-end
 
 function Processing.Init(Config, DB)
-    ItemsDB = DB
+    local eventsFolder = ReplicatedStorage:WaitForChild("Events")
+    local washEvents = eventsFolder:FindFirstChild("Wash")
+    local repairEvents = eventsFolder:FindFirstChild("Repair")
+    local gradingEvents = eventsFolder:FindFirstChild("Grading")
+    local timeCapsuleEvents = eventsFolder:FindFirstChild("TimeCapsule")
+
+    local function runPipeline()
+        pcall(function()
+            if Config.Get("AutoCollectFinishedProcessing", true) then
+                if washEvents and washEvents:FindFirstChild("ClaimWashedItem") then
+                    washEvents.ClaimWashedItem:FireServer()
+                end
+                if repairEvents and repairEvents:FindFirstChild("ClaimRepairedItem") then
+                    repairEvents.ClaimRepairedItem:FireServer()
+                end
+                if gradingEvents and gradingEvents:FindFirstChild("ClaimGradedItem") then
+                    gradingEvents.ClaimGradedItem:FireServer()
+                end
+                if timeCapsuleEvents and timeCapsuleEvents:FindFirstChild("ClaimCapsule") then
+                    timeCapsuleEvents.ClaimCapsule:FireServer()
+                end
+            end
+
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, item in ipairs(backpack:GetChildren()) do
+                    local itemData = DB.GetItem(item.Name)
+                    local basePrice = itemData and itemData.Price or 0
+                    local rarity = itemData and itemData.Rarity or "Junk"
+                    local rMult = DB.GetRarityMultiplier(rarity)
+
+                    if Config.Get("AutoWashItems", false) and washEvents and washEvents:FindFirstChild("StartWash") then
+                        local minVal = tonumber(Config.Get("WashMinValue", 0)) or 0
+                        if basePrice >= minVal then
+                            washEvents.StartWash:FireServer(item)
+                        end
+                    end
+
+                    if Config.Get("AutoRepairItems", false) and repairEvents and repairEvents:FindFirstChild("StartRepair") then
+                        local minVal = tonumber(Config.Get("RepairMinValue", 0)) or 0
+                        if basePrice >= minVal then
+                            repairEvents.StartRepair:FireServer(item)
+                        end
+                    end
+
+                    if Config.Get("AutoGradeItems", false) and gradingEvents and gradingEvents:FindFirstChild("StartGrading") then
+                        local minVal = tonumber(Config.Get("GradeMinValue", 0)) or 0
+                        if basePrice >= minVal and rMult >= 2.0 then
+                            gradingEvents.StartGrading:FireServer(item)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
     task.spawn(function()
         while task.wait(1) do
             if not Config.Get("StopAllAutomation", false) then
-                local events = getEventsFolder()
-                if events then
-                    if Config.Get("AutoWashItems", false) then
-                        pcall(function()
-                            local wash = events:FindFirstChild("Wash")
-                            if wash then
-                                local startWash = wash:FindFirstChild("StartWash")
-                                local claimWash = wash:FindFirstChild("ClaimWashedItem")
-                                local getSlots = wash:FindFirstChild("GetSlotState")
-
-                                if Config.Get("AutoCollectFinishedProcessing", true) and claimWash then
-                                    for slot = 1, 5 do
-                                        claimWash:InvokeServer(slot)
-                                    end
-                                end
-
-                                if startWash and getSlots then
-                                    local slotData = getSlots:InvokeServer()
-                                    if typeof(slotData) == "table" then
-                                        for slotIndex, slot in pairs(slotData) do
-                                            if slot.Occupied == false or slot.State == "Empty" then
-                                                startWash:InvokeServer(slotIndex)
-                                                Processing.Status.Started = Processing.Status.Started + 1
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoRepairItems", false) then
-                        pcall(function()
-                            local repair = events:FindFirstChild("Repair")
-                            if repair then
-                                local startRepair = repair:FindFirstChild("StartRepair")
-                                local claimRepair = repair:FindFirstChild("ClaimRepairedItem")
-                                if Config.Get("AutoCollectFinishedProcessing", true) and claimRepair then
-                                    for slot = 1, 5 do
-                                        claimRepair:InvokeServer(slot)
-                                    end
-                                end
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoGradeItems", false) then
-                        pcall(function()
-                            local grading = events:FindFirstChild("Grading")
-                            if grading then
-                                local startGrade = grading:FindFirstChild("StartGrading")
-                                local claimGrade = grading:FindFirstChild("ClaimGradedItem")
-                                if Config.Get("AutoCollectFinishedProcessing", true) and claimGrade then
-                                    for slot = 1, 5 do
-                                        claimGrade:InvokeServer(slot)
-                                    end
-                                end
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoTimeCapsule", false) then
-                        pcall(function()
-                            local capsule = events:FindFirstChild("TimeCapsule")
-                            if capsule then
-                                local claimCapsule = capsule:FindFirstChild("ClaimCapsule")
-                                if Config.Get("AutoCollectFinishedProcessing", true) and claimCapsule then
-                                    for slot = 1, 3 do
-                                        claimCapsule:InvokeServer(slot)
-                                    end
-                                end
-                            end
-                        end)
-                    end
-
-                    if Config.Get("AutoAuthenticateAccessories", false) then
-                        pcall(function()
-                            local auth = events:FindFirstChild("Authentication")
-                            if auth then
-                                local authAccessory = auth:FindFirstChild("AuthenticateAccessory")
-                                if authAccessory then
-                                    authAccessory:InvokeServer()
-                                    Processing.Status.Certified = Processing.Status.Certified + 1
-                                end
-                            end
-                        end)
-                    end
-                end
+                runPipeline()
             end
         end
     end)
