@@ -1,7 +1,38 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
 local AuctionModule = {}
-local pickupThread = nil
+local loopThread = nil
+
+local function getAuctionEvents()
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    return events and events:FindFirstChild("Auction")
+end
+
+function AuctionModule.Bid(auctionId)
+    local events = getAuctionEvents()
+    if events and events:FindFirstChild("Bid") then
+        pcall(function()
+            events.Bid:FireServer("BiddingUIClosed", nil, auctionId or "")
+        end)
+    end
+end
+
+function AuctionModule.UsePowers()
+    local events = getAuctionEvents()
+    if not events then return end
+    
+    if events:FindFirstChild("UseXRay") then
+        pcall(function() events.UseXRay:InvokeServer() end)
+    end
+    if events:FindFirstChild("UseCalculator") then
+        pcall(function() events.UseCalculator:InvokeServer() end)
+    end
+    if events:FindFirstChild("UseKickNPC") then
+        pcall(function() events.UseKickNPC:InvokeServer() end)
+    end
+end
 
 function AuctionModule.FastPickup()
     local events = ReplicatedStorage:FindFirstChild("Events")
@@ -29,22 +60,30 @@ function AuctionModule.FastPickup()
     end
 end
 
-function AuctionModule.StartFastPickupLoop(State)
-    if pickupThread then
-        pcall(function() task.cancel(pickupThread) end)
+function AuctionModule.StartLoop(State)
+    if loopThread then
+        pcall(function() task.cancel(loopThread) end)
     end
-    pickupThread = task.spawn(function()
-        while State.FastPickup do
-            pcall(AuctionModule.FastPickup)
-            task.wait(0.3)
+
+    loopThread = task.spawn(function()
+        while true do
+            if State.FastPickup then
+                pcall(AuctionModule.FastPickup)
+            end
+
+            if State.AutoXRay or State.AutoCalculator or State.AutoKickNPC then
+                pcall(AuctionModule.UsePowers)
+            end
+
+            task.wait(0.25)
         end
     end)
 end
 
-function AuctionModule.StopFastPickupLoop()
-    if pickupThread then
-        pcall(function() task.cancel(pickupThread) end)
-        pickupThread = nil
+function AuctionModule.StopLoop()
+    if loopThread then
+        pcall(function() task.cancel(loopThread) end)
+        loopThread = nil
     end
 end
 
