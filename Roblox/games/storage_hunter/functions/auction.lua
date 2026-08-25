@@ -4,7 +4,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local AuctionModule = {}
 local pickupThread = nil
-local connections = {}
+local smartWarpThread = nil
 local boundWashModule = nil
 
 local TARGET_FOLDERS = { "AuctionItems", "WonItems", "StorageItems", "Auction", "WonStorage" }
@@ -60,21 +60,6 @@ function AuctionModule.EnsureInVehicle()
         end
     end
 
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    local vehEvents = events and events:FindFirstChild("Vehicles")
-    if vehEvents and vehEvents:FindFirstChild("RequestSpawn") then
-        pcall(function() vehEvents.RequestSpawn:InvokeServer() end)
-        task.wait(0.2)
-        myVeh = AuctionModule.GetPlayerVehicle()
-        if myVeh then
-            local seat = myVeh:FindFirstChildOfClass("VehicleSeat") or myVeh:FindFirstChildWhichIsA("Seat", true)
-            if seat then
-                seat:Sit(humanoid)
-                return true
-            end
-        end
-    end
-
     return false
 end
 
@@ -98,6 +83,12 @@ function AuctionModule.InstantLootAll(items, State)
 
     for _, obj in ipairs(items) do
         task.spawn(function()
+            if fireproximityprompt then
+                local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or (obj:IsA("BasePart") and obj:FindFirstChildOfClass("ProximityPrompt"))
+                if prompt then
+                    pcall(function() fireproximityprompt(prompt, 0) end)
+                end
+            end
             if pickupItem then
                 pcall(function() pickupItem:FireServer(obj) end)
             end
@@ -141,16 +132,16 @@ function AuctionModule.ScanAndLoot(State)
     end
 
     if myPos then
-        local bounds = workspace:GetPartBoundsInRadius(myPos, 50)
+        local bounds = workspace:GetPartBoundsInRadius(myPos, 60)
         for _, part in ipairs(bounds) do
             local model = part:FindFirstAncestorOfClass("Model")
             local target = model or part
 
             if target and not processed[target] and target ~= character and not target:IsDescendantOf(character) then
                 local isWon = target:GetAttribute("AuctionItemId") or target:GetAttribute("WonItem") or target:GetAttribute("ItemId")
-                local hasPrompt = target:FindFirstChildOfClass("ProximityPrompt") or part:FindFirstChildOfClass("ProximityPrompt")
+                local prompt = target:FindFirstChildOfClass("ProximityPrompt") or part:FindFirstChildOfClass("ProximityPrompt")
 
-                if isWon or hasPrompt then
+                if isWon or prompt then
                     processed[target] = true
                     table.insert(itemsToPick, target)
                 end
@@ -172,6 +163,21 @@ function AuctionModule.HasItemsToStock()
             return true
         end
     end
+
+    local invEvents = events and events:FindFirstChild("Inventory")
+    if invEvents and invEvents:FindFirstChild("GetPlayerInventory") then
+        local ok2, inv = pcall(function() return invEvents.GetPlayerInventory:InvokeServer() end)
+        if ok2 and type(inv) == "table" then
+            local count = 0
+            for _, _ in pairs(inv) do
+                count = count + 1
+            end
+            if count > 0 then
+                return true
+            end
+        end
+    end
+
     return false
 end
 
@@ -188,101 +194,33 @@ function AuctionModule.TeleportToNextAuction()
     end
 end
 
-function AuctionModule.SetupEventListeners(State)
-    for _, conn in ipairs(connections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    connections = {}
+function AuctionModule.IsAtPlot()
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
 
-    local events = ReplicatedStorage:FindFirstChild("Events")
-    local auctionEvents = events and events:FindFirstChild("Auction")
-    local plotEvents = events and events:FindFirstChild("Plot")
-
-    if auctionEvents then
-        local feePaid = auctionEvents:FindFirstChild("AuctionFeePaid")
-        if feePaid then
-            local cFee = feePaid.OnClientEvent:Connect(function()
-                if State.FastPickup then
-                    task.spawn(function()
-                        AuctionModule.ScanAndLoot(State)
-                    end)
-                end
-            end)
-            table.insert(connections, cFee)
-        end
-
-        local winBid = auctionEvents:FindFirstChild("UpdateCurrentWinningBid")
-        if winBid then
-            local cWin = winBid.OnClientEvent:Connect(function(bidderName)
-                if bidderName == LocalPlayer.Name and State.FastPickup then
-                    task.spawn(function()
-                        task.wait(0.1)
-                        AuctionModule.ScanAndLoot(State)
-                    end)
-                end
-            end)
-            table.insert(connections, cWin)
-        end
-
-        local toggleBidding = auctionEvents:FindFirstChild("ToggleBiddingUI")
-        if toggleBidding then
-            local cTog = toggleBidding.OnClientEvent:Connect(function(isOpen)
-                if not isOpen and State.FastPickup then
-                    task.spawn(function()
-                        task.wait(0.05)
-                        AuctionModule.ScanAndLoot(State)
-                    end)
-                end
-            end)
-            table.insert(connections, cTog)
-        end
-    end
-
-    if plotEvents and plotEvents:FindFirstChild("TeleportToPlot") then
-        local cTele = plotEvents.TeleportToPlot.OnClientEvent:Connect(function()
-            if State.SmartWarp then
-                task.spawn(function()
-                    task.wait(0.3)
-                    if not AuctionModule.HasItemsToStock() then
-                        AuctionModule.TeleportToNextAuction()
-                    end
-                end)
-            end
-        end)
-        table.insert(connections, cTele)
-    end
-
-    for _, folderName in ipairs(TARGET_FOLDERS) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then
-            local c = folder.ChildAdded:Connect(function(child)
-                if State.FastPickup then
-                    task.spawn(function()
-                        AuctionModule.InstantLootAll({ child }, State)
-                    end)
-                end
-            end)
-            table.insert(connections, c)
-        end
-    end
-
-    local cMain = workspace.ChildAdded:Connect(function(child)
-        if State.FastPickup then
-            for _, fName in ipairs(TARGET_FOLDERS) do
-                if child.Name == fName then
-                    local subC = child.ChildAdded:Connect(function(subChild)
-                        if State.FastPickup then
-                            task.spawn(function()
-                                AuctionModule.InstantLootAll({ subChild }, State)
-                            end)
-                        end
-                    end)
-                    table.insert(connections, subC)
-                end
+    local myPos = hrp.Position
+    local plots = workspace:FindFirstChild("Plots")
+    if plots then
+        local myPlot = plots:FindFirstChild(LocalPlayer.Name) or plots:FindFirstChild(LocalPlayer.Name .. "'s Plot")
+        if myPlot then
+            local plotPart = myPlot:FindFirstChildWhichIsA("BasePart", true)
+            if plotPart and (plotPart.Position - myPos).Magnitude < 120 then
+                return true
             end
         end
-    end)
-    table.insert(connections, cMain)
+    end
+
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if string.find(obj.Name, "Plot") and obj:IsA("Model") then
+            local pPart = obj:FindFirstChildWhichIsA("BasePart", true)
+            if pPart and (pPart.Position - myPos).Magnitude < 100 then
+                return true
+            end
+        end
+    end
+
+    return false
 end
 
 function AuctionModule.StartFastPickupLoop(State, washMod)
@@ -291,12 +229,26 @@ function AuctionModule.StartFastPickupLoop(State, washMod)
     end
 
     AuctionModule.StopFastPickupLoop()
-    AuctionModule.SetupEventListeners(State)
 
     pickupThread = task.spawn(function()
         while State.FastPickup do
             pcall(function() AuctionModule.ScanAndLoot(State) end)
-            task.wait(1.5)
+            task.wait(0.8)
+        end
+    end)
+
+    smartWarpThread = task.spawn(function()
+        while State.SmartWarp do
+            pcall(function()
+                if AuctionModule.IsAtPlot() then
+                    if not AuctionModule.HasItemsToStock() then
+                        task.wait(0.2)
+                        AuctionModule.TeleportToNextAuction()
+                        task.wait(2)
+                    end
+                end
+            end)
+            task.wait(1)
         end
     end)
 end
@@ -306,10 +258,10 @@ function AuctionModule.StopFastPickupLoop()
         pcall(function() task.cancel(pickupThread) end)
         pickupThread = nil
     end
-    for _, conn in ipairs(connections) do
-        pcall(function() conn:Disconnect() end)
+    if smartWarpThread then
+        pcall(function() task.cancel(smartWarpThread) end)
+        smartWarpThread = nil
     end
-    connections = {}
 end
 
 return AuctionModule
