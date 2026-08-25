@@ -4,6 +4,19 @@ local WashModule = {}
 local washThread = nil
 local RarityCache = {}
 
+local function normalizeRarity(r)
+    if not r then return "Common" end
+    local s = string.lower(tostring(r))
+    if string.find(s, "secret") then return "Secret" end
+    if string.find(s, "exotic") then return "Exotic" end
+    if string.find(s, "myth") then return "Mythic" end
+    if string.find(s, "legend") then return "Legendary" end
+    if string.find(s, "epic") then return "Epic" end
+    if string.find(s, "rare") then return "Rare" end
+    if string.find(s, "uncommon") then return "Uncommon" end
+    return "Common"
+end
+
 local function buildRarityCache()
     pcall(function()
         local mod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Items")
@@ -15,17 +28,17 @@ local function buildRarityCache()
                     if type(data) == "table" then
                         local rarityVal = data.Rarity or data.rarity or data.Tier or data.tier
                         if rarityVal then
-                            local rStr = tostring(rarityVal)
-                            RarityCache[tostring(k)] = rStr
-                            if data.Name then RarityCache[tostring(data.Name)] = rStr end
-                            if data.name then RarityCache[tostring(data.name)] = rStr end
-                            if data.ItemId then RarityCache[tostring(data.ItemId)] = rStr end
-                            if data.itemId then RarityCache[tostring(data.itemId)] = rStr end
-                            if data.Id then RarityCache[tostring(data.Id)] = rStr end
-                            if data.id then RarityCache[tostring(data.id)] = rStr end
+                            local rNorm = normalizeRarity(rarityVal)
+                            RarityCache[tostring(k)] = rNorm
+                            if data.Name then RarityCache[tostring(data.Name)] = rNorm end
+                            if data.name then RarityCache[tostring(data.name)] = rNorm end
+                            if data.ItemId then RarityCache[tostring(data.ItemId)] = rNorm end
+                            if data.itemId then RarityCache[tostring(data.itemId)] = rNorm end
+                            if data.Id then RarityCache[tostring(data.Id)] = rNorm end
+                            if data.id then RarityCache[tostring(data.id)] = rNorm end
                         end
                     elseif type(data) == "string" then
-                        RarityCache[tostring(k)] = tostring(data)
+                        RarityCache[tostring(k)] = normalizeRarity(data)
                     end
                 end
             end
@@ -36,12 +49,16 @@ end
 buildRarityCache()
 
 function WashModule.GetItemRarity(itemEntry)
+    if next(RarityCache) == nil then
+        buildRarityCache()
+    end
+
     if type(itemEntry) == "table" then
         local data = itemEntry.data or itemEntry
-        if data.Rarity then return tostring(data.Rarity) end
-        if data.rarity then return tostring(data.rarity) end
-        if data.Tier then return tostring(data.Tier) end
-        if data.tier then return tostring(data.tier) end
+        local directRarity = data.Rarity or data.rarity or data.Tier or data.tier
+        if directRarity then
+            return normalizeRarity(directRarity)
+        end
 
         if data.Name and RarityCache[tostring(data.Name)] then return RarityCache[tostring(data.Name)] end
         if data.ItemId and RarityCache[tostring(data.ItemId)] then return RarityCache[tostring(data.ItemId)] end
@@ -54,12 +71,26 @@ function WashModule.GetItemRarity(itemEntry)
     return "Common"
 end
 
+function WashModule.IsRarityAllowed(rarityName, State)
+    if not State or not State.WashRarities then return true end
+    local norm = normalizeRarity(rarityName)
+    if State.WashRarities[norm] ~= nil then
+        return State.WashRarities[norm] == true
+    end
+    for k, v in pairs(State.WashRarities) do
+        if normalizeRarity(k) == norm and v == true then
+            return true
+        end
+    end
+    return true
+end
+
 function WashModule.ProcessWash(State)
-    if not State.AutoWash then return 5 end
+    if not State.AutoWash then return 4 end
 
     local events = ReplicatedStorage:FindFirstChild("Events")
     local washEvents = events and events:FindFirstChild("Wash")
-    if not washEvents then return 5 end
+    if not washEvents then return 4 end
 
     local getSlotState = washEvents:FindFirstChild("GetSlotState")
     local getWashableItems = washEvents:FindFirstChild("GetWashableItems")
@@ -67,15 +98,14 @@ function WashModule.ProcessWash(State)
     local claimWashed = washEvents:FindFirstChild("ClaimWashedItem")
     local collectWash = washEvents:FindFirstChild("CollectWash")
 
-    if not getSlotState or not getWashableItems or not startWash then return 5 end
+    if not getSlotState or not getWashableItems or not startWash then return 4 end
 
     local ok1, rawSlotState = pcall(function() return getSlotState:InvokeServer() end)
-    if not ok1 or type(rawSlotState) ~= "table" then return 5 end
+    if not ok1 or type(rawSlotState) ~= "table" then return 4 end
 
     local unlockedCount = tonumber(rawSlotState.unlockedCount) or 3
     local activeSlots = rawSlotState.slots or {}
     local now = os.time()
-    local minSleep = 5
 
     for slotIdx = 1, unlockedCount do
         local slotData = activeSlots[slotIdx] or activeSlots[tostring(slotIdx)]
@@ -87,20 +117,10 @@ function WashModule.ProcessWash(State)
                 local endTime = tonumber(slotData.StartTime) + tonumber(slotData.Duration)
                 if now >= endTime then
                     isDone = true
-                else
-                    local rem = endTime - now
-                    if rem > 0 and rem < minSleep then
-                        minSleep = rem
-                    end
                 end
             elseif slotData.EndTime then
                 if now >= tonumber(slotData.EndTime) then
                     isDone = true
-                else
-                    local rem = tonumber(slotData.EndTime) - now
-                    if rem > 0 and rem < minSleep then
-                        minSleep = rem
-                    end
                 end
             end
 
@@ -144,7 +164,7 @@ function WashModule.ProcessWash(State)
                 local eligible = {}
                 for _, itemEntry in ipairs(flatItems) do
                     local rarity = WashModule.GetItemRarity(itemEntry)
-                    if State.WashRarities == nil or State.WashRarities[rarity] == true then
+                    if WashModule.IsRarityAllowed(rarity, State) then
                         table.insert(eligible, itemEntry)
                     end
                 end
@@ -153,17 +173,16 @@ function WashModule.ProcessWash(State)
                     local target = eligible[i]
                     if target then
                         local guid = target.guid or (type(target) == "table" and (target.UUID or target.Id or target.ItemId or target.id)) or target
-                        task.spawn(function()
-                            pcall(function() startWash:InvokeServer(slotIdx, guid) end)
-                            pcall(function() startWash:InvokeServer(tostring(slotIdx), guid) end)
-                        end)
+                        pcall(function() startWash:InvokeServer(slotIdx, guid) end)
+                        pcall(function() startWash:InvokeServer(tostring(slotIdx), guid) end)
+                        task.wait(0.1)
                     end
                 end
             end
         end
     end
 
-    return math.clamp(minSleep, 1, 5)
+    return 3
 end
 
 function WashModule.QuickWash(State)
@@ -179,11 +198,10 @@ function WashModule.StartAutoWashLoop(State)
     end
     washThread = task.spawn(function()
         while State.AutoWash do
-            local nextSleep = 5
             pcall(function()
-                nextSleep = WashModule.ProcessWash(State)
+                WashModule.ProcessWash(State)
             end)
-            task.wait(nextSleep)
+            task.wait(2.5)
         end
     end)
 end
