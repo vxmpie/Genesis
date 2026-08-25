@@ -4,20 +4,33 @@ local function loadModule(path)
     return loadstring(game:HttpGet(BASE .. path))()
 end
 
-local Config = loadModule("config.lua")
-Config.Load()
+local Store = loadModule("core/Store.lua")
+Store.Load()
 
-local ResetModule = loadModule("functions/reset.lua")
-local AuctionModule = loadModule("functions/auction.lua")
-local WashModule = loadModule("functions/wash.lua")
-local RepairModule = loadModule("functions/repair.lua")
-local GradingModule = loadModule("functions/grading.lua")
-local LocksmithModule = loadModule("functions/locksmith.lua")
-local StockModule = loadModule("functions/stock.lua")
-local RewardsModule = loadModule("functions/rewards.lua")
-local UtilsModule = loadModule("functions/utils.lua")
+local EventBus = loadModule("core/EventBus.lua")
+
+local Components = {
+    Card = loadModule("components/Card.lua"),
+    Toggle = loadModule("components/Toggle.lua"),
+    Slider = loadModule("components/Slider.lua"),
+    Dropdown = loadModule("components/Dropdown.lua"),
+    Input = loadModule("components/Input.lua"),
+}
+
+local Modules = {
+    ResetModule = loadModule("functions/reset.lua"),
+    AuctionModule = loadModule("functions/auction.lua"),
+    WashModule = loadModule("functions/wash.lua"),
+    RepairModule = loadModule("functions/repair.lua"),
+    GradingModule = loadModule("functions/grading.lua"),
+    LocksmithModule = loadModule("functions/locksmith.lua"),
+    StockModule = loadModule("functions/stock.lua"),
+    RewardsModule = loadModule("functions/rewards.lua"),
+    TeleportModule = loadModule("functions/teleport.lua"),
+    UtilsModule = loadModule("functions/utils.lua"),
+}
+
 local UI = loadModule("ui.lua")
-
-UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule, GradingModule, LocksmithModule, StockModule, RewardsModule, UtilsModule)
+UI.Create(Store, EventBus, Components, Modules)
 
 warn("[GENESIS] Storage Hunter Hub loaded successfully!")

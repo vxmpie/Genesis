@@ -3,12 +3,24 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StockModule = {}
 local loopThread = nil
 
-function StockModule.Process(State)
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
+function StockModule.Process(StoreOrState)
     local events = ReplicatedStorage:FindFirstChild("Events")
     local plotEvents = events and events:FindFirstChild("Plot")
     local pawnEvents = events and events:FindFirstChild("Pawn")
 
-    if State.AutoStock and plotEvents and plotEvents:FindFirstChild("PlaceStockItem") then
+    if getStateVal(StoreOrState, "AutoStock", false) and plotEvents and plotEvents:FindFirstChild("PlaceStockItem") then
         pcall(function()
             local getDragging = plotEvents:FindFirstChild("GetDraggingInventory")
             if getDragging then
@@ -23,7 +35,7 @@ function StockModule.Process(State)
         end)
     end
 
-    if State.AutoSell and pawnEvents and pawnEvents:FindFirstChild("SellItems") then
+    if getStateVal(StoreOrState, "AutoSell", false) and pawnEvents and pawnEvents:FindFirstChild("SellItems") then
         pcall(function()
             local getSellable = pawnEvents:FindFirstChild("GetSellableItems")
             if getSellable then
@@ -36,15 +48,17 @@ function StockModule.Process(State)
     end
 end
 
-function StockModule.StartLoop(State)
+function StockModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
     loopThread = task.spawn(function()
         while true do
-            if State.AutoStock or State.AutoSell then
-                pcall(function() StockModule.Process(State) end)
+            local autoStock = getStateVal(StoreOrState, "AutoStock", false)
+            local autoSell = getStateVal(StoreOrState, "AutoSell", false)
+            if autoStock or autoSell then
+                pcall(function() StockModule.Process(StoreOrState) end)
             end
             task.wait(4)
         end

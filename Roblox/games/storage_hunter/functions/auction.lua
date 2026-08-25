@@ -5,6 +5,18 @@ local LocalPlayer = Players.LocalPlayer
 local AuctionModule = {}
 local loopThread = nil
 
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
 local function getAuctionEvents()
     local events = ReplicatedStorage:FindFirstChild("Events")
     return events and events:FindFirstChild("Auction")
@@ -60,22 +72,27 @@ function AuctionModule.FastPickup()
     end
 end
 
-function AuctionModule.StartLoop(State)
+function AuctionModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
     loopThread = task.spawn(function()
         while true do
-            if State.FastPickup then
+            if getStateVal(StoreOrState, "FastPickup", true) then
                 pcall(AuctionModule.FastPickup)
             end
 
-            if State.AutoXRay or State.AutoCalculator or State.AutoKickNPC then
+            local useXRay = getStateVal(StoreOrState, "AutoXRay", false)
+            local useCalc = getStateVal(StoreOrState, "AutoCalculator", false)
+            local useKick = getStateVal(StoreOrState, "AutoKickNPC", false)
+
+            if useXRay or useCalc or useKick then
                 pcall(AuctionModule.UsePowers)
             end
 
-            task.wait(0.25)
+            local delayVal = tonumber(getStateVal(StoreOrState, "BidDelay", 0.1)) or 0.1
+            task.wait(math.max(0.1, delayVal))
         end
     end)
 end

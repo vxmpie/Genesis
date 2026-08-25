@@ -3,18 +3,30 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RepairModule = {}
 local loopThread = nil
 
-function RepairModule.Process(State)
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
+function RepairModule.Process(StoreOrState)
     local events = ReplicatedStorage:FindFirstChild("Events")
     local repairEvents = events and events:FindFirstChild("Repair")
     local wrenchEvents = events and events:FindFirstChild("WrenchShop")
 
-    if State.AutoWrench and wrenchEvents and wrenchEvents:FindFirstChild("RepairWonItem") then
+    if getStateVal(StoreOrState, "AutoWrench", false) and wrenchEvents and wrenchEvents:FindFirstChild("RepairWonItem") then
         pcall(function()
             wrenchEvents.RepairWonItem:InvokeServer()
         end)
     end
 
-    if not State.AutoRepair or not repairEvents then return end
+    if not getStateVal(StoreOrState, "AutoRepair", false) or not repairEvents then return end
 
     local getSlotState = repairEvents:FindFirstChild("GetSlotState")
     local getRepairable = repairEvents:FindFirstChild("GetRepairableItems")
@@ -55,15 +67,17 @@ function RepairModule.Process(State)
     end
 end
 
-function RepairModule.StartLoop(State)
+function RepairModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
     loopThread = task.spawn(function()
         while true do
-            if State.AutoRepair or State.AutoWrench then
-                pcall(function() RepairModule.Process(State) end)
+            local autoRep = getStateVal(StoreOrState, "AutoRepair", false)
+            local autoWr = getStateVal(StoreOrState, "AutoWrench", false)
+            if autoRep or autoWr then
+                pcall(function() RepairModule.Process(StoreOrState) end)
             end
             task.wait(3)
         end

@@ -1,5 +1,5 @@
-local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 local UI = {}
@@ -15,10 +15,30 @@ local RARITY_COLORS = {
     Secret = Color3.fromRGB(255, 220, 80),
 }
 
-local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Secret" }
+local RARITIES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Secret" }
 
-function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule, GradingModule, LocksmithModule, StockModule, RewardsModule, UtilsModule)
-    local State = Config.State
+local AUCTION_AREAS = {
+    "Shipyard", "Jurassic", "Business Bay", "Farmyard", "Back Alley", 
+    "Lucky Beach", "Alien Invasion", "Power Plant", "Cargo Ship", "Junk Yard"
+}
+
+function UI.Create(Store, EventBus, Components, Modules)
+    local Card = Components.Card
+    local Toggle = Components.Toggle
+    local Slider = Components.Slider
+    local Dropdown = Components.Dropdown
+    local Input = Components.Input
+
+    local ResetModule = Modules.ResetModule
+    local AuctionModule = Modules.AuctionModule
+    local WashModule = Modules.WashModule
+    local RepairModule = Modules.RepairModule
+    local GradingModule = Modules.GradingModule
+    local LocksmithModule = Modules.LocksmithModule
+    local StockModule = Modules.StockModule
+    local RewardsModule = Modules.RewardsModule
+    local TeleportModule = Modules.TeleportModule
+    local UtilsModule = Modules.UtilsModule
 
     if CoreGui:FindFirstChild("GenesisHubGUI") then
         CoreGui.GenesisHubGUI:Destroy()
@@ -35,13 +55,13 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
 
     local FloatingBtn = Instance.new("TextButton")
     FloatingBtn.Name = "FloatingBtn"
-    FloatingBtn.Size = UDim2.new(0, 48, 0, 48)
-    FloatingBtn.Position = UDim2.new(1, -65, 0.5, -24)
-    FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+    FloatingBtn.Size = UDim2.new(0, 46, 0, 46)
+    FloatingBtn.Position = UDim2.new(1, -60, 0.5, -23)
+    FloatingBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     FloatingBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
     FloatingBtn.Text = "G"
     FloatingBtn.Font = Enum.Font.GothamBlack
-    FloatingBtn.TextSize = 26
+    FloatingBtn.TextSize = 24
     FloatingBtn.AutoButtonColor = false
     FloatingBtn.Draggable = true
     FloatingBtn.Parent = ScreenGui
@@ -57,9 +77,9 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 720, 0, 460)
-    MainFrame.Position = UDim2.new(0.5, -360, 0.5, -230)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 17)
+    MainFrame.Size = UDim2.new(0, 760, 0, 480)
+    MainFrame.Position = UDim2.new(0.5, -380, 0.5, -240)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(13, 13, 17)
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = false
     MainFrame.Active = true
@@ -72,7 +92,7 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     mainCorner.Parent = MainFrame
 
     local mainStroke = Instance.new("UIStroke")
-    mainStroke.Color = Color3.fromRGB(32, 32, 38)
+    mainStroke.Color = Color3.fromRGB(35, 35, 45)
     mainStroke.Thickness = 1
     mainStroke.Parent = MainFrame
 
@@ -81,8 +101,8 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     end)
 
     local Sidebar = Instance.new("Frame")
-    Sidebar.Size = UDim2.new(0, 180, 1, 0)
-    Sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    Sidebar.Size = UDim2.new(0, 185, 1, 0)
+    Sidebar.BackgroundColor3 = Color3.fromRGB(16, 16, 21)
     Sidebar.BorderSizePixel = 0
     Sidebar.Parent = MainFrame
 
@@ -91,58 +111,68 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     sideCorner.Parent = Sidebar
 
     local sideFix = Instance.new("Frame")
-    sideFix.Size = UDim2.new(0, 12, 1, 0)
-    sideFix.Position = UDim2.new(1, -12, 0, 0)
-    sideFix.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    sideFix.Size = UDim2.new(0, 10, 1, 0)
+    sideFix.Position = UDim2.new(1, -10, 0, 0)
+    sideFix.BackgroundColor3 = Color3.fromRGB(16, 16, 21)
     sideFix.BorderSizePixel = 0
     sideFix.Parent = Sidebar
 
-    local LogoLabel = Instance.new("TextLabel")
-    LogoLabel.Size = UDim2.new(1, -20, 0, 45)
-    LogoLabel.Position = UDim2.new(0, 15, 0, 8)
-    LogoLabel.BackgroundTransparency = 1
-    LogoLabel.Text = "GENESIS HUB"
-    LogoLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-    LogoLabel.Font = Enum.Font.GothamBlack
-    LogoLabel.TextSize = 17
-    LogoLabel.TextXAlignment = Enum.TextXAlignment.Left
-    LogoLabel.Parent = Sidebar
+    local LogoHeader = Instance.new("Frame")
+    LogoHeader.Size = UDim2.new(1, 0, 0, 50)
+    LogoHeader.BackgroundTransparency = 1
+    LogoHeader.Parent = Sidebar
 
-    local NavContainer = Instance.new("Frame")
-    NavContainer.Size = UDim2.new(1, -16, 1, -65)
-    NavContainer.Position = UDim2.new(0, 8, 0, 55)
-    NavContainer.BackgroundTransparency = 1
-    NavContainer.Parent = Sidebar
+    local LogoDot = Instance.new("Frame")
+    LogoDot.Size = UDim2.new(0, 10, 0, 10)
+    LogoDot.Position = UDim2.new(0, 14, 0.5, -5)
+    LogoDot.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    LogoDot.BorderSizePixel = 0
+    LogoDot.Parent = LogoHeader
+
+    local ldCorner = Instance.new("UICorner")
+    ldCorner.CornerRadius = UDim.new(1, 0)
+    ldCorner.Parent = LogoDot
+
+    local LogoText = Instance.new("TextLabel")
+    LogoText.Size = UDim2.new(1, -35, 1, 0)
+    LogoText.Position = UDim2.new(0, 32, 0, 0)
+    LogoText.BackgroundTransparency = 1
+    LogoText.Text = "GENESIS HUB"
+    LogoText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    LogoText.Font = Enum.Font.GothamBlack
+    LogoText.TextSize = 15
+    LogoText.TextXAlignment = Enum.TextXAlignment.Left
+    LogoText.Parent = LogoHeader
+
+    local NavScroll = Instance.new("ScrollingFrame")
+    NavScroll.Size = UDim2.new(1, -12, 1, -60)
+    NavScroll.Position = UDim2.new(0, 6, 0, 52)
+    NavScroll.BackgroundTransparency = 1
+    NavScroll.ScrollBarThickness = 2
+    NavScroll.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 60)
+    NavScroll.BorderSizePixel = 0
+    NavScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    NavScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    NavScroll.Parent = Sidebar
 
     local navLayout = Instance.new("UIListLayout")
     navLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    navLayout.Padding = UDim.new(0, 5)
-    navLayout.Parent = NavContainer
+    navLayout.Padding = UDim.new(0, 4)
+    navLayout.Parent = NavScroll
 
     local TopBar = Instance.new("Frame")
-    TopBar.Size = UDim2.new(1, -180, 0, 48)
-    TopBar.Position = UDim2.new(0, 180, 0, 0)
-    TopBar.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+    TopBar.Size = UDim2.new(1, -185, 0, 50)
+    TopBar.Position = UDim2.new(0, 185, 0, 0)
+    TopBar.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     TopBar.BorderSizePixel = 0
     TopBar.Parent = MainFrame
 
-    local topCorner = Instance.new("UICorner")
-    topCorner.CornerRadius = UDim.new(0, 10)
-    topCorner.Parent = TopBar
-
-    local topFix = Instance.new("Frame")
-    topFix.Size = UDim2.new(0, 12, 1, 0)
-    topFix.Position = UDim2.new(0, 0, 0, 0)
-    topFix.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-    topFix.BorderSizePixel = 0
-    topFix.Parent = TopBar
-
     local TabTitle = Instance.new("TextLabel")
-    TabTitle.Size = UDim2.new(0, 200, 1, 0)
-    TabTitle.Position = UDim2.new(0, 15, 0, 0)
+    TabTitle.Size = UDim2.new(0, 220, 1, 0)
+    TabTitle.Position = UDim2.new(0, 16, 0, 0)
     TabTitle.BackgroundTransparency = 1
-    TabTitle.Text = "Info"
-    TabTitle.TextColor3 = Color3.fromRGB(240, 240, 245)
+    TabTitle.Text = "Dashboard & Info"
+    TabTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
     TabTitle.Font = Enum.Font.GothamBold
     TabTitle.TextSize = 16
     TabTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -151,9 +181,9 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Size = UDim2.new(0, 28, 0, 28)
     CloseBtn.Position = UDim2.new(1, -38, 0.5, -14)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(38, 25, 28)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(35, 22, 25)
     CloseBtn.Text = "✕"
-    CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+    CloseBtn.TextColor3 = Color3.fromRGB(255, 85, 85)
     CloseBtn.Font = Enum.Font.GothamBold
     CloseBtn.TextSize = 13
     CloseBtn.AutoButtonColor = false
@@ -168,18 +198,17 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     end)
 
     local PagesContainer = Instance.new("Frame")
-    PagesContainer.Size = UDim2.new(1, -195, 1, -60)
-    PagesContainer.Position = UDim2.new(0, 190, 0, 52)
+    PagesContainer.Size = UDim2.new(1, -195, 1, -58)
+    PagesContainer.Position = UDim2.new(0, 190, 0, 54)
     PagesContainer.BackgroundTransparency = 1
     PagesContainer.Parent = MainFrame
 
     local TabPages = {}
     local TabButtons = {}
-    local CurrentTab = "Info"
 
-    local function createPage(name)
+    local function createTwoColumnPage(tabId, titleName)
         local Page = Instance.new("ScrollingFrame")
-        Page.Name = name .. "Page"
+        Page.Name = tabId .. "Page"
         Page.Size = UDim2.new(1, 0, 1, 0)
         Page.BackgroundTransparency = 1
         Page.ScrollBarThickness = 3
@@ -190,308 +219,159 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
         Page.Visible = false
         Page.Parent = PagesContainer
 
-        local pLayout = Instance.new("UIListLayout")
-        pLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        pLayout.Padding = UDim.new(0, 8)
-        pLayout.Parent = Page
+        local Grid = Instance.new("Frame")
+        Grid.Size = UDim2.new(1, -8, 1, 0)
+        Grid.BackgroundTransparency = 1
+        Grid.AutomaticSize = Enum.AutomaticSize.Y
+        Grid.Parent = Page
 
-        TabPages[name] = Page
-        return Page
+        local LeftCol = Instance.new("Frame")
+        LeftCol.Size = UDim2.new(0.49, 0, 0, 0)
+        LeftCol.Position = UDim2.new(0, 0, 0, 0)
+        LeftCol.BackgroundTransparency = 1
+        LeftCol.AutomaticSize = Enum.AutomaticSize.Y
+        LeftCol.Parent = Grid
+
+        local lLayout = Instance.new("UIListLayout")
+        lLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        lLayout.Padding = UDim.new(0, 8)
+        lLayout.Parent = LeftCol
+
+        local RightCol = Instance.new("Frame")
+        RightCol.Size = UDim2.new(0.49, 0, 0, 0)
+        RightCol.Position = UDim2.new(0.51, 0, 0, 0)
+        RightCol.BackgroundTransparency = 1
+        RightCol.AutomaticSize = Enum.AutomaticSize.Y
+        RightCol.Parent = Grid
+
+        local rLayout = Instance.new("UIListLayout")
+        rLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rLayout.Padding = UDim.new(0, 8)
+        rLayout.Parent = RightCol
+
+        TabPages[tabId] = { Page = Page, Left = LeftCol, Right = RightCol, Title = titleName }
+        return LeftCol, RightCol
     end
 
-    local function switchTab(name)
-        CurrentTab = name
-        TabTitle.Text = name
-        for tName, page in pairs(TabPages) do
-            page.Visible = (tName == name)
+    local function switchTab(tabId)
+        for id, tab in pairs(TabPages) do
+            tab.Page.Visible = (id == tabId)
+            if id == tabId then
+                TabTitle.Text = tab.Title
+            end
         end
-        for tName, btn in pairs(TabButtons) do
-            if tName == name then
-                btn.BackgroundColor3 = Color3.fromRGB(35, 25, 30)
-                btn.TextColor3 = Color3.fromRGB(255, 70, 70)
+        for id, btn in pairs(TabButtons) do
+            if id == tabId then
+                btn.BackgroundColor3 = Color3.fromRGB(35, 24, 28)
+                btn.TextColor3 = Color3.fromRGB(255, 75, 75)
             else
-                btn.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+                btn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
                 btn.TextColor3 = Color3.fromRGB(160, 160, 175)
             end
         end
     end
 
-    local function createNavButton(name, icon, order)
+    local function createNavBtn(tabId, icon, label, order)
         local Btn = Instance.new("TextButton")
-        Btn.Size = UDim2.new(1, 0, 0, 36)
-        Btn.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
-        Btn.Text = "  " .. icon .. "  " .. name
+        Btn.Size = UDim2.new(1, 0, 0, 34)
+        Btn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+        Btn.Text = "  " .. icon .. "  " .. label
         Btn.TextColor3 = Color3.fromRGB(160, 160, 175)
         Btn.Font = Enum.Font.GothamBold
-        Btn.TextSize = 13
+        Btn.TextSize = 12
         Btn.TextXAlignment = Enum.TextXAlignment.Left
         Btn.AutoButtonColor = false
         Btn.LayoutOrder = order
-        Btn.Parent = NavContainer
+        Btn.Parent = NavScroll
 
         local bCorner = Instance.new("UICorner")
         bCorner.CornerRadius = UDim.new(0, 6)
         bCorner.Parent = Btn
 
         Btn.MouseButton1Click:Connect(function()
-            switchTab(name)
+            switchTab(tabId)
         end)
 
-        TabButtons[name] = Btn
+        TabButtons[tabId] = Btn
         return Btn
     end
 
-    local function createCard(parent, titleText, order)
-        local Card = Instance.new("Frame")
-        Card.Size = UDim2.new(1, -6, 0, 0)
-        Card.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-        Card.AutomaticSize = Enum.AutomaticSize.Y
-        Card.LayoutOrder = order
-        Card.Parent = parent
+    createNavBtn("Info", "ℹ", "Info & Live Status", 1)
+    createNavBtn("Auctions", "🔨", "Auctions & Bidding", 2)
+    createNavBtn("Processing", "🧼", "Item Processing", 3)
+    createNavBtn("Shop", "🏪", "Shop, Stock & Sell", 4)
+    createNavBtn("Rewards", "🎁", "Rewards & Quests", 5)
+    createNavBtn("Teleport", "🗺", "Map & Teleports", 6)
+    createNavBtn("Utilities", "🔧", "Utilities & Guard", 7)
+    createNavBtn("Settings", "⚙", "Settings & Unload", 8)
 
-        local cCorner = Instance.new("UICorner")
-        cCorner.CornerRadius = UDim.new(0, 8)
-        cCorner.Parent = Card
-
-        local cStroke = Instance.new("UIStroke")
-        cStroke.Color = Color3.fromRGB(32, 32, 38)
-        cStroke.Thickness = 1
-        cStroke.Parent = Card
-
-        local Padding = Instance.new("UIPadding")
-        Padding.PaddingTop = UDim.new(0, 10)
-        Padding.PaddingBottom = UDim.new(0, 10)
-        Padding.PaddingLeft = UDim.new(0, 12)
-        Padding.PaddingRight = UDim.new(0, 12)
-        Padding.Parent = Card
-
-        local cLayout = Instance.new("UIListLayout")
-        cLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        cLayout.Padding = UDim.new(0, 8)
-        cLayout.Parent = Card
-
-        if titleText then
-            local Header = Instance.new("TextLabel")
-            Header.Size = UDim2.new(1, 0, 0, 20)
-            Header.BackgroundTransparency = 1
-            Header.Text = titleText:upper()
-            Header.TextColor3 = Color3.fromRGB(120, 120, 140)
-            Header.Font = Enum.Font.GothamBlack
-            Header.TextSize = 11
-            Header.TextXAlignment = Enum.TextXAlignment.Left
-            Header.LayoutOrder = 0
-            Header.Parent = Card
-        end
-
-        return Card
-    end
-
-    local function createToggle(parent, labelText, initialState, onToggle, order)
-        local Row = Instance.new("Frame")
-        Row.Size = UDim2.new(1, 0, 0, 32)
-        Row.BackgroundTransparency = 1
-        Row.LayoutOrder = order
-        Row.Parent = parent
-
-        local Label = Instance.new("TextLabel")
-        Label.Size = UDim2.new(0.7, 0, 1, 0)
-        Label.BackgroundTransparency = 1
-        Label.Text = labelText
-        Label.TextColor3 = Color3.fromRGB(220, 220, 230)
-        Label.Font = Enum.Font.GothamSemibold
-        Label.TextSize = 13
-        Label.TextXAlignment = Enum.TextXAlignment.Left
-        Label.Parent = Row
-
-        local Btn = Instance.new("TextButton")
-        Btn.Size = UDim2.new(0, 48, 0, 22)
-        Btn.Position = UDim2.new(1, -48, 0.5, -11)
-        Btn.Text = ""
-        Btn.AutoButtonColor = false
-        Btn.Parent = Row
-
-        local bCorner = Instance.new("UICorner")
-        bCorner.CornerRadius = UDim.new(1, 0)
-        bCorner.Parent = Btn
-
-        local Circle = Instance.new("Frame")
-        Circle.Size = UDim2.new(0, 16, 0, 16)
-        Circle.Parent = Btn
-
-        local cCorner = Instance.new("UICorner")
-        cCorner.CornerRadius = UDim.new(1, 0)
-        cCorner.Parent = Circle
-
-        local function update(val)
-            if val then
-                Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-                Circle.Position = UDim2.new(1, -19, 0.5, -8)
-                Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            else
-                Btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-                Circle.Position = UDim2.new(0, 3, 0.5, -8)
-                Circle.BackgroundColor3 = Color3.fromRGB(160, 160, 170)
-            end
-        end
-
-        update(initialState)
-
-        Btn.MouseButton1Click:Connect(function()
-            local newState = onToggle()
-            update(newState)
-            Config.Save()
-        end)
-
-        return Row
-    end
-
-    local function createInput(parent, labelText, initialVal, onFocusLost, order)
-        local Row = Instance.new("Frame")
-        Row.Size = UDim2.new(1, 0, 0, 32)
-        Row.BackgroundTransparency = 1
-        Row.LayoutOrder = order
-        Row.Parent = parent
-
-        local Label = Instance.new("TextLabel")
-        Label.Size = UDim2.new(0.6, 0, 1, 0)
-        Label.BackgroundTransparency = 1
-        Label.Text = labelText
-        Label.TextColor3 = Color3.fromRGB(220, 220, 230)
-        Label.Font = Enum.Font.GothamSemibold
-        Label.TextSize = 13
-        Label.TextXAlignment = Enum.TextXAlignment.Left
-        Label.Parent = Row
-
-        local Box = Instance.new("TextBox")
-        Box.Size = UDim2.new(0, 90, 0, 24)
-        Box.Position = UDim2.new(1, -90, 0.5, -12)
-        Box.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-        Box.TextColor3 = Color3.fromRGB(255, 255, 255)
-        Box.Text = tostring(initialVal)
-        Box.Font = Enum.Font.GothamBold
-        Box.TextSize = 12
-        Box.ClearTextOnFocus = false
-        Box.Parent = Row
-
-        local bCorner = Instance.new("UICorner")
-        bCorner.CornerRadius = UDim.new(0, 5)
-        bCorner.Parent = Box
-
-        local bStroke = Instance.new("UIStroke")
-        bStroke.Color = Color3.fromRGB(45, 45, 55)
-        bStroke.Thickness = 1
-        bStroke.Parent = Box
-
-        Box.FocusLost:Connect(function()
-            onFocusLost(Box.Text)
-            Config.Save()
-        end)
-
-        return Row
-    end
-
-    createNavButton("Info", "ℹ", 1)
-    createNavButton("Farming", "🎮", 2)
-    createNavButton("Management", "💼", 3)
-    createNavButton("Utilities", "🔧", 4)
-    createNavButton("Settings", "⚙", 5)
-
-    local infoPage = createPage("Info")
-    local accCard = createCard(infoPage, "Account & Game Info", 1)
+    local infoL, infoR = createTwoColumnPage("Info", "Dashboard & Info")
     
-    local function addInfoRow(parent, label, val)
+    local accCard = Card.new(infoL, "Account & Session", "👤", 1)
+    local function addRow(parent, lText, rText)
         local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 22)
+        row.Size = UDim2.new(1, 0, 0, 20)
         row.BackgroundTransparency = 1
         row.Parent = parent
 
         local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(0.4, 0, 1, 0)
+        l.Size = UDim2.new(0.45, 0, 1, 0)
         l.BackgroundTransparency = 1
-        l.Text = label
+        l.Text = lText
         l.TextColor3 = Color3.fromRGB(140, 140, 155)
-        l.Font = Enum.Font.GothamSemibold
+        l.Font = Enum.Font.GothamMedium
         l.TextSize = 12
         l.TextXAlignment = Enum.TextXAlignment.Left
         l.Parent = row
 
-        local v = Instance.new("TextLabel")
-        v.Size = UDim2.new(0.6, 0, 1, 0)
-        v.Position = UDim2.new(0.4, 0, 0, 0)
-        v.BackgroundTransparency = 1
-        v.Text = val
-        v.TextColor3 = Color3.fromRGB(240, 240, 250)
-        v.Font = Enum.Font.GothamBold
-        v.TextSize = 12
-        v.TextXAlignment = Enum.TextXAlignment.Left
-        v.Parent = row
+        local r = Instance.new("TextLabel")
+        r.Size = UDim2.new(0.55, 0, 1, 0)
+        r.Position = UDim2.new(0.45, 0, 0, 0)
+        r.BackgroundTransparency = 1
+        r.Text = rText
+        r.TextColor3 = Color3.fromRGB(240, 240, 250)
+        r.Font = Enum.Font.GothamBold
+        r.TextSize = 12
+        r.TextXAlignment = Enum.TextXAlignment.Left
+        r.Parent = row
     end
 
-    addInfoRow(accCard, "User", LocalPlayer.Name)
-    addInfoRow(accCard, "Game", "Storage Hunters")
-    addInfoRow(accCard, "Place ID", tostring(game.PlaceId))
-    addInfoRow(accCard, "Status", "Active & Keyless")
+    addRow(accCard.Content, "User", LocalPlayer.Name)
+    addRow(accCard.Content, "Game", "Storage Hunters")
+    addRow(accCard.Content, "Place ID", tostring(game.PlaceId))
+    addRow(accCard.Content, "Status", "Keyless / Premium")
 
-    local featCard = createCard(infoPage, "Available Systems", 2)
-    addInfoRow(featCard, "Farming", "Auto-Bid, Fast Loot, Powers, Kick NPC")
-    addInfoRow(featCard, "Management", "Auto-Wash, Repair, Grade, Safes, Stock")
-    addInfoRow(featCard, "Utilities", "Anti-Stuck Guard, Speeds, Drinks, Upgrades")
+    local statusCard = Card.new(infoR, "Live Telemetry Dashboard", "📊", 1)
+    addRow(statusCard.Content, "Auction State", "Active Tracking")
+    addRow(statusCard.Content, "Fast Loot", "Direct Bypass Ready")
+    addRow(statusCard.Content, "Wash Pipeline", "Reactive Ready")
+    addRow(statusCard.Content, "Watchdog", "Guard Active")
 
-    local farmingPage = createPage("Farming")
-    local aucCard = createCard(farmingPage, "Auction & Bid System", 1)
-    
-    createToggle(aucCard, "Auto Bid", State.AutoBid, function()
-        State.AutoBid = not State.AutoBid
-        return State.AutoBid
-    end, 1)
+    local aucL, aucR = createTwoColumnPage("Auctions", "Auctions & Bidding")
+    local aucMainCard = Card.new(aucL, "Auction Automation", "🔨", 1)
+    Toggle.new(aucMainCard.Content, "Auto Bid", "AutoBid", Store, 1)
+    Toggle.new(aucMainCard.Content, "Fast Loot (Instant Pickup)", "FastPickup", Store, 2)
+    Toggle.new(aucMainCard.Content, "Auto Enter Auctions", "AutoEnterAuctions", Store, 3)
+    Dropdown.new(aucMainCard.Content, "Target Auction Area", AUCTION_AREAS, false, "AuctionArea", Store, 4)
+    Input.new(aucMainCard.Content, "Minimum Bid ($)", "MinimumBid", true, Store, 5)
+    Input.new(aucMainCard.Content, "Maximum Bid ($)", "MaximumBid", true, Store, 6)
 
-    createToggle(aucCard, "Fast Auction Pickup (Instant Loot)", State.FastPickup, function()
-        State.FastPickup = not State.FastPickup
-        return State.FastPickup
-    end, 2)
+    local aucPowerCard = Card.new(aucR, "Auction Powers & NPC", "⚡", 1)
+    Toggle.new(aucPowerCard.Content, "Auto Use X-Ray", "AutoXRay", Store, 1)
+    Toggle.new(aucPowerCard.Content, "Auto Use Calculator", "AutoCalculator", Store, 2)
+    Toggle.new(aucPowerCard.Content, "Auto Kick Top NPC Bidder", "AutoKickNPC", Store, 3)
+    Toggle.new(aucPowerCard.Content, "Always Grab Mutated Items", "AlwaysGrabMutated", Store, 4)
+    Slider.new(aucPowerCard.Content, "Bid Delay", 0.05, 1, 0.05, "BidDelay", "s", Store, 5)
 
-    createToggle(aucCard, "Auto X-Ray Powers", State.AutoXRay, function()
-        State.AutoXRay = not State.AutoXRay
-        return State.AutoXRay
-    end, 3)
-
-    createToggle(aucCard, "Auto Calculator Powers", State.AutoCalculator, function()
-        State.AutoCalculator = not State.AutoCalculator
-        return State.AutoCalculator
-    end, 4)
-
-    createToggle(aucCard, "Auto Kick Competitor NPC", State.AutoKickNPC, function()
-        State.AutoKickNPC = not State.AutoKickNPC
-        return State.AutoKickNPC
-    end, 5)
-
-    createInput(aucCard, "Minimum Bid ($)", State.MinimumBid, function(val)
-        State.MinimumBid = tonumber(val) or 1000
-    end, 6)
-
-    createInput(aucCard, "Maximum Bid ($)", State.MaximumBid, function(val)
-        State.MaximumBid = tonumber(val) or 1000000
-    end, 7)
-
-    local lfCard = createCard(farmingPage, "Lost & Found", 2)
-    createToggle(lfCard, "Auto Collect Lost & Found", State.AutoLostFound, function()
-        State.AutoLostFound = not State.AutoLostFound
-        return State.AutoLostFound
-    end, 1)
-
-    local mgmtPage = createPage("Management")
-    local washCard = createCard(mgmtPage, "Auto Wash System", 1)
-    
-    createToggle(washCard, "Auto Wash (Send & Claim)", State.AutoWash, function()
-        State.AutoWash = not State.AutoWash
-        return State.AutoWash
-    end, 1)
+    local procL, procR = createTwoColumnPage("Processing", "Item Processing Pipeline")
+    local washCard = Card.new(procL, "Auto Wash (Cleaning)", "🧼", 1)
+    Toggle.new(washCard.Content, "Auto Wash Items", "AutoWash", Store, 1)
 
     local RarityGrid = Instance.new("Frame")
     RarityGrid.Size = UDim2.new(1, 0, 0, 68)
     RarityGrid.BackgroundTransparency = 1
     RarityGrid.LayoutOrder = 2
-    RarityGrid.Parent = washCard
+    RarityGrid.Parent = washCard.Content
 
     local gridLayout = Instance.new("UIGridLayout")
     gridLayout.CellSize = UDim2.new(0.23, 0, 0, 30)
@@ -499,9 +379,10 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
     gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
     gridLayout.Parent = RarityGrid
 
-    for idx, rarity in ipairs(RARITY_LIST) do
+    local washRarities = Store.Get("WashRarities") or {}
+    for idx, rarity in ipairs(RARITIES) do
         local rBtn = Instance.new("TextButton")
-        rBtn.Name = rarity
+        rBtn.Size = UDim2.new(1, 0, 1, 0)
         rBtn.Text = rarity
         rBtn.Font = Enum.Font.GothamBold
         rBtn.TextSize = 10
@@ -517,177 +398,138 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
         rbStroke.Thickness = 1
         rbStroke.Parent = rBtn
 
-        local color = RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
+        local col = RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
 
-        local function updateRBtn(enabled)
-            if enabled then
-                rBtn.BackgroundColor3 = Color3.fromRGB(30, 34, 40)
-                rBtn.TextColor3 = color
-                rbStroke.Color = color
+        local function updateR()
+            local on = washRarities[rarity] == true
+            if on then
+                rBtn.BackgroundColor3 = Color3.fromRGB(30, 35, 42)
+                rBtn.TextColor3 = col
+                rbStroke.Color = col
             else
-                rBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+                rBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
                 rBtn.TextColor3 = Color3.fromRGB(75, 75, 85)
-                rbStroke.Color = Color3.fromRGB(35, 35, 42)
+                rbStroke.Color = Color3.fromRGB(35, 35, 45)
             end
         end
 
-        updateRBtn(State.WashRarities[rarity] == true)
+        updateR()
 
         rBtn.MouseButton1Click:Connect(function()
-            State.WashRarities[rarity] = not State.WashRarities[rarity]
-            updateRBtn(State.WashRarities[rarity])
-            Config.Save()
+            washRarities[rarity] = not washRarities[rarity]
+            Store.Set("WashRarities", washRarities)
+            updateR()
         end)
     end
 
-    local repCard = createCard(mgmtPage, "Repair & Grading", 2)
-    createToggle(repCard, "Auto Repair Items", State.AutoRepair, function()
-        State.AutoRepair = not State.AutoRepair
-        return State.AutoRepair
-    end, 1)
+    local repCard = Card.new(procR, "Repair & Grading & Safes", "🔧", 1)
+    Toggle.new(repCard.Content, "Auto Repair Slots", "AutoRepair", Store, 1)
+    Toggle.new(repCard.Content, "Auto Wrench Won Items", "AutoWrench", Store, 2)
+    Toggle.new(repCard.Content, "Auto Grade PSA", "AutoGrade", Store, 3)
+    Toggle.new(repCard.Content, "Auto Locksmith Slots", "AutoLocksmith", Store, 4)
+    Toggle.new(repCard.Content, "Auto Picklock Inventory Safes", "AutoOpenSafes", Store, 5)
+    Toggle.new(repCard.Content, "Auto Authenticate Items", "AutoAuthenticate", Store, 6)
 
-    createToggle(repCard, "Auto Wrench Won Items", State.AutoWrench, function()
-        State.AutoWrench = not State.AutoWrench
-        return State.AutoWrench
-    end, 2)
+    local shopL, shopR = createTwoColumnPage("Shop", "Shop, Stocking & Selling")
+    local stockCard = Card.new(shopL, "Shelves & Stocking", "🏪", 1)
+    Toggle.new(stockCard.Content, "Auto Stock Shelves", "AutoStock", Store, 1)
+    Slider.new(stockCard.Content, "Stock Price Multiplier", 100, 300, 10, "StockPricePercent", "%", Store, 2)
 
-    createToggle(repCard, "Auto Grade Items (PSA)", State.AutoGrade, function()
-        State.AutoGrade = not State.AutoGrade
-        return State.AutoGrade
-    end, 3)
+    local sellCard = Card.new(shopR, "Liquidation & Pawn", "💲", 1)
+    Toggle.new(sellCard.Content, "Auto Sell to Pawn Shop", "AutoSell", Store, 1)
 
-    local safeCard = createCard(mgmtPage, "Locksmith & Safes", 3)
-    createToggle(safeCard, "Auto Locksmith Slots", State.AutoLocksmith, function()
-        State.AutoLocksmith = not State.AutoLocksmith
-        return State.AutoLocksmith
-    end, 1)
+    local rewL, rewR = createTwoColumnPage("Rewards", "Rewards, Quests & Events")
+    local rewCard = Card.new(rewL, "Automated Claims", "🎁", 1)
+    Toggle.new(rewCard.Content, "Auto Collect Museum Yield", "AutoMuseum", Store, 1)
+    Toggle.new(rewCard.Content, "Auto Claim Collections", "AutoCollections", Store, 2)
+    Toggle.new(rewCard.Content, "Auto Claim Daily Rewards", "AutoDailyReward", Store, 3)
+    Toggle.new(rewCard.Content, "Auto Lost & Found Retrieval", "AutoLostFound", Store, 4)
 
-    createToggle(safeCard, "Auto Picklock Inventory Safes", State.AutoOpenSafes, function()
-        State.AutoOpenSafes = not State.AutoOpenSafes
-        return State.AutoOpenSafes
-    end, 2)
+    local tpL, tpR = createTwoColumnPage("Teleport", "Map Locations & Navigation")
+    local tpCard = Card.new(tpL, "Instant Teleportation", "🗺", 1)
+    
+    local locList = TeleportModule.GetLocationList()
+    local selectedLoc = locList[1]
+    
+    Dropdown.new(tpCard.Content, "Select Destination", locList, false, "TeleportTarget", Store, 1)
+    
+    local TpBtn = Instance.new("TextButton")
+    TpBtn.Size = UDim2.new(1, 0, 0, 36)
+    TpBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    TpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TpBtn.Text = "TELEPORT NOW"
+    TpBtn.Font = Enum.Font.GothamBold
+    TpBtn.TextSize = 13
+    TpBtn.AutoButtonColor = false
+    TpBtn.LayoutOrder = 2
+    TpBtn.Parent = tpCard.Content
 
-    local shopCard = createCard(mgmtPage, "Shop & Stock & Sell", 4)
-    createToggle(shopCard, "Auto Stock Shelves", State.AutoStock, function()
-        State.AutoStock = not State.AutoStock
-        return State.AutoStock
-    end, 1)
+    local tpbCorner = Instance.new("UICorner")
+    tpbCorner.CornerRadius = UDim.new(0, 6)
+    tpbCorner.Parent = TpBtn
 
-    createToggle(shopCard, "Auto Sell to Pawn Shop", State.AutoSell, function()
-        State.AutoSell = not State.AutoSell
-        return State.AutoSell
-    end, 2)
+    TpBtn.MouseButton1Click:Connect(function()
+        local target = Store.Get("TeleportTarget") or locList[1]
+        local ok = TeleportModule.TeleportTo(target)
+        TpBtn.Text = ok and "TELEPORTED!" or "LOCATION NOT FOUND"
+        task.wait(1.5)
+        TpBtn.Text = "TELEPORT NOW"
+    end)
 
-    local rewCard = createCard(mgmtPage, "Rewards & Museum", 5)
-    createToggle(rewCard, "Auto Collect Museum Cash", State.AutoMuseum, function()
-        State.AutoMuseum = not State.AutoMuseum
-        return State.AutoMuseum
-    end, 1)
+    local utilL, utilR = createTwoColumnPage("Utilities", "Utilities, Movement & Guard")
+    local guardCard = Card.new(utilL, "Watchdog & Movement", "🛡", 1)
+    Toggle.new(guardCard.Content, "Anti-Stuck Watchdog", "AntiStuck", Store, 1)
+    Input.new(guardCard.Content, "Idle Timeout (Seconds)", "AntiStuckSeconds", true, Store, 2)
+    Toggle.new(guardCard.Content, "WalkSpeed Boost", "WalkSpeedEnabled", Store, 3)
+    Slider.new(guardCard.Content, "WalkSpeed Value", 16, 200, 2, "WalkSpeedValue", "", Store, 4)
+    Toggle.new(guardCard.Content, "JumpPower Boost", "JumpPowerEnabled", Store, 5)
+    Slider.new(guardCard.Content, "JumpPower Value", 50, 300, 5, "JumpPowerValue", "", Store, 6)
+    Toggle.new(guardCard.Content, "Noclip", "Noclip", Store, 7)
 
-    createToggle(rewCard, "Auto Claim Collections", State.AutoCollections, function()
-        State.AutoCollections = not State.AutoCollections
-        return State.AutoCollections
-    end, 2)
+    local drinkCard = Card.new(utilR, "Consumables & Upgrades", "⚡", 1)
+    Toggle.new(drinkCard.Content, "Auto Buy Energy Drinks", "AutoBuyDrinks", Store, 1)
+    Toggle.new(drinkCard.Content, "Auto Use Energy Drinks", "AutoUseDrinks", Store, 2)
+    Toggle.new(drinkCard.Content, "Auto Buy Shop Upgrades", "AutoBuyUpgrades", Store, 3)
 
-    createToggle(rewCard, "Auto Claim Daily Rewards", State.AutoDailyReward, function()
-        State.AutoDailyReward = not State.AutoDailyReward
-        return State.AutoDailyReward
-    end, 3)
-
-    local utilsPage = createPage("Utilities")
-    local guardCard = createCard(utilsPage, "Anti-Stuck & Guard", 1)
-
-    createToggle(guardCard, "Anti-Stuck Movement Guard", State.AntiStuck, function()
-        State.AntiStuck = not State.AntiStuck
-        State.IsActive = State.AntiStuck
-        return State.AntiStuck
-    end, 1)
-
-    createInput(guardCard, "Max Idle Threshold (Seconds)", State.IntervalValue, function(val)
-        local n = tonumber(val) or 15
-        State.IntervalValue = n
-        State.IntervalSeconds = n
-    end, 2)
-
-    local moveCard = createCard(utilsPage, "Movement Enhancements", 2)
-    createToggle(moveCard, "WalkSpeed Boost", State.WalkSpeedEnabled, function()
-        State.WalkSpeedEnabled = not State.WalkSpeedEnabled
-        return State.WalkSpeedEnabled
-    end, 1)
-
-    createInput(moveCard, "WalkSpeed Value", State.WalkSpeedValue, function(val)
-        State.WalkSpeedValue = tonumber(val) or 16
-    end, 2)
-
-    createToggle(moveCard, "JumpPower Boost", State.JumpPowerEnabled, function()
-        State.JumpPowerEnabled = not State.JumpPowerEnabled
-        return State.JumpPowerEnabled
-    end, 3)
-
-    createInput(moveCard, "JumpPower Value", State.JumpPowerValue, function(val)
-        State.JumpPowerValue = tonumber(val) or 50
-    end, 4)
-
-    createToggle(moveCard, "Noclip", State.Noclip, function()
-        State.Noclip = not State.Noclip
-        return State.Noclip
-    end, 5)
-
-    local drinkCard = createCard(utilsPage, "Energy Drinks & Upgrades", 3)
-    createToggle(drinkCard, "Auto Buy Energy Drinks", State.AutoBuyDrinks, function()
-        State.AutoBuyDrinks = not State.AutoBuyDrinks
-        return State.AutoBuyDrinks
-    end, 1)
-
-    createToggle(drinkCard, "Auto Use Energy Drinks", State.AutoUseDrinks, function()
-        State.AutoUseDrinks = not State.AutoUseDrinks
-        return State.AutoUseDrinks
-    end, 2)
-
-    createToggle(drinkCard, "Auto Buy Shop Upgrades", State.AutoBuyUpgrades, function()
-        State.AutoBuyUpgrades = not State.AutoBuyUpgrades
-        return State.AutoBuyUpgrades
-    end, 3)
-
-    local settPage = createPage("Settings")
-    local settCard = createCard(settPage, "Script Management", 1)
-
+    local setL, setR = createTwoColumnPage("Settings", "Configuration & Unload")
+    local setCard = Card.new(setL, "Config Management", "⚙", 1)
+    
     local SaveBtn = Instance.new("TextButton")
     SaveBtn.Size = UDim2.new(1, 0, 0, 36)
-    SaveBtn.BackgroundColor3 = Color3.fromRGB(30, 90, 45)
-    SaveBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
-    SaveBtn.Text = "SAVE CURRENT CONFIG"
+    SaveBtn.BackgroundColor3 = Color3.fromRGB(25, 95, 45)
+    SaveBtn.TextColor3 = Color3.fromRGB(140, 255, 160)
+    SaveBtn.Text = "SAVE SETTINGS TO JSON"
     SaveBtn.Font = Enum.Font.GothamBold
     SaveBtn.TextSize = 13
     SaveBtn.AutoButtonColor = false
     SaveBtn.LayoutOrder = 1
-    SaveBtn.Parent = settCard
+    SaveBtn.Parent = setCard.Content
 
     local sbCorner = Instance.new("UICorner")
     sbCorner.CornerRadius = UDim.new(0, 6)
     sbCorner.Parent = SaveBtn
 
     SaveBtn.MouseButton1Click:Connect(function()
-        Config.Save()
-        SaveBtn.Text = "CONFIG SAVED!"
+        Store.DebouncedSave()
+        SaveBtn.Text = "SAVED TO GENESIS/SETTINGS.JSON!"
         task.wait(1.5)
-        SaveBtn.Text = "SAVE CURRENT CONFIG"
+        SaveBtn.Text = "SAVE SETTINGS TO JSON"
     end)
 
     local UnloadBtn = Instance.new("TextButton")
     UnloadBtn.Size = UDim2.new(1, 0, 0, 36)
-    UnloadBtn.BackgroundColor3 = Color3.fromRGB(60, 25, 28)
+    UnloadBtn.BackgroundColor3 = Color3.fromRGB(65, 25, 30)
     UnloadBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
     UnloadBtn.Text = "UNLOAD GENESIS HUB"
     UnloadBtn.Font = Enum.Font.GothamBold
     UnloadBtn.TextSize = 13
     UnloadBtn.AutoButtonColor = false
     UnloadBtn.LayoutOrder = 2
-    UnloadBtn.Parent = settCard
+    UnloadBtn.Parent = setCard.Content
 
-    local ulCorner = Instance.new("UICorner")
-    ulCorner.CornerRadius = UDim.new(0, 6)
-    ulCorner.Parent = UnloadBtn
+    local ubCorner = Instance.new("UICorner")
+    ubCorner.CornerRadius = UDim.new(0, 6)
+    ubCorner.Parent = UnloadBtn
 
     UnloadBtn.MouseButton1Click:Connect(function()
         AuctionModule.StopLoop()
@@ -698,20 +540,22 @@ function UI.Create(Config, ResetModule, AuctionModule, WashModule, RepairModule,
         StockModule.StopLoop()
         RewardsModule.StopLoop()
         UtilsModule.StopLoop()
+        ResetModule.StopTracker()
+        EventBus.Destroy()
         ScreenGui:Destroy()
     end)
 
     switchTab("Info")
 
-    AuctionModule.StartLoop(State)
-    WashModule.StartAutoWashLoop(State)
-    RepairModule.StartLoop(State)
-    GradingModule.StartLoop(State)
-    LocksmithModule.StartLoop(State)
-    StockModule.StartLoop(State)
-    RewardsModule.StartLoop(State)
-    UtilsModule.StartLoop(State)
-    ResetModule.StartTracker(State, nil, nil)
+    AuctionModule.StartLoop(Store)
+    WashModule.StartAutoWashLoop(Store)
+    RepairModule.StartLoop(Store)
+    GradingModule.StartLoop(Store)
+    LocksmithModule.StartLoop(Store)
+    StockModule.StartLoop(Store)
+    RewardsModule.StartLoop(Store)
+    UtilsModule.StartLoop(Store)
+    ResetModule.StartTracker(Store)
 end
 
 return UI

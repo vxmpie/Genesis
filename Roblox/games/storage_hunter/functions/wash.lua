@@ -3,6 +3,18 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local WashModule = {}
 local washThread = nil
 
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
 local ItemsCache = nil
 local function getItemsModule()
     if ItemsCache then return ItemsCache end
@@ -34,7 +46,7 @@ function WashModule.GetItemRarity(item)
     return "Common"
 end
 
-function WashModule.RunAutoWash(State)
+function WashModule.RunAutoWash(StoreOrState)
     local events = ReplicatedStorage:FindFirstChild("Events")
     local washEvents = events and events:FindFirstChild("Wash")
     if not washEvents then return end
@@ -65,10 +77,11 @@ function WashModule.RunAutoWash(State)
     if ok2 and type(refreshedSlots) == "table" then
         local ok3, washable = pcall(function() return getWashableItems:InvokeServer() end)
         if ok3 and type(washable) == "table" and #washable > 0 then
+            local rarities = getStateVal(StoreOrState, "WashRarities", nil)
             local eligibleItems = {}
             for _, item in ipairs(washable) do
                 local rarity = WashModule.GetItemRarity(item)
-                if State.WashRarities == nil or State.WashRarities[rarity] == true then
+                if rarities == nil or rarities[rarity] == true then
                     table.insert(eligibleItems, item)
                 end
             end
@@ -96,15 +109,17 @@ function WashModule.RunAutoWash(State)
     end
 end
 
-function WashModule.StartAutoWashLoop(State)
+function WashModule.StartAutoWashLoop(StoreOrState)
     if washThread then
         pcall(function() task.cancel(washThread) end)
     end
     washThread = task.spawn(function()
-        while State.AutoWash do
-            pcall(function()
-                WashModule.RunAutoWash(State)
-            end)
+        while true do
+            if getStateVal(StoreOrState, "AutoWash", false) then
+                pcall(function()
+                    WashModule.RunAutoWash(StoreOrState)
+                end)
+            end
             task.wait(3)
         end
     end)

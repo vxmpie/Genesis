@@ -7,11 +7,23 @@ local UtilsModule = {}
 local loopThread = nil
 local noclipConnection = nil
 
-function UtilsModule.Process(State)
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
+function UtilsModule.Process(StoreOrState)
     local events = ReplicatedStorage:FindFirstChild("Events")
     if not events then return end
 
-    if State.AutoBuyDrinks then
+    if getStateVal(StoreOrState, "AutoBuyDrinks", false) then
         local energyEvents = events:FindFirstChild("EnergyShop")
         if energyEvents and energyEvents:FindFirstChild("BuyDrink") then
             for drinkId = 1, 3 do
@@ -20,14 +32,14 @@ function UtilsModule.Process(State)
         end
     end
 
-    if State.AutoUseDrinks then
+    if getStateVal(StoreOrState, "AutoUseDrinks", false) then
         local uiEvents = events:FindFirstChild("UI")
         if uiEvents and uiEvents:FindFirstChild("UseEnergyDrink") then
             pcall(function() uiEvents.UseEnergyDrink:FireServer() end)
         end
     end
 
-    if State.AutoBuyUpgrades then
+    if getStateVal(StoreOrState, "AutoBuyUpgrades", false) then
         local upEvents = events:FindFirstChild("Upgrades")
         if upEvents and upEvents:FindFirstChild("BuyUpgrade") then
             pcall(function()
@@ -44,23 +56,23 @@ function UtilsModule.Process(State)
     local character = LocalPlayer.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     if humanoid then
-        if State.WalkSpeedEnabled then
-            humanoid.WalkSpeed = State.WalkSpeedValue
+        if getStateVal(StoreOrState, "WalkSpeedEnabled", false) then
+            humanoid.WalkSpeed = tonumber(getStateVal(StoreOrState, "WalkSpeedValue", 16)) or 16
         end
-        if State.JumpPowerEnabled then
-            humanoid.JumpPower = State.JumpPowerValue
+        if getStateVal(StoreOrState, "JumpPowerEnabled", false) then
+            humanoid.JumpPower = tonumber(getStateVal(StoreOrState, "JumpPowerValue", 50)) or 50
         end
     end
 end
 
-function UtilsModule.SetupNoclip(State)
+function UtilsModule.SetupNoclip(StoreOrState)
     if noclipConnection then
         noclipConnection:Disconnect()
         noclipConnection = nil
     end
 
     noclipConnection = RunService.Stepped:Connect(function()
-        if State.Noclip and LocalPlayer.Character then
+        if getStateVal(StoreOrState, "Noclip", false) and LocalPlayer.Character then
             for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
                 if part:IsA("BasePart") and part.CanCollide then
                     part.CanCollide = false
@@ -70,16 +82,16 @@ function UtilsModule.SetupNoclip(State)
     end)
 end
 
-function UtilsModule.StartLoop(State)
+function UtilsModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
-    UtilsModule.SetupNoclip(State)
+    UtilsModule.SetupNoclip(StoreOrState)
 
     loopThread = task.spawn(function()
         while true do
-            pcall(function() UtilsModule.Process(State) end)
+            pcall(function() UtilsModule.Process(StoreOrState) end)
             task.wait(2)
         end
     end)

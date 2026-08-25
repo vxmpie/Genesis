@@ -3,8 +3,20 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GradingModule = {}
 local loopThread = nil
 
-function GradingModule.Process(State)
-    if not State.AutoGrade then return end
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
+function GradingModule.Process(StoreOrState)
+    if not getStateVal(StoreOrState, "AutoGrade", false) then return end
 
     local events = ReplicatedStorage:FindFirstChild("Events")
     local gradingEvents = events and events:FindFirstChild("Grading")
@@ -49,15 +61,15 @@ function GradingModule.Process(State)
     end
 end
 
-function GradingModule.StartLoop(State)
+function GradingModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
     loopThread = task.spawn(function()
         while true do
-            if State.AutoGrade then
-                pcall(function() GradingModule.Process(State) end)
+            if getStateVal(StoreOrState, "AutoGrade", false) then
+                pcall(function() GradingModule.Process(StoreOrState) end)
             end
             task.wait(3)
         end

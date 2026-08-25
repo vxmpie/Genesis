@@ -3,7 +3,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocksmithModule = {}
 local loopThread = nil
 
-function LocksmithModule.Process(State)
+local function getStateVal(StoreOrState, key, defaultVal)
+    if type(StoreOrState) == "table" then
+        if StoreOrState.Get then
+            local v = StoreOrState.Get(key)
+            if v ~= nil then return v end
+        elseif StoreOrState[key] ~= nil then
+            return StoreOrState[key]
+        end
+    end
+    return defaultVal
+end
+
+function LocksmithModule.Process(StoreOrState)
     local events = ReplicatedStorage:FindFirstChild("Events")
     local locksmithEvents = events and events:FindFirstChild("Locksmith")
     if not locksmithEvents then return end
@@ -13,13 +25,13 @@ function LocksmithModule.Process(State)
     local startLocksmith = locksmithEvents:FindFirstChild("StartLocksmith") or locksmithEvents:FindFirstChild("OpenSafe")
     local claimItem = locksmithEvents:FindFirstChild("ClaimItem")
 
-    if State.AutoOpenSafes and locksmithEvents:FindFirstChild("PicklockInventorySafe") then
+    if getStateVal(StoreOrState, "AutoOpenSafes", false) and locksmithEvents:FindFirstChild("PicklockInventorySafe") then
         pcall(function()
             locksmithEvents.PicklockInventorySafe:InvokeServer()
         end)
     end
 
-    if not State.AutoLocksmith or not getSlotState then return end
+    if not getStateVal(StoreOrState, "AutoLocksmith", false) or not getSlotState then return end
 
     local ok, slotState = pcall(function() return getSlotState:InvokeServer() end)
     if ok and type(slotState) == "table" then
@@ -55,15 +67,17 @@ function LocksmithModule.Process(State)
     end
 end
 
-function LocksmithModule.StartLoop(State)
+function LocksmithModule.StartLoop(StoreOrState)
     if loopThread then
         pcall(function() task.cancel(loopThread) end)
     end
 
     loopThread = task.spawn(function()
         while true do
-            if State.AutoLocksmith or State.AutoOpenSafes then
-                pcall(function() LocksmithModule.Process(State) end)
+            local autoLock = getStateVal(StoreOrState, "AutoLocksmith", false)
+            local autoOpen = getStateVal(StoreOrState, "AutoOpenSafes", false)
+            if autoLock or autoOpen then
+                pcall(function() LocksmithModule.Process(StoreOrState) end)
             end
             task.wait(3)
         end
