@@ -46,6 +46,7 @@ end
 function UI.Create(Config, ResetModule, WashModule)
     local State = Config.GetState()
     local parent = getGuiParent()
+    local connections = {}
 
     local existing = parent:FindFirstChild("GenesisRedUI")
     if existing then existing:Destroy() end
@@ -97,12 +98,13 @@ function UI.Create(Config, ResetModule, WashModule)
             floatDragInput = input
         end
     end)
-    UserInputService.InputChanged:Connect(function(input)
+    local floatDragConn = UserInputService.InputChanged:Connect(function(input)
         if input == floatDragInput and draggingFloat then
             local delta = input.Position - floatDragStart
             FloatingBtn.Position = UDim2.new(floatStartPos.X.Scale, floatStartPos.X.Offset + delta.X, floatStartPos.Y.Scale, floatStartPos.Y.Offset + delta.Y)
         end
     end)
+    table.insert(connections, floatDragConn)
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
@@ -145,12 +147,13 @@ function UI.Create(Config, ResetModule, WashModule)
             mainDragInput = input
         end
     end)
-    UserInputService.InputChanged:Connect(function(input)
+    local mainDragConn = UserInputService.InputChanged:Connect(function(input)
         if input == mainDragInput and draggingMain then
             local delta = input.Position - mainDragStart
             MainFrame.Position = UDim2.new(mainStartPos.X.Scale, mainStartPos.X.Offset + delta.X, mainStartPos.Y.Scale, mainStartPos.Y.Offset + delta.Y)
         end
     end)
+    table.insert(connections, mainDragConn)
 
     local Sidebar = Instance.new("Frame")
     Sidebar.Name = "Sidebar"
@@ -538,7 +541,22 @@ function UI.Create(Config, ResetModule, WashModule)
     settingsCard:AddButton("Unload Genesis Hub", function()
         WashModule.StopAutoWashLoop()
         ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
+        for _, conn in ipairs(connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(connections)
+        _G.GenesisRunning = nil
+        _G.GenesisLoaded = nil
+        shared.GenesisRunning = nil
+        shared.GenesisLoaded = nil
         ScreenGui:Destroy()
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "GENESIS",
+                Text = "Genesis Hub completely unloaded!",
+                Duration = 3
+            })
+        end)
     end)
 
     TabButtons["wash"].BackgroundColor3 = THEME.Primary
@@ -552,11 +570,12 @@ function UI.Create(Config, ResetModule, WashModule)
         WashModule.StartAutoWashLoop(State)
     end
 
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    local keybindConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftShift then
             MainFrame.Visible = not MainFrame.Visible
         end
     end)
+    table.insert(connections, keybindConn)
 
     pcall(function()
         StarterGui:SetCore("SendNotification", {
