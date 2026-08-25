@@ -3,41 +3,81 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 local TeleportModule = {}
+local cachedPOIs = {}
 
-local LOCATIONS = {
-    ["Auction: Shipyard"] = Vector3.new(-820, 15, -1200),
-    ["Auction: Jurassic"] = Vector3.new(1250, 15, 850),
-    ["Auction: Business Bay"] = Vector3.new(-450, 15, 600),
-    ["Auction: Farmyard"] = Vector3.new(780, 15, -950),
-    ["Auction: Back Alley"] = Vector3.new(210, 15, -340),
-    ["Auction: Lucky Beach"] = Vector3.new(-1100, 15, 300),
-    ["Auction: Alien Invasion"] = Vector3.new(1500, 20, -1400),
-    ["Auction: Power Plant"] = Vector3.new(920, 15, 1400),
-    ["Auction: Cargo Ship"] = Vector3.new(-1400, 25, -500),
-    ["Auction: Junk Yard"] = Vector3.new(-320, 15, -780),
-    
-    ["Service: Item Cleaning (Wash)"] = Vector3.new(50, 15, 120),
-    ["Service: Repair Shop (Mechanic)"] = Vector3.new(-80, 15, 210),
-    ["Service: Grading Shop (PSA)"] = Vector3.new(180, 15, 90),
-    ["Service: Locksmith & Safes"] = Vector3.new(-150, 15, -80),
-    ["Service: Pawn Shop (Sell)"] = Vector3.new(20, 15, -190),
-    ["Service: Museum"] = Vector3.new(340, 15, 450),
-    ["Service: Energy Drinks"] = Vector3.new(-60, 15, 310),
-    ["Service: Gas Station"] = Vector3.new(450, 15, -200),
-    ["Service: Dealership"] = Vector3.new(-290, 15, 480),
-}
+function TeleportModule.FetchPOIs()
+    cachedPOIs = {}
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    local gpsEvents = events and events:FindFirstChild("GPS")
+    local getPOIs = gpsEvents and gpsEvents:FindFirstChild("GetPOIs")
+
+    if getPOIs then
+        local ok, res = pcall(function() return getPOIs:InvokeServer() end)
+        if ok and type(res) == "table" then
+            for k, v in pairs(res) do
+                local name = nil
+                local pos = nil
+
+                if type(v) == "table" then
+                    name = v.Name or v.Title or v.name or v.Label or tostring(k)
+                    pos = v.Position or v.CFrame or v.pos or v.Location or v.Target
+                elseif typeof(v) == "Vector3" or typeof(v) == "CFrame" then
+                    name = tostring(k)
+                    pos = v
+                end
+
+                if name and pos then
+                    if typeof(pos) == "CFrame" then
+                        cachedPOIs[name] = pos.Position
+                    elseif typeof(pos) == "Vector3" then
+                        cachedPOIs[name] = pos
+                    elseif type(pos) == "table" then
+                        local x = pos.X or pos.x or pos[1]
+                        local y = pos.Y or pos.y or pos[2]
+                        local z = pos.Z or pos.z or pos[3]
+                        if x and y and z then
+                            cachedPOIs[name] = Vector3.new(x, y, z)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local mapFolder = workspace:FindFirstChild("Map") or workspace:FindFirstChild("Zones") or workspace:FindFirstChild("POIs")
+    if mapFolder then
+        for _, obj in ipairs(mapFolder:GetChildren()) do
+            if obj:IsA("BasePart") then
+                if not cachedPOIs[obj.Name] then
+                    cachedPOIs[obj.Name] = obj.Position
+                end
+            elseif obj:IsA("Model") and obj.PrimaryPart then
+                if not cachedPOIs[obj.Name] then
+                    cachedPOIs[obj.Name] = obj.PrimaryPart.Position
+                end
+            end
+        end
+    end
+
+    return cachedPOIs
+end
+
+TeleportModule.FetchPOIs()
 
 function TeleportModule.GetLocationList()
-    local list = { "My Plot / Shop" }
-    for name, _ in pairs(LOCATIONS) do
+    TeleportModule.FetchPOIs()
+    local list = { "🏡 My Plot / Shop" }
+
+    for name, _ in pairs(cachedPOIs) do
         table.insert(list, name)
     end
+
     table.sort(list)
     return list
 end
 
 function TeleportModule.TeleportTo(targetName)
-    if targetName == "My Plot / Shop" then
+    if targetName == "🏡 My Plot / Shop" or string.find(targetName, "Plot") then
         local events = ReplicatedStorage:FindFirstChild("Events")
         local plotEvents = events and events:FindFirstChild("Plot")
         if plotEvents and plotEvents:FindFirstChild("TeleportToPlot") then
@@ -50,20 +90,17 @@ function TeleportModule.TeleportTo(targetName)
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("BasePart")) and string.find(string.lower(obj.Name), string.lower(string.gsub(targetName, ".*: ", ""))) then
-            local pos = obj:IsA("BasePart") and obj.Position or (obj.PrimaryPart and obj.PrimaryPart.Position)
-            if pos then
-                hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-                return true
-            end
-        end
+    local targetPos = cachedPOIs[targetName]
+    if targetPos then
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 4, 0))
+        return true
     end
 
-    local fallback = LOCATIONS[targetName]
-    if fallback then
-        hrp.CFrame = CFrame.new(fallback)
-        return true
+    for name, pos in pairs(cachedPOIs) do
+        if string.find(string.lower(name), string.lower(targetName)) or string.find(string.lower(targetName), string.lower(name)) then
+            hrp.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
+            return true
+        end
     end
 
     return false
