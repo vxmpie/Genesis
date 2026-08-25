@@ -82,11 +82,11 @@ function UI.Init(Config, DB, Modules)
 
     local Title = Instance.new("TextLabel")
     Title.Name = "Title"
-    Title.Size = UDim2.new(0, 240, 1, 0)
+    Title.Size = UDim2.new(0, 260, 1, 0)
     Title.Position = UDim2.new(0, 16, 0, 0)
     Title.BackgroundTransparency = 1
     Title.Font = Enum.Font.GothamBold
-    Title.Text = "GENESIS  |  Storage Hunters"
+    Title.Text = "[+] GENESIS  |  Storage Hunters"
     Title.TextColor3 = Color3.fromRGB(240, 240, 245)
     Title.TextSize = 14
     Title.TextXAlignment = Enum.TextXAlignment.Left
@@ -145,11 +145,11 @@ function UI.Init(Config, DB, Modules)
     ViewContainer.Parent = ContentArea
 
     local tabs = {
-        {Name = "Info", Icon = "rbxassetid://10723415903"},
-        {Name = "Farming", Icon = "rbxassetid://10723415903"},
-        {Name = "Management", Icon = "rbxassetid://10723415903"},
-        {Name = "Utilities", Icon = "rbxassetid://10723415903"},
-        {Name = "Setting", Icon = "rbxassetid://10723415903"}
+        {Name = "Info", Glyph = "[i]"},
+        {Name = "Farming", Glyph = "[*]"},
+        {Name = "Management", Glyph = "[$]"},
+        {Name = "Utilities", Glyph = "[#]"},
+        {Name = "Setting", Glyph = "[%]"}
     }
 
     local tabButtons = {}
@@ -178,7 +178,7 @@ function UI.Init(Config, DB, Modules)
         header.Size = UDim2.new(1, 0, 0, 36)
         header.BackgroundTransparency = 1
         header.Font = Enum.Font.GothamBold
-        header.Text = "   " .. titleText
+        header.Text = "   [+] " .. titleText
         header.TextColor3 = Color3.fromRGB(230, 230, 235)
         header.TextSize = 13
         header.TextXAlignment = Enum.TextXAlignment.Left
@@ -258,7 +258,7 @@ function UI.Init(Config, DB, Modules)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 38, 0, 20)
         btn.Position = UDim2.new(1, -38, 0.5, -10)
-        btn.BackgroundColor3 = Config.Get(configKey, defaultValue) and Color3.fromRGB(30, 180, 90) or Color3.fromRGB(45, 45, 55)
+        btn.BackgroundColor3 = Config.Get(configKey, defaultValue) and Color3.fromRGB(220, 220, 225) or Color3.fromRGB(45, 45, 55)
         btn.Text = ""
         btn.Parent = row
 
@@ -269,7 +269,7 @@ function UI.Init(Config, DB, Modules)
         local knob = Instance.new("Frame")
         knob.Size = UDim2.new(0, 16, 0, 16)
         knob.Position = Config.Get(configKey, defaultValue) and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-        knob.BackgroundColor3 = Color3.fromRGB(250, 250, 250)
+        knob.BackgroundColor3 = Config.Get(configKey, defaultValue) and Color3.fromRGB(20, 20, 25) or Color3.fromRGB(200, 200, 200)
         knob.Parent = btn
 
         local knobCorner = Instance.new("UICorner")
@@ -281,8 +281,11 @@ function UI.Init(Config, DB, Modules)
             local nxt = not cur
             Config.Set(configKey, nxt)
             Config.Save()
-            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = nxt and Color3.fromRGB(30, 180, 90) or Color3.fromRGB(45, 45, 55)}):Play()
-            TweenService:Create(knob, TweenInfo.new(0.15), {Position = nxt and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)}):Play()
+            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = nxt and Color3.fromRGB(220, 220, 225) or Color3.fromRGB(45, 45, 55)}):Play()
+            TweenService:Create(knob, TweenInfo.new(0.15), {
+                Position = nxt and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
+                BackgroundColor3 = nxt and Color3.fromRGB(20, 20, 25) or Color3.fromRGB(200, 200, 200)
+            }):Play()
         end)
     end
 
@@ -312,7 +315,7 @@ function UI.Init(Config, DB, Modules)
         tabBtn.Size = UDim2.new(1, 0, 0, 34)
         tabBtn.BackgroundColor3 = idx == 1 and Color3.fromRGB(30, 30, 42) or Color3.fromRGB(20, 20, 28)
         tabBtn.Font = Enum.Font.GothamBold
-        tabBtn.Text = "  " .. tabInfo.Name
+        tabBtn.Text = "  " .. tabInfo.Glyph .. "  " .. tabInfo.Name
         tabBtn.TextColor3 = idx == 1 and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 160)
         tabBtn.TextSize = 13
         tabBtn.TextXAlignment = Enum.TextXAlignment.Left
