@@ -3,9 +3,12 @@ local HttpService = game:GetService("HttpService")
 
 local FILE_NAME = "Genesis_StorageHunter_Config.json"
 
-local State = {
+Config.State = {
     AutoWash = false,
-    AntiAFK = true,
+    IsActive = false,
+    Mode = "Anti-Stuck",
+    IntervalSeconds = 15,
+    IntervalValue = 15,
     WashRarities = {
         Common = true,
         Uncommon = true,
@@ -19,24 +22,24 @@ local State = {
 }
 
 function Config.Get(key, default)
-    if State[key] ~= nil then
-        return State[key]
+    if Config.State[key] ~= nil then
+        return Config.State[key]
     end
     return default
 end
 
 function Config.Set(key, value)
-    State[key] = value
+    Config.State[key] = value
 end
 
 function Config.GetState()
-    return State
+    return Config.State
 end
 
 function Config.Save()
     if writefile then
         pcall(function()
-            local data = HttpService:JSONEncode(State)
+            local data = HttpService:JSONEncode(Config.State)
             writefile(FILE_NAME, data)
         end)
     end
@@ -49,12 +52,12 @@ function Config.Load()
             local decoded = HttpService:JSONDecode(content)
             if type(decoded) == "table" then
                 for k, v in pairs(decoded) do
-                    State[k] = v
+                    Config.State[k] = v
                 end
             end
         end)
     end
-    return State
+    return Config.State
 end
 
 return Config

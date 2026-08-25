@@ -43,7 +43,7 @@ local function getGuiParent()
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 
-function UI.Create(Config, WashModule, AntiAFK)
+function UI.Create(Config, ResetModule, WashModule)
     local State = Config.GetState()
     local parent = getGuiParent()
 
@@ -312,7 +312,8 @@ function UI.Create(Config, WashModule, AntiAFK)
     end
 
     local washPage = createTab("wash", "Auto Wash", 1)
-    local safetyPage = createTab("safety", "Settings", 2)
+    local resetPage = createTab("reset", "Anti-Stuck", 2)
+    local settingsPage = createTab("settings", "Settings", 3)
 
     local function createCard(parentPage, title)
         local card = Instance.new("Frame")
@@ -451,20 +452,105 @@ function UI.Create(Config, WashModule, AntiAFK)
         end)
     end
 
-    local safetyCard = createCard(safetyPage, "Safety & Guard Settings")
-    safetyCard:AddToggle("Anti-AFK (ตรวจตัวยืนนิ่ง)", Config.Get("AntiAFK", true), function(val)
-        Config.Set("AntiAFK", val)
+    local trackerCard = createCard(resetPage, "Anti-Stuck Character Reset Tracker")
+    
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Size = UDim2.new(1, 0, 0, 20)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = State.IsActive and "ACTIVE" or "INACTIVE"
+    StatusLabel.TextColor3 = State.IsActive and THEME.Success or THEME.TextSecondary
+    StatusLabel.Font = Enum.Font.GothamBold
+    StatusLabel.TextSize = 12
+    StatusLabel.Parent = trackerCard.Card
+
+    local CountdownLabel = Instance.new("TextLabel")
+    CountdownLabel.Size = UDim2.new(1, 0, 0, 36)
+    CountdownLabel.BackgroundTransparency = 1
+    CountdownLabel.Text = "00:00"
+    CountdownLabel.TextColor3 = THEME.TextPrimary
+    CountdownLabel.Font = Enum.Font.GothamBlack
+    CountdownLabel.TextSize = 28
+    CountdownLabel.Parent = trackerCard.Card
+
+    trackerCard:AddToggle("Anti-Stuck Character Reset Guard", State.IsActive or false, function(val)
+        State.IsActive = val
+        Config.Set("IsActive", val)
+        Config.Save()
+        if val then
+            ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
+        else
+            ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
+        end
+    end)
+
+    local InputRow = Instance.new("Frame")
+    InputRow.Size = UDim2.new(1, 0, 0, 28)
+    InputRow.BackgroundTransparency = 1
+    InputRow.Parent = trackerCard.Card
+
+    local InpLabel = Instance.new("TextLabel")
+    InpLabel.Size = UDim2.new(0.65, 0, 1, 0)
+    InpLabel.BackgroundTransparency = 1
+    InpLabel.Text = "Idle Limit (Seconds)"
+    InpLabel.TextColor3 = THEME.TextPrimary
+    InpLabel.Font = Enum.Font.GothamMedium
+    InpLabel.TextSize = 11
+    InpLabel.TextXAlignment = Enum.TextXAlignment.Left
+    InpLabel.Parent = InputRow
+
+    local Box = Instance.new("TextBox")
+    Box.Size = UDim2.new(0, 75, 0, 22)
+    Box.Position = UDim2.new(1, -75, 0.5, -11)
+    Box.BackgroundColor3 = THEME.Background
+    Box.TextColor3 = THEME.TextPrimary
+    Box.Text = tostring(State.IntervalSeconds or 15)
+    Box.Font = Enum.Font.GothamBold
+    Box.TextSize = 11
+    Box.ClearTextOnFocus = false
+    Box.Parent = InputRow
+
+    local bxCorner = Instance.new("UICorner")
+    bxCorner.CornerRadius = UDim.new(0, 4)
+    bxCorner.Parent = Box
+
+    local bxStroke = Instance.new("UIStroke")
+    bxStroke.Color = THEME.CardBorder
+    bxStroke.Thickness = 1
+    bxStroke.Parent = Box
+
+    Box.FocusLost:Connect(function()
+        local val = tonumber(Box.Text) or 15
+        State.IntervalSeconds = val
+        State.IntervalValue = val
+        Box.Text = tostring(val)
         Config.Save()
     end)
-    safetyCard:AddButton("Unload Genesis Hub", function()
+
+    local settingsCard = createCard(settingsPage, "Configuration & Core")
+    settingsCard:AddButton("Save Settings to JSON", function()
+        Config.Save()
+        StarterGui:SetCore("SendNotification", {
+            Title = "GENESIS",
+            Text = "Settings Saved Successfully!",
+            Duration = 3
+        })
+    end)
+    settingsCard:AddButton("Unload Genesis Hub", function()
         WashModule.StopAutoWashLoop()
-        AntiAFK.Destroy()
+        ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
         ScreenGui:Destroy()
     end)
 
     TabButtons["wash"].BackgroundColor3 = THEME.Primary
     TabButtons["wash"].TextColor3 = Color3.fromRGB(255, 255, 255)
     TabPages["wash"].Visible = true
+
+    if State.IsActive then
+        ResetModule.StartTracker(State, CountdownLabel, StatusLabel)
+    end
+    if State.AutoWash then
+        WashModule.StartAutoWashLoop(State)
+    end
 
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftControl then

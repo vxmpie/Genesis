@@ -20,16 +20,12 @@ end
 local Config = loadModule("config.lua")
 Config.Load()
 
+local ResetModule = loadModule("functions/reset.lua")
 local WashModule = loadModule("functions/wash.lua")
-local AntiAFK = loadModule("functions/anti_afk.lua")
 local UI = loadModule("ui.lua")
 
-if AntiAFK and AntiAFK.Init then
-    AntiAFK.Init(Config)
-end
-
 if UI and UI.Create then
-    UI.Create(Config, WashModule, AntiAFK)
+    UI.Create(Config, ResetModule, WashModule)
 end
 
 if Config.Get("AutoWash", false) and WashModule and WashModule.StartAutoWashLoop then
