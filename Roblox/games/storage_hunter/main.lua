@@ -1,18 +1,71 @@
-local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/storage_hunter/"
+local Genesis = {}
 
-local function loadModule(path)
-    return loadstring(game:HttpGet(BASE .. path))()
+local BASE_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/storage_hunter/"
+
+local function loadModule(relPath)
+    local localPath = "Roblox/games/storage_hunter/" .. relPath
+    if isfile and isfile(localPath) then
+        local fn, err = loadstring(readfile(localPath))
+        if fn then return fn() end
+    end
+    local fullUrl = BASE_URL .. relPath
+    local success, code = pcall(function()
+        return game:HttpGet(fullUrl)
+    end)
+    if success and code and #code > 0 then
+        local fn, err = loadstring(code)
+        if fn then return fn() end
+    end
+    return nil
 end
 
 local Config = loadModule("config.lua")
-Config.Load()
+local DB = loadModule("database/items.lua")
 
-local ResetModule = loadModule("functions/reset.lua")
-local WashModule = loadModule("functions/wash.lua")
-local AuctionModule = loadModule("functions/auction.lua")
-local TeleportModule = loadModule("functions/teleport.lua")
+local General = loadModule("functions/general.lua")
+local Auction = loadModule("functions/auction.lua")
+local Loot = loadModule("functions/loot.lua")
+local Fishing = loadModule("functions/fishing.lua")
+local Processing = loadModule("functions/processing.lua")
+local Shop = loadModule("functions/shop.lua")
+local Reward = loadModule("functions/reward.lua")
+local Quests = loadModule("functions/quests.lua")
+local Index = loadModule("functions/index.lua")
+local Utilities = loadModule("functions/utilities.lua")
+local Optimization = loadModule("functions/optimization.lua")
+
 local UI = loadModule("ui.lua")
 
-UI.Create(Config, ResetModule, WashModule, AuctionModule, TeleportModule)
+local Modules = {
+    Config = Config,
+    DB = DB,
+    General = General,
+    Auction = Auction,
+    Loot = Loot,
+    Fishing = Fishing,
+    Processing = Processing,
+    Shop = Shop,
+    Reward = Reward,
+    Quests = Quests,
+    Index = Index,
+    Utilities = Utilities,
+    Optimization = Optimization
+}
 
-warn("[GENESIS] Storage Hunter Hub loaded successfully!")
+if General and General.Init then General.Init(Config) end
+if Auction and Auction.Init then Auction.Init(Config, DB) end
+if Loot and Loot.Init then Loot.Init(Config, DB) end
+if Fishing and Fishing.Init then Fishing.Init(Config, DB) end
+if Processing and Processing.Init then Processing.Init(Config, DB) end
+if Shop and Shop.Init then Shop.Init(Config, DB) end
+if Reward and Reward.Init then Reward.Init(Config, DB) end
+if Quests and Quests.Init then Quests.Init(Config, DB) end
+if Index and Index.Init then Index.Init(Config, DB) end
+if Utilities and Utilities.Init then Utilities.Init(Config, DB) end
+if Optimization and Optimization.Init then Optimization.Init(Config) end
+
+if UI and UI.Init then
+    UI.Init(Config, DB, Modules)
+end
+
+return Genesis
