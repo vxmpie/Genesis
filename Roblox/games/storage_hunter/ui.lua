@@ -24,6 +24,29 @@ local THEME = {
     ToggleOn = Color3.fromRGB(255, 60, 75)
 }
 
+local function purgeAllGenesisGuis()
+    local containers = {}
+    pcall(function()
+        if gethui then table.insert(containers, gethui()) end
+    end)
+    pcall(function() table.insert(containers, CoreGui) end)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then table.insert(containers, pg) end
+    end)
+
+    for _, container in ipairs(containers) do
+        if container then
+            for _, child in ipairs(container:GetChildren()) do
+                local name = child.Name
+                if string.find(name, "Genesis") or name == "GenesisRedUI" or name == "GenesisCustomUI" or name == "GenesisHubGUI" then
+                    pcall(function() child:Destroy() end)
+                end
+            end
+        end
+    end
+end
+
 local function getGuiParent()
     local success, parent = pcall(function()
         return gethui and gethui() or CoreGui
@@ -33,12 +56,15 @@ local function getGuiParent()
 end
 
 function UI.Create(Config, ResetModule, WashModule, GradingModule)
+    if _G.GenesisUnload then
+        pcall(_G.GenesisUnload)
+    end
+
+    purgeAllGenesisGuis()
+
     local State = Config.GetState()
     local parent = getGuiParent()
     local connections = {}
-
-    local existing = parent:FindFirstChild("GenesisRedUI")
-    if existing then existing:Destroy() end
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "GenesisRedUI"
@@ -47,6 +73,47 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     ScreenGui.DisplayOrder = 9999
     ScreenGui.IgnoreGuiInset = true
     ScreenGui.Parent = parent
+
+    local function fullUnload()
+        State.AutoWash = false
+        State.AutoGrade = false
+        State.IsActive = false
+
+        if WashModule and WashModule.StopAutoWashLoop then
+            pcall(function() WashModule.StopAutoWashLoop() end)
+        end
+        if GradingModule and GradingModule.StopAutoGradeLoop then
+            pcall(function() GradingModule.StopAutoGradeLoop() end)
+        end
+        if ResetModule and ResetModule.StopTracker then
+            pcall(function() ResetModule.StopTracker(State) end)
+        end
+
+        for _, conn in ipairs(connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(connections)
+
+        purgeAllGenesisGuis()
+
+        _G.GenesisRunning = nil
+        _G.GenesisLoaded = nil
+        _G.GenesisUnload = nil
+        shared.GenesisRunning = nil
+        shared.GenesisLoaded = nil
+        shared.GenesisUnload = nil
+
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "GENESIS",
+                Text = "Genesis Hub completely unloaded!",
+                Duration = 3
+            })
+        end)
+    end
+
+    _G.GenesisUnload = fullUnload
+    shared.GenesisUnload = fullUnload
 
     local FloatingBtn = Instance.new("TextButton")
     FloatingBtn.Name = "FloatingBtn"
@@ -567,25 +634,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         })
     end)
     settingsCard:AddButton("Unload Genesis Hub", function()
-        WashModule.StopAutoWashLoop()
-        GradingModule.StopAutoGradeLoop()
-        ResetModule.StopTracker(State, CountdownLabel, StatusLabel)
-        for _, conn in ipairs(connections) do
-            pcall(function() conn:Disconnect() end)
-        end
-        table.clear(connections)
-        _G.GenesisRunning = nil
-        _G.GenesisLoaded = nil
-        shared.GenesisRunning = nil
-        shared.GenesisLoaded = nil
-        ScreenGui:Destroy()
-        pcall(function()
-            StarterGui:SetCore("SendNotification", {
-                Title = "GENESIS",
-                Text = "Genesis Hub completely unloaded!",
-                Duration = 3
-            })
-        end)
+        fullUnload()
     end)
 
     TabButtons["wash"].BackgroundColor3 = THEME.Primary

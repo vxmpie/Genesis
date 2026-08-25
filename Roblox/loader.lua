@@ -2,6 +2,10 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
+if _G.GenesisUnload then
+    pcall(_G.GenesisUnload)
+end
+
 print("[GENESIS] LOADER EXECUTED - Checking game compatibility...")
 
 pcall(function()

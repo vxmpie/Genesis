@@ -1,3 +1,7 @@
+if _G.GenesisUnload then
+    pcall(_G.GenesisUnload)
+end
+
 local BASE_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/storage_hunter/"
 
 local function loadModule(relPath)
