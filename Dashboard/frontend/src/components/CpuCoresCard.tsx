@@ -6,7 +6,6 @@ export const CpuCoresCard: React.FC = () => {
   const metrics = useDashboardStore((s) => s.metrics);
   const perCore = metrics?.cpu?.per_core || [];
   const cpuCount = metrics?.cpu?.count || 16;
-  const cpuGhz = metrics?.cpu?.frequency_ghz || 2.5;
   const cpuModel = (metrics?.cpu as any)?.model || '12th Gen Intel Core i5-12500H';
 
   const pCores = perCore.slice(0, 8);
@@ -26,7 +25,7 @@ export const CpuCoresCard: React.FC = () => {
               {cpuModel}
             </span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-300 border border-white/[0.08] inline-block mt-0.5 sm:mt-0">
-              12 Cores / {cpuCount} Threads @ {cpuGhz.toFixed(1)} GHz
+              12 Cores (4P + 8E) • {cpuCount} Threads @ 2.5 – 4.5 GHz
             </span>
           </div>
         </div>

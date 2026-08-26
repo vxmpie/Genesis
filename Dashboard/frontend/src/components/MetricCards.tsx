@@ -82,7 +82,6 @@ export const MetricCards: React.FC = () => {
   const metrics = useDashboardStore((s) => s.metrics);
 
   const cpuPct = metrics?.cpu?.total_percent || 0;
-  const cpuGhz = metrics?.cpu?.frequency_ghz;
   const cpuCount = metrics?.cpu?.count || 16;
 
   const ramPct = metrics?.ram?.percent || 0;
@@ -124,15 +123,15 @@ export const MetricCards: React.FC = () => {
       <MetricRing
         percent={cpuPct}
         label="CPU Load"
-        sublabel={`${cpuCount} Cores • ${cpuGhz ? cpuGhz.toFixed(1) : '2.5'} GHz`}
+        sublabel={`12 Cores • ${cpuCount} Threads`}
         valueDisplay={Math.round(cpuPct)}
         unit="%"
         colorClass={cpuColor}
         glowClass={cpuGlow}
         icon={<Cpu className="w-3.5 h-3.5 text-genesis-accent" />}
       >
-        <div className="w-full text-center text-[11px] font-mono text-slate-200 font-semibold">
-          {cpuGhz ? `${cpuGhz.toFixed(1)} GHz Frequency` : '2.5 GHz Frequency'}
+        <div className="w-full text-center text-[10px] font-mono text-slate-300 font-semibold tracking-tight truncate px-1" title="12th Gen Intel Core i5-12500H @ 2.5 – 4.5 GHz">
+          i5-12500H • 2.5 – 4.5 GHz
         </div>
       </MetricRing>
 

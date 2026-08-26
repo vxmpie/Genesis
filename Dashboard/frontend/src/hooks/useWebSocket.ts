@@ -1,12 +1,12 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useDashboardStore } from '../store/useDashboard';
 
-export function useWebSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const pendingCommandsRef = useRef<{ command: string; payload: Record<string, any> }[]>([]);
-  const reconnectTimeoutRef = useRef<any>(null);
+// Shared module-level singleton WebSocket connection
+let globalWs: WebSocket | null = null;
+let reconnectTimer: any = null;
+let pendingCommands: { command: string; payload: Record<string, any> }[] = [];
 
-  const token = useDashboardStore((s) => s.token);
+export function useWebSocket() {
   const setConnected = useDashboardStore((s) => s.setConnected);
   const setAuthenticated = useDashboardStore((s) => s.setAuthenticated);
   const updateInitPayload = useDashboardStore((s) => s.updateInitPayload);
@@ -18,46 +18,47 @@ export function useWebSocket() {
   const setIsScanningClean = useDashboardStore((s) => s.setIsScanningClean);
 
   const connect = useCallback(() => {
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+    if (globalWs && (globalWs.readyState === WebSocket.OPEN || globalWs.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
+    const currentToken = useDashboardStore.getState().token;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const host = window.location.host;
-    const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-    // In local dev vite mode (port 5173), proxy to port 7700 or use current host
+    const tokenQuery = currentToken ? `?token=${encodeURIComponent(currentToken)}` : '';
     const url = host.includes('5173') 
       ? `ws://127.0.0.1:7700/ws${tokenQuery}`
       : `${proto}://${host}/ws${tokenQuery}`;
 
     try {
       const ws = new WebSocket(url);
-      wsRef.current = ws;
+      globalWs = ws;
 
       ws.onopen = () => {
         setConnected(true);
-        if (token) {
-          ws.send(JSON.stringify({ command: 'auth', token }));
+        const tok = useDashboardStore.getState().token;
+        if (tok) {
+          ws.send(JSON.stringify({ command: 'auth', token: tok }));
         }
 
         // Flush pending queued commands
-        if (pendingCommandsRef.current.length > 0) {
-          pendingCommandsRef.current.forEach(({ command, payload }) => {
-            ws.send(JSON.stringify({ command, token, ...payload }));
+        if (pendingCommands.length > 0) {
+          pendingCommands.forEach(({ command, payload }) => {
+            ws.send(JSON.stringify({ command, token: tok, ...payload }));
           });
-          pendingCommandsRef.current = [];
+          pendingCommands = [];
         }
       };
 
       ws.onclose = () => {
         setConnected(false);
-        wsRef.current = null;
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = setTimeout(connect, 1500);
+        globalWs = null;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, 1500);
       };
 
       ws.onerror = () => {
-        ws.close();
+        if (ws.readyState === WebSocket.OPEN) ws.close();
       };
 
       ws.onmessage = (e) => {
@@ -70,9 +71,9 @@ export function useWebSocket() {
       };
     } catch (err) {
       console.error('WS Connection error:', err);
-      reconnectTimeoutRef.current = setTimeout(connect, 2000);
+      reconnectTimer = setTimeout(connect, 2000);
     }
-  }, [token, setConnected]);
+  }, [setConnected]);
 
   const handleIncomingMessage = (data: any) => {
     switch (data.type) {
@@ -90,11 +91,19 @@ export function useWebSocket() {
           }
         }
         break;
+      case 'auth_success':
+        setAuthenticated(true);
+        break;
       case 'auth_result':
-        setAuthenticated(data.authenticated);
-        if (!data.authenticated) {
-          addToast('error', 'Session locked: Invalid PIN');
-        }
+        setAuthenticated(!!data.authenticated);
+        break;
+      case 'auth_failed':
+        setAuthenticated(false);
+        addToast('error', 'Authentication failed');
+        break;
+      case 'auth_required':
+        setAuthenticated(false);
+        useDashboardStore.getState().setAuthModalOpen(true);
         break;
       case 'deep_clean_preview':
         setIsScanningClean(false);
@@ -125,15 +134,16 @@ export function useWebSocket() {
 
   const sendCommand = useCallback(
     (command: string, payload: Record<string, any> = {}) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ command, token, ...payload }));
+      const currentToken = useDashboardStore.getState().token;
+      if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+        globalWs.send(JSON.stringify({ command, token: currentToken, ...payload }));
       } else {
-        pendingCommandsRef.current.push({ command, payload });
+        pendingCommands.push({ command, payload });
         addToast('info', 'Connecting... Command queued');
         connect();
       }
     },
-    [token, connect, addToast]
+    [connect, addToast]
   );
 
   useEffect(() => {
@@ -141,7 +151,7 @@ export function useWebSocket() {
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        if (!globalWs || globalWs.readyState !== WebSocket.OPEN) {
           connect();
         }
       }
@@ -151,10 +161,8 @@ export function useWebSocket() {
     window.addEventListener('focus', handleVisibility);
 
     return () => {
-      clearTimeout(reconnectTimeoutRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
-      if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);
 

@@ -1856,9 +1856,14 @@ async def roblox_ping_sampler_loop():
         await asyncio.sleep(10)
 
 
+_cpu_sampler_lock = threading.Lock()
+_latest_cpu_total = 0.0
+_latest_cpu_per_core = [0.0] * 16
+_latest_cpu_freq_ghz = 2.5
 _smoothed_per_core = None
 _smoothed_cpu_total = None
 _cpu_brand_name = None
+_cpu_sampler_task = None
 
 
 def get_cpu_brand() -> str:
@@ -1875,29 +1880,56 @@ def get_cpu_brand() -> str:
     return _cpu_brand_name
 
 
+def _sample_cpu_sync():
+    global _latest_cpu_total, _latest_cpu_per_core, _latest_cpu_freq_ghz, _smoothed_per_core, _smoothed_cpu_total
+    try:
+        raw_per_core = psutil.cpu_percent(interval=None, percpu=True)
+        raw_total = psutil.cpu_percent(interval=None)
+        freq = psutil.cpu_freq()
+        ghz = round(freq.current / 1000, 2) if freq else 2.5
+
+        if _smoothed_per_core is None or len(_smoothed_per_core) != len(raw_per_core):
+            _smoothed_per_core = [float(x) for x in raw_per_core]
+            _smoothed_cpu_total = float(raw_total)
+        else:
+            # 50/50 Exponential Moving Average over strict 1s interval provides Task Manager grade smoothness
+            _smoothed_per_core = [
+                round(_smoothed_per_core[i] * 0.50 + raw_per_core[i] * 0.50, 1)
+                for i in range(len(raw_per_core))
+            ]
+            _smoothed_cpu_total = round(_smoothed_cpu_total * 0.50 + raw_total * 0.50, 1)
+
+        with _cpu_sampler_lock:
+            _latest_cpu_total = _smoothed_cpu_total
+            _latest_cpu_per_core = list(_smoothed_per_core)
+            _latest_cpu_freq_ghz = ghz
+    except Exception:
+        pass
+
+
+async def cpu_sampler_loop():
+    """Single master background sampler for CPU metrics running on a strict 1.0s clock."""
+    psutil.cpu_percent(interval=None, percpu=True)  # Initialize baseline tick
+    while True:
+        try:
+            await asyncio.to_thread(_sample_cpu_sync)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+
 def get_system_metrics() -> dict:
-    global _smoothed_per_core, _smoothed_cpu_total
-    raw_per_core = psutil.cpu_percent(interval=0, percpu=True)
-    raw_total = psutil.cpu_percent(interval=0)
-
-    if _smoothed_per_core is None or len(_smoothed_per_core) != len(raw_per_core):
-        _smoothed_per_core = [float(x) for x in raw_per_core]
-        _smoothed_cpu_total = float(raw_total)
-    else:
-        _smoothed_per_core = [
-            round(_smoothed_per_core[i] * 0.70 + raw_per_core[i] * 0.30, 1)
-            for i in range(len(raw_per_core))
-        ]
-        _smoothed_cpu_total = round(_smoothed_cpu_total * 0.70 + raw_total * 0.30, 1)
-
-    cpu_per_core = _smoothed_per_core
-    cpu_total = _smoothed_cpu_total
+    with _cpu_sampler_lock:
+        cpu_total = _latest_cpu_total
+        cpu_per_core = list(_latest_cpu_per_core)
+        cpu_ghz = _latest_cpu_freq_ghz
 
     mem = psutil.virtual_memory()
     disk_io = psutil.disk_io_counters()
     net_io = psutil.net_io_counters()
     swap = psutil.swap_memory()
-    freq = psutil.cpu_freq()
     boot_time = psutil.boot_time()
     uptime_sec = time.time() - boot_time
     hours = int(uptime_sec // 3600)
@@ -1913,10 +1945,10 @@ def get_system_metrics() -> dict:
             "model": get_cpu_brand(),
             "total_percent": cpu_total,
             "per_core": cpu_per_core,
-            "core_count": len(cpu_per_core),
-            "p_cores": cpu_per_core[:8],
-            "e_cores": cpu_per_core[8:],
-            "frequency_ghz": round(freq.current / 1000, 2) if freq else 2.5,
+            "core_count": len(cpu_per_core) if cpu_per_core else 16,
+            "p_cores": cpu_per_core[:8] if cpu_per_core else [],
+            "e_cores": cpu_per_core[8:] if cpu_per_core else [],
+            "frequency_ghz": cpu_ghz,
         },
         "ram": {
             "total_gb": round(mem.total / (1024 ** 3), 1),
@@ -2806,7 +2838,8 @@ async def chart_sampler_loop():
     """Continuous 24/7 background telemetry sampler for RAM & CPU 30-minute chart buffer."""
     while True:
         try:
-            cpu_pct = psutil.cpu_percent(interval=0)
+            with _cpu_sampler_lock:
+                cpu_pct = _latest_cpu_total
             mem = psutil.virtual_memory()
             update_chart_buffer(mem.percent, cpu_pct)
         except Exception:
@@ -2816,8 +2849,8 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task
-    psutil.cpu_percent(interval=0, percpu=True)
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task, _cpu_sampler_task
+    _cpu_sampler_task = asyncio.create_task(cpu_sampler_loop())
     _ping_sampler_task = asyncio.create_task(roblox_ping_sampler_loop())
     _process_sampler_task = asyncio.create_task(process_sampler_loop())
     _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
@@ -2831,6 +2864,8 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Autonomous Core started")
 
     yield
+    if _cpu_sampler_task:
+        _cpu_sampler_task.cancel()
     if _ping_sampler_task:
         _ping_sampler_task.cancel()
     if _process_sampler_task:

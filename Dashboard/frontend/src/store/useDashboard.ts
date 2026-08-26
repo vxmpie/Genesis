@@ -116,7 +116,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setAuthRequired: (authRequired) => set({ authRequired }),
   setToken: (token) => {
     localStorage.setItem('genesis_auth_token', token);
-    set({ token });
+    set({ token, authenticated: !!token });
   },
   setUptimeSeconds: (uptimeSeconds) => set({ uptimeSeconds }),
   setChartZoom: (chartZoom) => set({ chartZoom }),
@@ -161,7 +161,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       }
       return {
         authRequired: data.auth_required ?? s.authRequired,
-        authenticated: data.authenticated ?? s.authenticated,
+        authenticated: s.authenticated || (data.authenticated ?? false),
         hardening: data.hardening ?? s.hardening,
         defender: data.defender ?? s.defender,
         observatory: data.observatory ?? s.observatory,

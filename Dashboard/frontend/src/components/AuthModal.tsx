@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, X } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
-import { useWebSocket } from '../hooks/useWebSocket';
 
 interface AuthModalProps {
   onSuccess?: () => void;
@@ -13,8 +12,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const setToken = useDashboardStore((s) => s.setToken);
   const setAuthenticated = useDashboardStore((s) => s.setAuthenticated);
   const addToast = useDashboardStore((s) => s.addToast);
-
-  const { sendCommand } = useWebSocket();
 
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -41,8 +38,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       if (res.ok && data.token) {
         setToken(data.token);
         setAuthenticated(true);
-        sendCommand('auth', { token: data.token });
-        addToast('system', 'Security Core Unlocked (PIN 8666 Verified)');
+        addToast('system', 'Security Core Unlocked');
         setOpen(false);
         setPin('');
         if (onSuccess) onSuccess();
