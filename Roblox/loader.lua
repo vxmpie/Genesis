@@ -6,35 +6,26 @@ if _G.GenesisUnload then
     pcall(_G.GenesisUnload)
 end
 
-print("[GENESIS] LOADER EXECUTED - Checking game compatibility...")
+print("[GENESIS] LOADER EXECUTED - Initializing Core Genesis Infrastructure...")
 
 pcall(function()
     game:GetService("StarterGui"):SetCore("SendNotification", {
         Title = "GENESIS",
-        Text = "Executing Genesis Loader...",
+        Text = "Executing Genesis Core Loader...",
         Duration = 4
     })
 end)
 
--- Auto-Sync Place ID with Genesis Autonomous Core Dashboard
-task.spawn(function()
-    pcall(function()
-        local req = (syn and syn.request) or (http and http.request) or http_request or request
-        if req then
-            local playerName = "Player"
-            pcall(function() playerName = game:GetService("Players").LocalPlayer.Name end)
-            req({
-                Url = "http://127.0.0.1:7700/api/bot/heartbeat",
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = game:GetService("HttpService"):JSONEncode({
-                    place_id = game.PlaceId,
-                    job_id = game.JobId,
-                    player = playerName,
-                })
-            })
+local UTILS_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/utils/reconnect.lua"
+pcall(function()
+    local recCode = game:HttpGet(UTILS_URL .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999)))
+    local recFn = loadstring(recCode)
+    if recFn then
+        local recMod = recFn()
+        if recMod and recMod.Start then
+            recMod.Start()
         end
-    end)
+    end
 end)
 
 local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/"
@@ -47,7 +38,7 @@ local games = {
 local file = games[game.PlaceId] or games[game.GameId] or games[game.CreatorId]
 
 if file then
-    print("[GENESIS] Game matched: Storage Hunters (" .. tostring(game.PlaceId) .. "). Loading main hub...")
+    print("[GENESIS] Game matched: (" .. tostring(game.PlaceId) .. "). Loading hub...")
     local url = BASE .. file .. "?t=" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
     loadstring(game:HttpGet(url))()
 else

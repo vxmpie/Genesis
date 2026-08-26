@@ -1,6 +1,3 @@
--- =========================================================================
--- GENESIS AUTONOMOUS RECONNECT & ANTI-AFK MODULE
--- =========================================================================
 local Reconnect = {}
 
 local GuiService = game:GetService("GuiService")
@@ -66,25 +63,22 @@ local function executeRejoin(reason)
     end)
 end
 
-function Reconnect.Start(configState)
+function Reconnect.Start()
     if initialized then return end
     initialized = true
 
-    print("[GENESIS] Initializing Auto-Reconnect & Anti-AFK Watchdog...")
+    print("[GENESIS] Universal Auto-Reconnect & Anti-AFK Active.")
 
-    -- 1. Anti-AFK Protection (Prevents 20-minute idle kicks)
     pcall(function()
         LocalPlayer.Idled:Connect(function()
             pcall(function()
                 VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
                 task.wait(0.2)
                 VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-                print("[GENESIS ANTI-AFK] Virtual input simulated.")
             end)
         end)
     end)
 
-    -- 2. GuiService Error Hook (Network disconnects, Error 277/279/267)
     pcall(function()
         GuiService.ErrorMessageChanged:Connect(function(errorMessage)
             if errorMessage and #errorMessage > 0 then
@@ -96,7 +90,6 @@ function Reconnect.Start(configState)
         end)
     end)
 
-    -- 3. CoreGui Prompt Watchdog (Disconnect / Reload Modals)
     task.spawn(function()
         pcall(function()
             local promptGui = CoreGui:WaitForChild("RobloxPromptGui", 10)
@@ -104,7 +97,7 @@ function Reconnect.Start(configState)
                 local promptOverlay = promptGui:WaitForChild("promptOverlay", 10)
                 if promptOverlay then
                     promptOverlay.ChildAdded:Connect(function(child)
-                        if child.Name == "ErrorPrompt" or child.Name:find("Prompt") then
+                        if child.Name == "ErrorPrompt" or string.find(child.Name, "Prompt") then
                             task.wait(0.5)
                             executeRejoin("Roblox ErrorPrompt Detected: " .. child.Name)
                         end
