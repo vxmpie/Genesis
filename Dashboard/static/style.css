@@ -48,6 +48,8 @@
 html {
     font-size: 14px;
     scroll-behavior: smooth;
+    overflow-x: hidden;
+    width: 100%;
 }
 
 body {
@@ -55,6 +57,8 @@ body {
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
+    overflow-x: hidden;
+    width: 100%;
     -webkit-font-smoothing: antialiased;
 }
 
@@ -168,14 +172,17 @@ body {
     box-shadow: 0 2px 10px rgba(255, 60, 60, 0.2);
 }
 
-.nav-tab .icon {
-    stroke: currentColor;
-    transition: var(--transition);
+.nav-tab .tab-short {
+    display: none;
 }
 
-.nav-tab.active .icon {
-    stroke: var(--accent);
-    filter: drop-shadow(0 0 6px var(--accent));
+.nav-tab .tab-full {
+    display: inline;
+}
+
+.nav-tab .tab-label {
+    display: inline-flex;
+    align-items: center;
 }
 
 /* Vector SVG Utilities */
@@ -3136,31 +3143,48 @@ body {
         padding: 4px 8px;
     }
 
-    /* Mobile Workspace Tabs: Full-width Smooth Horizontal Bar */
+    /* Mobile Workspace Tabs: 4-Column Fixed Grid (Zero Horizontal Scrolling!) */
     .nav-workspaces {
         order: 3;
         width: 100%;
-        display: flex;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        padding: 4px 2px;
-        gap: 6px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+        padding: 3px;
+        overflow: hidden; /* ZERO HORIZONTAL SCROLL */
         border-top: 1px solid rgba(255, 255, 255, 0.05);
         margin-top: 2px;
-    }
-
-    .nav-workspaces::-webkit-scrollbar {
-        display: none;
+        box-sizing: border-box;
     }
 
     .nav-tab {
-        flex: 1 0 auto;
-        padding: 6px 12px;
-        font-size: 11px;
-        white-space: nowrap;
-        text-align: center;
+        width: 100%;
+        min-width: 0;
+        padding: 6px 2px;
+        font-size: 10.5px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
         justify-content: center;
+        gap: 4px;
+        text-align: center;
+        border-radius: 6px;
+        touch-action: manipulation;
+    }
+
+    .nav-tab .tab-full {
+        display: none;
+    }
+
+    .nav-tab .tab-short {
+        display: inline;
+        white-space: nowrap;
+    }
+
+    .nav-tab .icon {
+        width: 13px;
+        height: 13px;
+        flex-shrink: 0;
     }
 
     /* Dashboard Layout on Mobile */
