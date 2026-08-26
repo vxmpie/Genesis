@@ -301,6 +301,15 @@ def add_event(event_type: str, message: str):
     if len(event_history) > MAX_HISTORY:
         del event_history[: len(event_history) - MAX_HISTORY]
     _save_history(event_history)
+
+    # Immediately push to all active WebSockets
+    try:
+        if 'manager' in globals() and manager.active_connections:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(manager.broadcast({"type": "event", "event": entry}))
+    except Exception:
+        pass
     return entry
 
 
@@ -986,6 +995,10 @@ def ram_boost(force_standby: bool = True) -> dict:
         "breakdown_after": breakdown_after,
         "duration_ms": duration_ms,
     }
+
+    global _last_boost_time, _last_boost_result
+    _last_boost_time = time.time()
+    _last_boost_result = result
 
     msg_parts = [f"Boost: freed {freed_mb} MB RAM ({freed_count} procs in {duration_ms}ms)"]
     if standby_purged:
@@ -2429,10 +2442,54 @@ async def mumu_game_watchdog_loop():
 # ---------------------------------------------------------------------------
 # Auto-Boost Background Task
 # ---------------------------------------------------------------------------
+def _get_initial_last_boost_time():
+    for e in reversed(event_history):
+        if e.get("type") == "boost":
+            epoch = e.get("epoch")
+            if epoch:
+                return epoch
+            try:
+                dt = datetime.strptime(e.get("time", ""), "%Y-%m-%d %H:%M:%S")
+                return dt.timestamp()
+            except Exception:
+                pass
+    return None
+
+
 _auto_boost_task = None
-_last_boost_time = None
+_last_boost_time = _get_initial_last_boost_time()
 _last_boost_result = None
 _last_scheduled_slot = None
+
+
+def get_next_boost_info() -> dict:
+    cfg = CONFIG.get("auto_boost", {})
+    if not cfg.get("enabled", False):
+        return {"status": "disabled", "text": "Disabled (Sentinel Paused)"}
+
+    mode = cfg.get("mode", "scheduled")
+    if mode == "auto":
+        thresh = cfg.get("threshold_percent", 40)
+        mem = psutil.virtual_memory()
+        return {
+            "status": "threshold",
+            "threshold": thresh,
+            "current": mem.percent,
+            "text": f"When RAM > {thresh}% (Now: {mem.percent}%)",
+        }
+    else:
+        interval_min = max(1, cfg.get("interval_minutes", 60))
+        now = datetime.now()
+        passed_mins = now.minute % interval_min
+        mins_remaining = interval_min - passed_mins
+        next_dt = now + timedelta(minutes=mins_remaining)
+        next_time_str = next_dt.strftime("%H:%M")
+        return {
+            "status": "scheduled",
+            "next_time": next_time_str,
+            "in_minutes": mins_remaining,
+            "text": f"{next_time_str} (in {mins_remaining}m)",
+        }
 
 
 async def auto_boost_loop():
@@ -3109,11 +3166,13 @@ async def websocket_endpoint(ws: WebSocket):
                     "enabled": CONFIG["auto_boost"]["enabled"],
                     "mode": CONFIG["auto_boost"]["mode"],
                     "threshold": CONFIG["auto_boost"]["threshold_percent"],
+                    "interval_minutes": CONFIG["auto_boost"].get("interval_minutes", 60),
                     "last_boost_time": (
                         datetime.fromtimestamp(_last_boost_time).strftime("%H:%M:%S")
                         if _last_boost_time else None
                     ),
                     "last_boost_result": _last_boost_result,
+                    "next_boost": get_next_boost_info(),
                 },
             }
 
@@ -3165,8 +3224,27 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         return
 
     if cmd == "boost":
-        result = ram_boost(force_standby=True)
-        await ws.send_json({"type": "boost_result", "result": result})
+        result = await asyncio.to_thread(ram_boost, True)
+        summary = get_session_summary()
+        await ws.send_json({"type": "boost_result", "result": result, "summary": summary})
+        # Broadcast updated summary and boost info to all connected dashboards immediately
+        await manager.broadcast({
+            "type": "metrics",
+            "metrics": get_metrics_with_rates(),
+            "summary": summary,
+            "auto_boost": {
+                "enabled": CONFIG["auto_boost"]["enabled"],
+                "mode": CONFIG["auto_boost"]["mode"],
+                "threshold": CONFIG["auto_boost"]["threshold_percent"],
+                "interval_minutes": CONFIG["auto_boost"].get("interval_minutes", 60),
+                "last_boost_time": (
+                    datetime.fromtimestamp(_last_boost_time).strftime("%H:%M:%S")
+                    if _last_boost_time else None
+                ),
+                "last_boost_result": _last_boost_result,
+                "next_boost": get_next_boost_info(),
+            }
+        })
 
     elif cmd in ("update_config", "set_auto_boost", "toggle_auto_boost", "set_threshold", "set_boost_mode", "set_boost_interval"):
         payload = data.get("config", {})

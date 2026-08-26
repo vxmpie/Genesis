@@ -124,12 +124,19 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
         </div>
       </div>
 
-      {/* Boost Button & Last Boost Status */}
+      {/* Boost Status Info (Last Boost & Next Scheduled Boost) */}
       <div className="mt-4 pt-2 border-t border-white/[0.06]">
-        <div className="text-[10px] font-mono text-slate-400 mb-2 truncate flex items-center justify-between">
-          <span>Last boost: {autoBoost?.last_boost_time || 'Never'}</span>
-          <span className="text-genesis-accent text-[9px]">NtSetSystemInfo</span>
+        <div className="text-[11px] font-mono mb-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-2 rounded bg-black/30 border border-white/[0.04]">
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="text-slate-500">Last:</span>
+            <span className="text-genesis-accent font-bold">{autoBoost?.last_boost_time || 'Never'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="text-slate-500">Next:</span>
+            <span className="text-genesis-cyan font-bold">{autoBoost?.next_boost?.text || (enabled ? 'Scheduled' : 'Disabled')}</span>
+          </div>
         </div>
+
         <button
           onClick={handleBoost}
           disabled={boosting}

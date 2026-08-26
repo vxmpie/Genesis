@@ -167,6 +167,12 @@ export interface AutoBoostConfig {
     freed_temp_mb: number;
     deleted_temp_files: number;
   } | null;
+  next_boost?: {
+    status: string;
+    text: string;
+    next_time?: string;
+    in_minutes?: number;
+  } | null;
 }
 
 export interface DeepCleanPreviewItem {
