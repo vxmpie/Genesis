@@ -3,9 +3,11 @@ import { Cpu, Zap, Activity } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 export const CpuCoresCard: React.FC = () => {
-  const perCore = useDashboardStore((s) => s.metrics?.cpu?.per_core) || [];
-  const cpuCount = useDashboardStore((s) => s.metrics?.cpu?.count) || 16;
-  const cpuGhz = useDashboardStore((s) => s.metrics?.cpu?.frequency_ghz);
+  const metrics = useDashboardStore((s) => s.metrics);
+  const perCore = metrics?.cpu?.per_core || [];
+  const cpuCount = metrics?.cpu?.count || 16;
+  const cpuGhz = metrics?.cpu?.frequency_ghz || 2.5;
+  const cpuModel = (metrics?.cpu as any)?.model || '12th Gen Intel Core i5-12500H';
 
   const pCores = perCore.slice(0, 8);
   const eCores = perCore.slice(8, 16);
@@ -15,16 +17,18 @@ export const CpuCoresCard: React.FC = () => {
 
   return (
     <div className="cyber-card p-4">
-      {/* Main Header */}
+      {/* Main Header with Full CPU Processor String */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-2 border-b border-white/[0.06]">
         <div className="flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-genesis-cyan" />
-          <span className="text-xs font-bold text-white uppercase tracking-wider">
-            CPU Core Telemetry Matrix
-          </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-400 border border-white/[0.08]">
-            {cpuCount} Logical Threads {cpuGhz ? `• ${cpuGhz.toFixed(1)} GHz` : ''}
-          </span>
+          <Cpu className="w-4 h-4 text-genesis-cyan flex-shrink-0" />
+          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-xs font-extrabold text-white uppercase tracking-wider">
+              {cpuModel}
+            </span>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-300 border border-white/[0.08] inline-block mt-0.5 sm:mt-0">
+              12 Cores / {cpuCount} Threads @ {cpuGhz.toFixed(1)} GHz
+            </span>
+          </div>
         </div>
 
         {/* Global Averages */}
@@ -49,13 +53,13 @@ export const CpuCoresCard: React.FC = () => {
               <Zap className="w-3.5 h-3.5" />
               P-Cores (Threads 0 – 7)
             </span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-              High Performance
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 font-bold">
+              Performance
             </span>
           </div>
 
-          {/* 8 P-Core Vertical Bars */}
-          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-32 pt-2">
+          {/* 8 P-Core Vertical Bars (GPU Accelerated) */}
+          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-28 pt-2">
             {Array.from({ length: 8 }).map((_, i) => {
               const load = pCores[i] !== undefined ? Math.round(pCores[i]) : 0;
               return (
@@ -66,15 +70,12 @@ export const CpuCoresCard: React.FC = () => {
                   </span>
 
                   {/* Load Bar Container */}
-                  <div
-                    className="w-full bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-red-500/40"
-                    style={{ height: '84px' }}
-                  >
+                  <div className="w-full h-20 bg-white/[0.04] rounded-t-md overflow-hidden relative border-b border-red-500/40">
                     <div
-                      className="w-full bg-gradient-to-t from-red-600 via-genesis-accent to-orange-400 rounded-t-sm transition-all duration-300 ease-out"
+                      className="w-full h-full bg-gradient-to-t from-red-600 via-genesis-accent to-orange-400 rounded-t-sm will-change-transform transition-transform duration-300 ease-out"
                       style={{
-                        height: `${Math.min(Math.max(load, 4), 100)}%`,
-                        boxShadow: load > 15 ? '0 0 10px rgba(255, 60, 60, 0.5)' : 'none',
+                        transform: `scaleY(${Math.min(Math.max(load / 100, 0.04), 1)})`,
+                        transformOrigin: 'bottom',
                       }}
                       title={`P-Core #${i}: ${load}%`}
                     />
@@ -97,13 +98,13 @@ export const CpuCoresCard: React.FC = () => {
               <Activity className="w-3.5 h-3.5" />
               E-Cores (Cores 8 – 15)
             </span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              High Efficiency
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
+              Efficiency
             </span>
           </div>
 
-          {/* 8 E-Core Vertical Bars */}
-          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-32 pt-2">
+          {/* 8 E-Core Vertical Bars (GPU Accelerated) */}
+          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-28 pt-2">
             {Array.from({ length: 8 }).map((_, i) => {
               const coreIdx = i + 8;
               const load = eCores[i] !== undefined ? Math.round(eCores[i]) : 0;
@@ -115,15 +116,12 @@ export const CpuCoresCard: React.FC = () => {
                   </span>
 
                   {/* Load Bar Container */}
-                  <div
-                    className="w-full bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-genesis-cyan/40"
-                    style={{ height: '84px' }}
-                  >
+                  <div className="w-full h-20 bg-white/[0.04] rounded-t-md overflow-hidden relative border-b border-genesis-cyan/40">
                     <div
-                      className="w-full bg-gradient-to-t from-blue-600 via-genesis-cyan to-teal-300 rounded-t-sm transition-all duration-300 ease-out"
+                      className="w-full h-full bg-gradient-to-t from-blue-600 via-genesis-cyan to-teal-300 rounded-t-sm will-change-transform transition-transform duration-300 ease-out"
                       style={{
-                        height: `${Math.min(Math.max(load, 4), 100)}%`,
-                        boxShadow: load > 15 ? '0 0 10px rgba(0, 229, 255, 0.5)' : 'none',
+                        transform: `scaleY(${Math.min(Math.max(load / 100, 0.04), 1)})`,
+                        transformOrigin: 'bottom',
                       }}
                       title={`E-Core #${coreIdx}: ${load}%`}
                     />

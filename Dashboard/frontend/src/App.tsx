@@ -85,20 +85,12 @@ export function App() {
           />
         )}
 
-        {/* 4 Hardware Metric Rings (Overview, Analytics) */}
-        {(activeView === 'overview' || activeView === 'analytics') && <MetricCards />}
-
-        {/* CPU 16-Core Per-Core Chart (Overview, Analytics) */}
-        {(activeView === 'overview' || activeView === 'analytics') && <CpuCoresCard />}
-
-        {/* Hardening Status (Overview, System) */}
-        {(activeView === 'overview' || activeView === 'system') && (
-          <HardeningCard onRefresh={() => sendCommand('check_hardening')} />
-        )}
-
-        {/* Middle Two-Column Grid: Auto-Boost + MuMu */}
+        {/* Top Priority Grid: MuMu Instances & Auto-Boost Core (Overview & Bots) */}
         {(activeView === 'overview' || activeView === 'bots') && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <MuMuCard
+              onTrimMemory={(index) => requireAuthGuard(() => sendCommand('trim_mumu', { instance: index }))}
+            />
             <AutoBoostCard
               onToggle={(enabled) => sendCommand('set_auto_boost', { enabled })}
               onSetThreshold={(threshold) => sendCommand('set_threshold', { threshold })}
@@ -106,10 +98,18 @@ export function App() {
               onSetInterval={(interval_minutes) => sendCommand('set_boost_interval', { interval_minutes })}
               onBoostNow={() => requireAuthGuard(() => sendCommand('boost'))}
             />
-            <MuMuCard
-              onTrimMemory={(index) => requireAuthGuard(() => sendCommand('trim_mumu', { instance: index }))}
-            />
           </div>
+        )}
+
+        {/* 4 Hardware Metric Rings (Overview, Analytics) */}
+        {(activeView === 'overview' || activeView === 'analytics') && <MetricCards />}
+
+        {/* CPU 16-Core Matrix (Overview, Analytics) */}
+        {(activeView === 'overview' || activeView === 'analytics') && <CpuCoresCard />}
+
+        {/* Hardening Status (Overview, System) */}
+        {(activeView === 'overview' || activeView === 'system') && (
+          <HardeningCard onRefresh={() => sendCommand('check_hardening')} />
         )}
 
         {/* Deep Clean Engine (Overview, System) */}

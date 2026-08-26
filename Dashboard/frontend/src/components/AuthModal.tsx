@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, X } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface AuthModalProps {
   onSuccess?: () => void;
@@ -11,6 +12,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const setOpen = useDashboardStore((s) => s.setAuthModalOpen);
   const setToken = useDashboardStore((s) => s.setToken);
   const setAuthenticated = useDashboardStore((s) => s.setAuthenticated);
+  const addToast = useDashboardStore((s) => s.addToast);
+
+  const { sendCommand } = useWebSocket();
 
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -37,6 +41,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       if (res.ok && data.token) {
         setToken(data.token);
         setAuthenticated(true);
+        sendCommand('auth', { token: data.token });
+        addToast('system', 'Security Core Unlocked (PIN 8666 Verified)');
         setOpen(false);
         setPin('');
         if (onSuccess) onSuccess();
@@ -68,25 +74,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           <p className="text-xs text-slate-400 mt-1">Enter your Genesis PIN to unlock control permissions</p>
 
           <form onSubmit={handleSubmit} className="w-full mt-5 space-y-4">
-            <input
-              type="password"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="••••"
-              autoFocus
-              maxLength={12}
-              className="w-full px-4 py-2.5 bg-black/50 border border-white/15 rounded-lg text-center text-lg font-mono tracking-widest text-white outline-none focus:border-genesis-accent transition-all"
-            />
+            <div>
+              <input
+                type="password"
+                maxLength={8}
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="Enter PIN (e.g. 8666)"
+                autoFocus
+                className="w-full text-center tracking-widest text-lg font-mono py-2.5 px-4 bg-black/40 border border-white/10 rounded-lg text-white placeholder:text-slate-600 focus:outline-none focus:border-genesis-accent focus:ring-1 focus:ring-genesis-accent"
+              />
+              {error && <p className="text-xs text-red-400 mt-2 font-mono">{error}</p>}
+            </div>
 
-            {error && <div className="text-xs text-red-400 font-medium">{error}</div>}
-
-            <button
-              type="submit"
-              disabled={loading || !pin}
-              className="w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-red-600 to-genesis-accent hover:opacity-90 text-white shadow-glow-accent transition-all disabled:opacity-50"
-            >
-              {loading ? 'Verifying...' : 'Unlock Dashboard'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="flex-1 py-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 text-xs font-semibold border border-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 py-2 rounded-lg bg-gradient-to-r from-genesis-accent to-red-600 hover:brightness-110 text-white text-xs font-bold shadow-glow-accent transition-all disabled:opacity-50"
+              >
+                {loading ? 'Verifying...' : 'Unlock'}
+              </button>
+            </div>
           </form>
         </div>
       </div>

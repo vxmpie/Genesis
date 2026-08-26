@@ -1854,6 +1854,21 @@ async def roblox_ping_sampler_loop():
 
 _smoothed_per_core = None
 _smoothed_cpu_total = None
+_cpu_brand_name = None
+
+
+def get_cpu_brand() -> str:
+    global _cpu_brand_name
+    if _cpu_brand_name:
+        return _cpu_brand_name
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        raw = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+        _cpu_brand_name = raw.replace("(R)", "").replace("(TM)", "").replace("  ", " ").strip()
+    except Exception:
+        _cpu_brand_name = platform.processor() or "12th Gen Intel Core i5-12500H"
+    return _cpu_brand_name
 
 
 def get_system_metrics() -> dict:
@@ -1866,10 +1881,10 @@ def get_system_metrics() -> dict:
         _smoothed_cpu_total = float(raw_total)
     else:
         _smoothed_per_core = [
-            round(_smoothed_per_core[i] * 0.35 + raw_per_core[i] * 0.65, 1)
+            round(_smoothed_per_core[i] * 0.70 + raw_per_core[i] * 0.30, 1)
             for i in range(len(raw_per_core))
         ]
-        _smoothed_cpu_total = round(_smoothed_cpu_total * 0.35 + raw_total * 0.65, 1)
+        _smoothed_cpu_total = round(_smoothed_cpu_total * 0.70 + raw_total * 0.30, 1)
 
     cpu_per_core = _smoothed_per_core
     cpu_total = _smoothed_cpu_total
@@ -1891,12 +1906,13 @@ def get_system_metrics() -> dict:
             "uptime_seconds": int(uptime_sec),
         },
         "cpu": {
+            "model": get_cpu_brand(),
             "total_percent": cpu_total,
             "per_core": cpu_per_core,
             "core_count": len(cpu_per_core),
             "p_cores": cpu_per_core[:8],
             "e_cores": cpu_per_core[8:],
-            "frequency_ghz": round(freq.current / 1000, 2) if freq else 0.0,
+            "frequency_ghz": round(freq.current / 1000, 2) if freq else 2.5,
         },
         "ram": {
             "total_gb": round(mem.total / (1024 ** 3), 1),

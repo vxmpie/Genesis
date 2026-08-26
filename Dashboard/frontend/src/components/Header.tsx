@@ -37,9 +37,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPalette, onOpenAuth }) => 
               <h1 className="font-extrabold text-sm sm:text-base tracking-wider text-white bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text">
                 GENESIS
               </h1>
-              <span className="text-[10px] px-1.5 py-0.2 font-mono font-bold bg-genesis-accent/15 text-genesis-accent border border-genesis-accent/30 rounded">
-                v3.0 React
-              </span>
             </div>
             <p className="hidden sm:block text-[11px] text-slate-400 font-medium tracking-tight">
               Autonomous Supervisor & Core Telemetry
