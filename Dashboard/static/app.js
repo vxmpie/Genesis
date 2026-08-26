@@ -353,7 +353,7 @@ function handleMessage(data) {
                 DOM.flushDnsBtn.textContent = 'Flush DNS';
                 DOM.flushDnsBtn.disabled = false;
             }
-            showToast('system', data.success ? '🧹 DNS Resolver cache flushed' : '❌ Failed to flush DNS');
+            showToast('system', data.success ? 'DNS Resolver cache flushed' : 'Failed to flush DNS');
             break;
         case 'observatory_update':
             updateNetworkObservatory(data.data);
@@ -364,17 +364,17 @@ function handleMessage(data) {
         case 'session_boost_reset':
         case 'boost_counter_reset':
             updateSessionSummary(data.data);
-            showToast('system', '↺ Session Boosts Reset to 0 (Total preserved)');
+            showToast('system', 'Session Boosts Reset to 0 (Total preserved)');
             break;
         case 'total_boost_reset':
             updateSessionSummary(data.data);
-            showToast('system', '🗑️ Lifetime Total Boosts Reset to 0');
+            showToast('system', 'Lifetime Total Boosts Reset to 0');
             break;
         case 'mumu_trim_result':
             if (data.data && data.data.success) {
-                showToast('system', `↺ Trimmed working set for ${data.data.name || 'MuMu'} (freed ${data.data.freed_mb} MB)`);
+                showToast('system', `Trimmed working set for ${data.data.name || 'MuMu'} (freed ${data.data.freed_mb} MB)`);
             } else {
-                showToast('system', `❌ Failed to trim instance: ${data.data ? data.data.error : 'Unknown'}`);
+                showToast('system', `Failed to trim instance: ${data.data ? data.data.error : 'Unknown'}`);
             }
             break;
     }
@@ -885,14 +885,19 @@ function updateMuMu(mumu) {
             const placeId = inst.target_place_id || 98800969324557;
             gameHtml = `
                 <div class="mumu-game-cell" title="Target Game for Auto-Reconnect (Place: ${placeId})">
-                    <span class="mumu-game-badge">🎮 ${escapeHtml(gameName)}</span>
-                    <button class="btn-game-edit" data-instance="${instIdx}" data-place="${placeId}" title="Change Target Game for Instance #${instIdx}">✏️</button>
+                    <span class="mumu-game-badge">
+                        <svg class="icon icon-xs" viewBox="0 0 24 24"><rect width="20" height="12" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+                        ${escapeHtml(gameName)}
+                    </span>
+                    <button class="btn-game-edit" data-instance="${instIdx}" data-place="${placeId}" title="Change Target Game for Instance #${instIdx}">
+                        <svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                    </button>
                 </div>
             `;
         }
 
-        const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)">⚠️ Bloat</span>' : '';
-        const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}">↺ Trim</button>`;
+        const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)"><svg class="icon icon-xs" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg> Bloat</span>' : '';
+        const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}"><svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> Trim</button>`;
 
         return `
             <tr>
@@ -903,7 +908,7 @@ function updateMuMu(mumu) {
                 <td>${inst.ram_mb} MB${bloatBadge}</td>
                 <td>${inst.uptime}</td>
                 <td>${vmDiskHtml}</td>
-                <td><span class="status-dot running"></span>OK</td>
+                <td><span class="status-dot running"></span>Online</td>
                 <td>${trimBtn}</td>
             </tr>
         `;
@@ -919,7 +924,7 @@ function updateMuMu(mumu) {
             btn.textContent = '...';
             sendCommand('trim_mumu_instance', { pid: parseInt(pid) });
             setTimeout(() => {
-                btn.textContent = '↺ Trim';
+                btn.innerHTML = '<svg class="icon icon-xs" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> Trim';
                 btn.disabled = false;
             }, 2500);
         });
@@ -937,7 +942,7 @@ function updateMuMu(mumu) {
             if (newPlace && !isNaN(parseInt(newPlace)) && parseInt(newPlace) > 0) {
                 const placeNum = parseInt(newPlace);
                 sendCommand('set_instance_game', { instance: instIdx, place_id: placeNum });
-                showToast('system', `🎮 Target Game for Instance #${instIdx} set to Place ID ${placeNum}`);
+                showToast('system', `Target Game for Instance #${instIdx} set to Place ID ${placeNum}`);
             }
         });
     });
@@ -979,13 +984,13 @@ function confirmCyberAction() {
 // Command Palette (Ctrl+K / Mobile Quick Hub)
 // ============================================================
 const COMMANDS = [
-    { id: 'boost', label: '⚡ Quick RAM Boost Now', desc: 'Parallel Working Set & Standby Purge', disruptive: false },
-    { id: 'scan_deep_clean', label: '🧹 Scan Deep Clean Targets', desc: 'Preview reclaimable caches and dumps', disruptive: false },
-    { id: 'refresh_hardening', label: '🛡️ Re-verify Hardening (4/4 CIM)', desc: 'Audit VBS, MPO, Hypervisor, and Defender', disruptive: false },
-    { id: 'flush_dns', label: '🌐 Flush DNS Resolver Cache', desc: 'Reset Windows DNS resolver and clear stale caches', disruptive: true },
-    { id: 'quick_scan', label: '🔍 Run Defender Quick Scan', desc: 'Execute real-time security malware sweep', disruptive: true },
-    { id: 'reset_session', label: '↺ Reset Session Boost Counter', desc: 'Zero out current session metrics', disruptive: false },
-    { id: 'reset_total', label: '🗑️ Reset Lifetime Total Boosts', desc: 'Permanently reset lifetime boost history', disruptive: true },
+    { id: 'boost', icon: '<svg class="icon icon-sm icon-accent" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', label: 'Quick RAM Boost Now', desc: 'Parallel Working Set & Standby Purge', disruptive: false },
+    { id: 'scan_deep_clean', icon: '<svg class="icon icon-sm icon-amber" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>', label: 'Scan Deep Clean Targets', desc: 'Preview reclaimable caches and dumps', disruptive: false },
+    { id: 'refresh_hardening', icon: '<svg class="icon icon-sm icon-green" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>', label: 'Re-verify Hardening (4/4 CIM)', desc: 'Audit VBS, MPO, Hypervisor, and Defender', disruptive: false },
+    { id: 'flush_dns', icon: '<svg class="icon icon-sm icon-cyan" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>', label: 'Flush DNS Resolver Cache', desc: 'Reset Windows DNS resolver and clear stale caches', disruptive: true },
+    { id: 'quick_scan', icon: '<svg class="icon icon-sm icon-green" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></svg>', label: 'Run Defender Quick Scan', desc: 'Execute real-time security malware sweep', disruptive: true },
+    { id: 'reset_session', icon: '<svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>', label: 'Reset Session Boost Counter', desc: 'Zero out current session metrics', disruptive: false },
+    { id: 'reset_total', icon: '<svg class="icon icon-sm icon-accent" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>', label: 'Reset Lifetime Total Boosts', desc: 'Permanently reset lifetime boost history', disruptive: true },
 ];
 
 function openCommandPalette() {
@@ -1018,7 +1023,7 @@ function renderCommandList(filter = '') {
     DOM.cmdPaletteList.innerHTML = filtered.map(c => `
         <div class="cmd-palette-item" data-id="${c.id}">
             <div class="cmd-item-left">
-                <span class="cmd-item-label">${c.label}</span>
+                <span class="cmd-item-label">${c.icon || ''} ${c.label}</span>
                 <span class="cmd-item-desc">${c.desc}</span>
             </div>
             <span class="cmd-item-badge ${c.disruptive ? 'disruptive' : 'safe'}">${c.disruptive ? 'Confirm' : 'Direct'}</span>
@@ -1386,12 +1391,12 @@ function updateNetworkObservatory(obs) {
 // Event Log
 // ============================================================
 const EVENT_ICONS = {
-    boost: '⚡',
-    warning: '⚠️',
-    crash: '🔴',
-    system: '🔵',
-    kill: '💀',
-    error: '❌',
+    boost: '<svg class="icon icon-xs icon-accent" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    warning: '<svg class="icon icon-xs icon-amber" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>',
+    crash: '<svg class="icon icon-xs" viewBox="0 0 24 24" style="stroke: #FF3366;"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>',
+    system: '<svg class="icon icon-xs icon-cyan" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>',
+    kill: '<svg class="icon icon-xs" viewBox="0 0 24 24" style="stroke: #FF3366;"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+    error: '<svg class="icon icon-xs" viewBox="0 0 24 24" style="stroke: #FF3366;"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>',
 };
 
 function renderHistory(events) {
@@ -1743,9 +1748,48 @@ function escapeHtml(str) {
 }
 
 // ============================================================
+// Workspace View Controller (Overview, Bots, System, Analytics)
+// ============================================================
+function initWorkspaceNav() {
+    const nav = document.getElementById('workspaceNav');
+    if (!nav) return;
+    const tabs = nav.querySelectorAll('.nav-tab');
+    const sections = document.querySelectorAll('.view-section');
+
+    function switchView(viewName) {
+        tabs.forEach(t => {
+            if (t.dataset.view === viewName) t.classList.add('active');
+            else t.classList.remove('active');
+        });
+
+        sections.forEach(sec => {
+            const views = (sec.dataset.views || 'overview').split(',').map(s => s.trim());
+            if (viewName === 'overview' || views.includes(viewName)) {
+                sec.classList.remove('view-hidden');
+            } else {
+                sec.classList.add('view-hidden');
+            }
+        });
+
+        // Redraw canvas chart if view becomes visible
+        setTimeout(() => {
+            if (typeof drawHistoryChart === 'function') drawHistoryChart();
+        }, 50);
+    }
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const viewName = tab.dataset.view;
+            switchView(viewName);
+        });
+    });
+}
+
+// ============================================================
 // Init
 // ============================================================
 function init() {
+    initWorkspaceNav();
     setupEventHandlers();
     connectWS();
     setInterval(updateUptime, 1000);

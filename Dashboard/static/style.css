@@ -66,13 +66,15 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 24px;
-    background: linear-gradient(180deg, #111118 0%, #0A0A0F 100%);
+    padding: 12px 24px;
+    background: linear-gradient(180deg, rgba(17, 17, 24, 0.95) 0%, rgba(10, 10, 15, 0.98) 100%);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
-    z-index: 100;
-    backdrop-filter: blur(12px);
+    z-index: 1000;
+    backdrop-filter: blur(16px);
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
 .header-left {
@@ -82,30 +84,33 @@ body {
 }
 
 .logo {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
     background: linear-gradient(135deg, var(--accent), #FF6B3C);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: var(--font);
-    font-weight: 900;
-    font-size: 22px;
     color: white;
-    box-shadow: 0 0 20px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.15);
+    box-shadow: 0 0 20px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.25);
     animation: logoPulse 3s ease-in-out infinite;
 }
 
+.logo-svg {
+    width: 22px;
+    height: 22px;
+    stroke: #FFFFFF;
+}
+
 @keyframes logoPulse {
-    0%, 100% { box-shadow: 0 0 20px var(--accent-glow); }
-    50% { box-shadow: 0 0 30px rgba(255, 60, 60, 0.3); }
+    0%, 100% { box-shadow: 0 0 18px var(--accent-glow); }
+    50% { box-shadow: 0 0 28px rgba(255, 60, 60, 0.35); }
 }
 
 .header h1 {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 900;
-    letter-spacing: 3px;
+    letter-spacing: 2.5px;
     background: linear-gradient(90deg, var(--accent), #FF7070);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -113,16 +118,103 @@ body {
 }
 
 .subtitle {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-muted);
     font-weight: 500;
     letter-spacing: 0.5px;
 }
 
+/* ============================================================
+   Workspace Navigation Tabs (Overview, Bots, System, Analytics)
+   ============================================================ */
+.nav-workspaces {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(13, 13, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 3px;
+    border-radius: 10px;
+    backdrop-filter: blur(12px);
+}
+
+.nav-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    font-family: var(--font);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: var(--transition);
+    touch-action: manipulation;
+    white-space: nowrap;
+}
+
+.nav-tab:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-tab.active {
+    color: #FFFFFF;
+    background: linear-gradient(135deg, rgba(255, 60, 60, 0.22), rgba(255, 107, 60, 0.12));
+    border-color: rgba(255, 60, 60, 0.4);
+    box-shadow: 0 2px 10px rgba(255, 60, 60, 0.2);
+}
+
+.nav-tab .icon {
+    stroke: currentColor;
+    transition: var(--transition);
+}
+
+.nav-tab.active .icon {
+    stroke: var(--accent);
+    filter: drop-shadow(0 0 6px var(--accent));
+}
+
+/* Vector SVG Utilities */
+.icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    stroke-width: 2;
+    stroke: currentColor;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.icon-xs { width: 12px; height: 12px; }
+.icon-sm { width: 14px; height: 14px; }
+.icon-md { width: 18px; height: 18px; }
+.icon-lg { width: 22px; height: 22px; }
+
+.icon-accent { stroke: var(--accent); }
+.icon-cyan { stroke: #00E5FF; }
+.icon-green { stroke: var(--green); }
+.icon-amber { stroke: var(--amber); }
+
+/* View Filtering */
+.view-section {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.view-section.view-hidden {
+    display: none !important;
+}
+
 .header-right {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
 }
 
 /* Auth Badge */
@@ -130,7 +222,7 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 14px;
+    padding: 6px 12px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 20px;
