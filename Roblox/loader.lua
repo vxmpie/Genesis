@@ -16,6 +16,27 @@ pcall(function()
     })
 end)
 
+-- Auto-Sync Place ID with Genesis Autonomous Core Dashboard
+task.spawn(function()
+    pcall(function()
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        if req then
+            local playerName = "Player"
+            pcall(function() playerName = game:GetService("Players").LocalPlayer.Name end)
+            req({
+                Url = "http://127.0.0.1:7700/api/bot/heartbeat",
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = game:GetService("HttpService"):JSONEncode({
+                    place_id = game.PlaceId,
+                    job_id = game.JobId,
+                    player = playerName,
+                })
+            })
+        end
+    end)
+end)
+
 local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games/"
 
 local games = {

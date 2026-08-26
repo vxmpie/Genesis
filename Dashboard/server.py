@@ -2037,10 +2037,24 @@ def get_mumu_adb_devices() -> list[str]:
     return []
 
 
+_instance_auto_learned_place = {}  # index or serial -> place_id
+
+
+def record_instance_active_place(instance_idx: int | str, place_id: int, serial: str = ""):
+    """Auto-learn and remember active Place ID from running game session."""
+    if not place_id or place_id <= 0:
+        return
+    _instance_auto_learned_place[str(instance_idx)] = int(place_id)
+    if serial:
+        _instance_auto_learned_place[serial] = int(place_id)
+
+
 def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
-    """Resolve target Place ID for a specific MuMu instance index or serial."""
+    """Resolve target Place ID for a specific MuMu instance with auto-learning fallback."""
     mumu_cfg = CONFIG.get("mumu", {})
     instance_places = mumu_cfg.get("instance_places", {})
+
+    # 1. Check explicit manual user setting
     if str(instance_idx) in instance_places:
         try:
             return int(instance_places[str(instance_idx)])
@@ -2051,6 +2065,14 @@ def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
             return int(instance_places[serial])
         except (ValueError, TypeError):
             pass
+
+    # 2. Check auto-learned last active Place ID from gameplay
+    if str(instance_idx) in _instance_auto_learned_place:
+        return _instance_auto_learned_place[str(instance_idx)]
+    if serial and serial in _instance_auto_learned_place:
+        return _instance_auto_learned_place[serial]
+
+    # 3. Fallback to default
     return int(mumu_cfg.get("default_place_id", 98800969324557))
 
 
@@ -2735,6 +2757,45 @@ async def api_mumu_set_game(request: Request, payload: dict):
         "place_id": place_id,
         "game_name": get_game_name_for_place_id(place_id),
     })
+
+
+@app.get("/api/bot/heartbeat")
+@app.post("/api/bot/heartbeat")
+async def api_bot_heartbeat(request: Request):
+    """Receive live in-game telemetry & auto-register Place ID from running Roblox instances."""
+    place_id = None
+    inst_id = 1
+    player = "Unknown"
+
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            place_id = body.get("place_id") or body.get("placeId")
+            inst_id = body.get("instance") or 1
+            player = body.get("player") or "Unknown"
+        except Exception:
+            pass
+    else:
+        place_id = request.query_params.get("place_id") or request.query_params.get("placeId")
+        inst_id = request.query_params.get("instance") or 1
+        player = request.query_params.get("player") or "Unknown"
+
+    if place_id:
+        try:
+            place_num = int(place_id)
+            record_instance_active_place(inst_id, place_num)
+            game_name = get_game_name_for_place_id(place_num)
+            return JSONResponse({
+                "ok": True,
+                "instance": inst_id,
+                "place_id": place_num,
+                "game_name": game_name,
+                "status": "synced"
+            })
+        except ValueError:
+            pass
+
+    return JSONResponse({"ok": False, "error": "Missing or invalid place_id"}, status_code=400)
 
 
 # ---------------------------------------------------------------------------
