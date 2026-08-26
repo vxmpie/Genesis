@@ -2859,25 +2859,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Genesis Dashboard", version="2.4.0", lifespan=lifespan)
 
-static_dir = BASE_DIR / "static"
 frontend_dist_dir = BASE_DIR / "frontend" / "dist"
-legacy_static_dir = BASE_DIR / "static"
+assets_dir = frontend_dist_dir / "assets"
 
-if frontend_dist_dir.exists():
-    assets_dir = frontend_dist_dir / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    
-    @app.get("/")
-    async def serve_dashboard():
-        return FileResponse(str(frontend_dist_dir / "index.html"))
-else:
-    legacy_static_dir.mkdir(exist_ok=True)
-    app.mount("/static", StaticFiles(directory=str(legacy_static_dir)), name="static")
+if assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    @app.get("/")
-    async def serve_dashboard():
-        return FileResponse(str(legacy_static_dir / "index.html"))
+@app.get("/")
+async def serve_dashboard():
+    index_file = frontend_dist_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    return JSONResponse({"status": "error", "message": "Frontend build not found. Run npm run build in frontend directory."}, status_code=503)
 
 
 # ---------------------------------------------------------------------------
@@ -2964,12 +2957,34 @@ async def api_bot_heartbeat(request: Request):
 # ---------------------------------------------------------------------------
 @app.get("/manifest.json")
 async def serve_manifest():
-    return FileResponse(str(static_dir / "manifest.json"), media_type="application/manifest+json")
+    p = frontend_dist_dir / "manifest.json"
+    if p.exists():
+        return FileResponse(str(p), media_type="application/manifest+json")
+    return JSONResponse({"status": "not_found"}, status_code=404)
 
 
 @app.get("/sw.js")
 async def serve_service_worker():
-    return FileResponse(str(static_dir / "sw.js"), media_type="application/javascript")
+    p = frontend_dist_dir / "sw.js"
+    if p.exists():
+        return FileResponse(str(p), media_type="application/javascript")
+    return JSONResponse({"status": "not_found"}, status_code=404)
+
+
+@app.get("/icon-192.png")
+async def serve_icon_192():
+    p = frontend_dist_dir / "icon-192.png"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/png")
+    return JSONResponse({"status": "not_found"}, status_code=404)
+
+
+@app.get("/icon-512.png")
+async def serve_icon_512():
+    p = frontend_dist_dir / "icon-512.png"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/png")
+    return JSONResponse({"status": "not_found"}, status_code=404)
 
 
 # ---------------------------------------------------------------------------
