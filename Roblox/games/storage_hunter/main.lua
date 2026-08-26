@@ -22,7 +22,13 @@ Config.Load()
 local ResetModule = loadModule("functions/reset.lua")
 local WashModule = loadModule("functions/wash.lua")
 local GradingModule = loadModule("functions/grading.lua")
+local ReconnectModule = loadModule("functions/reconnect.lua")
 local UI = loadModule("ui.lua")
+
+-- Start Auto-Reconnect & Anti-AFK Watchdog immediately
+if ReconnectModule and ReconnectModule.Start then
+    ReconnectModule.Start(Config.GetState())
+end
 
 if UI and UI.Create then
     UI.Create(Config, ResetModule, WashModule, GradingModule)

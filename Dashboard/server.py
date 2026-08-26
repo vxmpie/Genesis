@@ -1990,6 +1990,118 @@ def check_mumu_health() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# MuMu ADB Auto-Reconnect & Game Recovery Engine (Tier 3 Safety Net)
+# ---------------------------------------------------------------------------
+def _find_mumu_adb() -> Path | None:
+    candidates = [
+        Path(CONFIG.get("mumu", {}).get("install_path", "C:/Program Files/Netease/MuMuPlayer")) / "nx_device" / "12.0" / "shell" / "adb.exe",
+        Path(CONFIG.get("mumu", {}).get("install_path", "C:/Program Files/Netease/MuMuPlayer")) / "nx_device" / "15.0" / "shell" / "adb.exe",
+        Path(r"C:\Program Files\Netease\MuMuPlayer\nx_device\12.0\shell\adb.exe"),
+        Path(r"C:\Program Files\Netease\MuMuPlayer\nx_device\15.0\shell\adb.exe"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def get_mumu_adb_devices() -> list[str]:
+    adb = _find_mumu_adb()
+    if not adb:
+        return []
+    try:
+        r = subprocess.run([str(adb), "devices"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            devices = []
+            for line in r.stdout.strip().splitlines()[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[1] == "device":
+                    devices.append(parts[0])
+            return devices
+    except Exception:
+        pass
+    return []
+
+
+def recover_roblox_instance(serial: str, place_id: int = 98800969324557) -> bool:
+    """Safely restart and rejoin Roblox on a specific MuMu Android instance."""
+    adb = _find_mumu_adb()
+    if not adb:
+        return False
+    try:
+        # 1. Force stop Roblox client
+        subprocess.run([str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"], capture_output=True, timeout=5)
+        time.sleep(1)
+        # 2. Start Roblox with Deep Link into target Place ID
+        deep_link = f"roblox://placeId={place_id}"
+        subprocess.run([str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link], capture_output=True, timeout=5)
+        add_event("system", f"🔄 MuMu Watchdog: Auto-recovered Roblox on {serial} (Place: {place_id})")
+        if CONFIG.get("alerts", {}).get("notify_on_watchdog_recovery", True):
+            send_discord_alert(
+                "🔄 Roblox Game Auto-Recovered",
+                f"MuMu Autonomous Watchdog detected disconnect/freeze on **{serial}**.\nRoblox process was safely restarted and rejoined into Place ID `{place_id}`.",
+                color=0x00D2FF,
+                fields=[
+                    {"name": "Instance", "value": serial, "inline": True},
+                    {"name": "Target Place", "value": str(place_id), "inline": True},
+                    {"name": "Status", "value": "Rejoined successfully", "inline": True},
+                ]
+            )
+        return True
+    except Exception as e:
+        print(f"[MUMU RECOVERY ERROR] {e}")
+        return False
+
+
+_mumu_consecutive_idle = {}  # serial -> count of checks with missing/stuck Roblox
+_mumu_reconnect_task = None
+
+
+async def mumu_game_watchdog_loop():
+    """Autonomous background supervisor to auto-detect and fix Roblox disconnects/hangs."""
+    await asyncio.sleep(20)  # Wait for initial boot
+    while True:
+        try:
+            mumu_cfg = CONFIG.get("mumu", {})
+            if mumu_cfg.get("auto_reconnect", True):
+                adb = _find_mumu_adb()
+                if adb:
+                    devices = await asyncio.to_thread(get_mumu_adb_devices)
+                    place_id = int(mumu_cfg.get("default_place_id", 98800969324557))
+
+                    for serial in devices:
+                        # Check if Roblox process is running
+                        r_pid = await asyncio.to_thread(
+                            lambda: subprocess.run([str(adb), "-s", serial, "shell", "pidof", "com.roblox.client"], capture_output=True, text=True, timeout=5)
+                        )
+                        pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
+
+                        # Check focused window
+                        r_win = await asyncio.to_thread(
+                            lambda: subprocess.run([str(adb), "-s", serial, "shell", "dumpsys", "window"], capture_output=True, text=True, timeout=5)
+                        )
+                        win_out = r_win.stdout if r_win.returncode == 0 else ""
+
+                        is_error_dialog = ("ErrorPrompt" in win_out or "Application Not Responding" in win_out or "is not responding" in win_out)
+
+                        if not pid_out or is_error_dialog:
+                            _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
+                            if _mumu_consecutive_idle[serial] >= 2:  # 2 checks in a row (~60s)
+                                print(f"[MUMU WATCHDOG] Instance {serial} disconnected/frozen. Triggering recovery...")
+                                await asyncio.to_thread(recover_roblox_instance, serial, place_id)
+                                _mumu_consecutive_idle[serial] = 0
+                        else:
+                            _mumu_consecutive_idle[serial] = 0
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[MUMU WATCHDOG ERROR] {e}")
+
+        interval = int(CONFIG.get("mumu", {}).get("check_interval_seconds", 30))
+        await asyncio.sleep(max(15, interval))
+
+
+# ---------------------------------------------------------------------------
 # Top Processes
 # ---------------------------------------------------------------------------
 def get_top_processes(limit: int = 10) -> list:
@@ -2469,9 +2581,10 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task
     psutil.cpu_percent(interval=0, percpu=True)
     _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
+    _mumu_reconnect_task = asyncio.create_task(mumu_game_watchdog_loop())
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _standby_guard_task = asyncio.create_task(autonomous_standby_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
@@ -2481,6 +2594,8 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Autonomous Core started")
 
     yield
+    if _mumu_reconnect_task:
+        _mumu_reconnect_task.cancel()
     if _chart_sampler_task:
         _chart_sampler_task.cancel()
     if _auto_boost_task:
