@@ -290,6 +290,9 @@ def _save_history(events: list):
 event_history: list = _load_history()
 
 
+_main_event_loop = None
+
+
 def add_event(event_type: str, message: str):
     entry = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -302,14 +305,16 @@ def add_event(event_type: str, message: str):
         del event_history[: len(event_history) - MAX_HISTORY]
     _save_history(event_history)
 
-    # Immediately push to all active WebSockets
+    # Immediately push to all active WebSockets across all worker threads
     try:
         if 'manager' in globals() and manager.active_connections:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(manager.broadcast({"type": "event", "event": entry}))
-    except Exception:
-        pass
+            if _main_event_loop and _main_event_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    manager.broadcast({"type": "event", "event": entry}),
+                    _main_event_loop
+                )
+    except Exception as e:
+        print(f"[EVENT BROADCAST ERROR] {e}")
     return entry
 
 
@@ -2953,7 +2958,8 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task, _cpu_sampler_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task, _cpu_sampler_task, _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
     _cpu_sampler_task = asyncio.create_task(cpu_sampler_loop())
     _ping_sampler_task = asyncio.create_task(roblox_ping_sampler_loop())
     _process_sampler_task = asyncio.create_task(process_sampler_loop())
@@ -3232,6 +3238,9 @@ async def handle_ws_command(ws: WebSocket, data: dict):
     if cmd == "boost":
         result = await asyncio.to_thread(ram_boost, True)
         summary = get_session_summary()
+        latest_event = event_history[-1] if event_history else None
+        if latest_event:
+            await manager.broadcast({"type": "event", "event": latest_event})
         await ws.send_json({"type": "boost_result", "result": result, "summary": summary})
         # Broadcast updated summary and boost info to all connected dashboards immediately
         await manager.broadcast({
