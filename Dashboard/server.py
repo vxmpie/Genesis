@@ -354,24 +354,63 @@ async def heartbeat_loop():
 
 
 # ---------------------------------------------------------------------------
-# 30-Minute Downsampled Chart Buffer & Session Summary
+# 30-Minute Downsampled Chart Buffer & Persistence Layer
 # ---------------------------------------------------------------------------
-_chart_buffer_ram = []  # max 60 data points (30 seconds per point = 30 mins)
-_chart_buffer_cpu = []
-_chart_last_sample_time = 0
+CHART_HISTORY_PATH = DATA_DIR / "chart_history.json"
+
+
+def _load_chart_history() -> dict:
+    if CHART_HISTORY_PATH.exists():
+        try:
+            with open(CHART_HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return {
+                        "ram": data.get("ram", [])[-60:],
+                        "cpu": data.get("cpu", [])[-60:],
+                        "timestamps": data.get("timestamps", [])[-60:],
+                    }
+        except Exception:
+            pass
+    return {"ram": [], "cpu": [], "timestamps": []}
+
+
+def _save_chart_history():
+    try:
+        tmp_path = DATA_DIR / "chart_history.json.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "ram": _chart_buffer_ram[-60:],
+                "cpu": _chart_buffer_cpu[-60:],
+                "timestamps": _chart_buffer_timestamps[-60:],
+            }, f, indent=2)
+        os.replace(tmp_path, CHART_HISTORY_PATH)
+    except Exception:
+        pass
+
+
+_loaded_chart = _load_chart_history()
+_chart_buffer_ram: list[float] = _loaded_chart["ram"]
+_chart_buffer_cpu: list[float] = _loaded_chart["cpu"]
+_chart_buffer_timestamps: list[int] = _loaded_chart["timestamps"]
+_chart_last_sample_time: float = (_chart_buffer_timestamps[-1] / 1000.0) if _chart_buffer_timestamps else 0.0
 
 
 def update_chart_buffer(ram_pct: float, cpu_pct: float):
     global _chart_last_sample_time
     now = time.time()
-    if now - _chart_last_sample_time >= 30:
+    if now - _chart_last_sample_time >= 28 or not _chart_buffer_timestamps:
         _chart_buffer_ram.append(round(float(ram_pct), 1))
         _chart_buffer_cpu.append(round(float(cpu_pct), 1))
+        _chart_buffer_timestamps.append(int(now * 1000))
         if len(_chart_buffer_ram) > 60:
             _chart_buffer_ram.pop(0)
         if len(_chart_buffer_cpu) > 60:
             _chart_buffer_cpu.pop(0)
+        if len(_chart_buffer_timestamps) > 60:
+            _chart_buffer_timestamps.pop(0)
         _chart_last_sample_time = now
+        _save_chart_history()
 
 
 _boost_counter_reset_time = _server_start_time
@@ -1341,27 +1380,74 @@ _last_scan_verified = None
 _defender_status = {}
 
 
+def _parse_dot_net_date(val: str | int | None) -> datetime | None:
+    if not val:
+        return None
+    if isinstance(val, (int, float)):
+        return datetime.fromtimestamp(val / 1000.0)
+    match = re.search(r"/Date\((\d+)\)/", str(val))
+    if match:
+        return datetime.fromtimestamp(int(match.group(1)) / 1000.0)
+    try:
+        return datetime.fromisoformat(str(val))
+    except Exception:
+        return None
+
+
+def format_defender_display_time(dt: datetime | None) -> str:
+    if not dt:
+        return "Never"
+    today = date.today()
+    if dt.date() == today:
+        return "Today " + dt.strftime("%H:%M")
+    elif (today - dt.date()).days == 1:
+        return "Yesterday " + dt.strftime("%H:%M")
+    else:
+        return dt.strftime("%d/%m %H:%M")
+
+
 def get_defender_status() -> dict:
-    """Get Windows Defender status including signature age and last scan."""
+    """Get Windows Defender status including signature age, last quick scan timestamp & duration."""
     global _defender_status
     try:
         r = subprocess.run(
-            ["powershell", "-Command",
-             "(Get-MpComputerStatus | Select-Object "
-             "AntivirusSignatureAge, AntivirusSignatureLastUpdated, "
-             "QuickScanAge, FullScanAge, RealTimeProtectionEnabled, "
-             "AntivirusEnabled "
-             "| ConvertTo-Json)"],
-            capture_output=True, text=True, timeout=15,
+            [
+                "powershell",
+                "-Command",
+                "(Get-MpComputerStatus | Select-Object "
+                "AntivirusSignatureAge, AntivirusSignatureLastUpdated, "
+                "QuickScanAge, QuickScanEndTime, QuickScanStartTime, "
+                "FullScanAge, RealTimeProtectionEnabled, AntivirusEnabled "
+                "| ConvertTo-Json)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if r.returncode == 0 and r.stdout.strip():
             data = json.loads(r.stdout.strip())
             sig_age = data.get("AntivirusSignatureAge", -1)
+
+            dt_end = _parse_dot_net_date(data.get("QuickScanEndTime"))
+            dt_start = _parse_dot_net_date(data.get("QuickScanStartTime"))
+            dt_sig = _parse_dot_net_date(data.get("AntivirusSignatureLastUpdated"))
+
+            duration_str = None
+            if dt_end and dt_start and dt_end >= dt_start:
+                dur_sec = int((dt_end - dt_start).total_seconds())
+                mins, secs = divmod(dur_sec, 60)
+                duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+
             _defender_status = {
                 "available": True,
                 "signature_age_days": sig_age,
                 "signature_stale": sig_age > 3,
+                "signature_last_updated": dt_sig.strftime("%Y-%m-%d %H:%M:%S") if dt_sig else "Unknown",
+                "signature_display": format_defender_display_time(dt_sig),
                 "quick_scan_age_days": data.get("QuickScanAge", -1),
+                "quick_scan_time": dt_end.strftime("%Y-%m-%d %H:%M:%S") if dt_end else "Never",
+                "quick_scan_display": format_defender_display_time(dt_end),
+                "quick_scan_duration": duration_str,
                 "full_scan_age_days": data.get("FullScanAge", -1),
                 "realtime_enabled": data.get("RealTimeProtectionEnabled", False),
                 "antivirus_enabled": data.get("AntivirusEnabled", False),
@@ -2366,18 +2452,37 @@ async def tunnel_supervisor_loop():
             await asyncio.sleep(5)
 
 
+_chart_sampler_task = None
+
+
+async def chart_sampler_loop():
+    """Continuous 24/7 background telemetry sampler for RAM & CPU 30-minute chart buffer."""
+    while True:
+        try:
+            cpu_pct = psutil.cpu_percent(interval=0)
+            mem = psutil.virtual_memory()
+            update_chart_buffer(mem.percent, cpu_pct)
+        except Exception:
+            pass
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task
     psutil.cpu_percent(interval=0, percpu=True)
+    _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _standby_guard_task = asyncio.create_task(autonomous_standby_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
     _heartbeat_task = asyncio.create_task(heartbeat_loop())
     _tunnel_task = asyncio.create_task(tunnel_supervisor_loop())
+    asyncio.create_task(asyncio.to_thread(get_defender_status))
     add_event("system", "Genesis Autonomous Core started")
 
     yield
+    if _chart_sampler_task:
+        _chart_sampler_task.cancel()
     if _auto_boost_task:
         _auto_boost_task.cancel()
     if _standby_guard_task:
@@ -2479,6 +2584,7 @@ async def websocket_endpoint(ws: WebSocket):
             "chart_history": {
                 "ram": _chart_buffer_ram,
                 "cpu": _chart_buffer_cpu,
+                "timestamps": _chart_buffer_timestamps,
             },
         })
 
