@@ -24,13 +24,15 @@ export function App() {
   const activeView = useDashboardStore((s) => s.activeView);
   const setAuthModalOpen = useDashboardStore((s) => s.setAuthModalOpen);
   const setCmdPaletteOpen = useDashboardStore((s) => s.setCmdPaletteOpen);
-  const authRequired = useDashboardStore((s) => s.authRequired);
-  const authenticated = useDashboardStore((s) => s.authenticated);
 
   const { sendCommand } = useWebSocket();
 
   const requireAuthGuard = (callback: () => void) => {
-    if (authRequired && !authenticated) {
+    const currentAuthed = useDashboardStore.getState().authenticated;
+    const currentToken = useDashboardStore.getState().token;
+    const req = useDashboardStore.getState().authRequired;
+
+    if (req && !currentAuthed && !currentToken) {
       setAuthModalOpen(true);
       return;
     }

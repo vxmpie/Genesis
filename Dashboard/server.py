@@ -149,12 +149,39 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Authentication & Cryptographic Security
+# Authentication & Cryptographic Security (Persistent 24-Hour Sessions)
 # ---------------------------------------------------------------------------
-_valid_sessions: dict[str, float] = {}  # token -> expiry_timestamp
-_failed_attempts: dict[str, list[float]] = {}  # ip -> list of failed timestamps
+SESSIONS_PATH = DATA_DIR / "sessions.json"
+
+
+def _load_sessions() -> dict[str, float]:
+    if SESSIONS_PATH.exists():
+        try:
+            with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                now = time.time()
+                return {k: float(v) for k, v in data.items() if float(v) > now}
+        except Exception:
+            pass
+    return {}
+
+
+def _save_sessions(sessions: dict[str, float]):
+    try:
+        now = time.time()
+        valid = {k: v for k, v in sessions.items() if v > now}
+        tmp_path = DATA_DIR / "sessions.json.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(valid, f, indent=2)
+        os.replace(tmp_path, SESSIONS_PATH)
+    except Exception:
+        pass
+
+
+_valid_sessions: dict[str, float] = _load_sessions()
+_failed_attempts: dict[str, list[float]] = {}
 MAX_FAILED_ATTEMPTS = 5
-LOCKOUT_SECONDS = 600  # 10 minutes
+LOCKOUT_SECONDS = 600
 
 
 def hash_pin(pin: str, salt: str) -> str:
@@ -176,7 +203,6 @@ def verify_pin_input(input_pin: str) -> bool:
         stored_pin = str(auth_cfg["pin"]).strip()
         is_valid = secrets.compare_digest(clean_input, stored_pin)
         if is_valid:
-            # Auto-migrate plaintext PIN to SHA-256 + Salt
             salt = secrets.token_hex(8)
             auth_cfg["salt"] = salt
             auth_cfg["pin_hash"] = hash_pin(clean_input, salt)
@@ -187,11 +213,6 @@ def verify_pin_input(input_pin: str) -> bool:
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract real client IP securely.
-    
-    Only trust proxy headers (CF-Connecting-IP / X-Forwarded-For) if connection 
-    originates from local loopback (cloudflared tunnel proxy). Otherwise use peer IP.
-    """
     peer_ip = request.client.host if request.client else "unknown"
     if peer_ip in ("127.0.0.1", "::1", "localhost"):
         cf_ip = request.headers.get("CF-Connecting-IP")
@@ -224,6 +245,7 @@ def verify_session_token(token: str | None) -> bool:
     if not expiry or time.time() > expiry:
         if token in _valid_sessions:
             del _valid_sessions[token]
+            _save_sessions(_valid_sessions)
         return False
     return True
 
@@ -232,6 +254,7 @@ def create_session_token() -> str:
     token = secrets.token_hex(24)
     timeout_hours = CONFIG.get("auth", {}).get("session_timeout_hours", 24)
     _valid_sessions[token] = time.time() + (timeout_hours * 3600)
+    _save_sessions(_valid_sessions)
     return token
 
 
@@ -3096,18 +3119,30 @@ async def websocket_endpoint(ws: WebSocket):
 
 async def handle_ws_command(ws: WebSocket, data: dict):
     cmd = data.get("command")
+    token = data.get("token")
+
+    # If valid token is supplied with command, immediately authenticate the connection
+    if token and verify_session_token(token):
+        manager.set_auth(ws, True)
 
     if cmd == "auth":
-        token = data.get("token")
         if verify_session_token(token):
             manager.set_auth(ws, True)
-            await ws.send_json({"type": "auth_success"})
+            await ws.send_json({"type": "auth_success", "authenticated": True})
         else:
             manager.set_auth(ws, False)
-            await ws.send_json({"type": "auth_failed"})
+            await ws.send_json({"type": "auth_failed", "authenticated": False})
         return
 
-    if is_auth_enabled() and not manager.is_auth(ws):
+    # Non-destructive commands that should never trigger an auth lock screen
+    safe_commands = {
+        "deep_clean_preview", "scan_deep_clean", "scan_targets",
+        "quick_scan", "defender_status", "check_hardening",
+        "refresh_hardening", "flush_dns", "observatory_refresh",
+        "growth_data", "vm_disk_refresh"
+    }
+
+    if is_auth_enabled() and cmd not in safe_commands and not manager.is_auth(ws):
         await ws.send_json({"type": "auth_required", "error": "Authentication required for this command."})
         return
 
