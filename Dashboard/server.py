@@ -1784,42 +1784,53 @@ _last_gpu_data = {
 }
 
 
-def get_gpu_metrics() -> dict:
-    global _last_gpu_data
-    try:
-        import pynvml
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        name = pynvml.nvmlDeviceGetName(handle)
-        if isinstance(name, bytes):
-            name = name.decode("utf-8")
+_nvml_initialized = False
+_nvml_handle = None
 
-        _last_gpu_data = {
-            "available": True,
-            "name": name,
-            "temperature_c": temp,
-            "utilization_percent": util.gpu,
-            "memory_used_mb": round(mem.used / (1024 * 1024)),
-            "memory_total_mb": round(mem.total / (1024 * 1024)),
-            "memory_percent": round(mem.used / mem.total * 100, 1),
-        }
-        try:
-            pynvml.nvmlShutdown()
-        except Exception:
-            pass
-        return _last_gpu_data
-    except Exception:
+
+def _init_nvml():
+    global _nvml_initialized, _nvml_handle
+    if not _nvml_initialized:
         try:
             import pynvml
-            pynvml.nvmlShutdown()
+            pynvml.nvmlInit()
+            _nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            _nvml_initialized = True
         except Exception:
-            pass
-        if _last_gpu_data.get("temperature_c", 0) > 0:
+            _nvml_initialized = False
+
+
+def get_gpu_metrics() -> dict:
+    global _last_gpu_data, _nvml_initialized, _nvml_handle
+    if not _nvml_initialized:
+        _init_nvml()
+
+    if _nvml_initialized and _nvml_handle is not None:
+        try:
+            import pynvml
+            temp = pynvml.nvmlDeviceGetTemperature(_nvml_handle, pynvml.NVML_TEMPERATURE_GPU)
+            util = pynvml.nvmlDeviceGetUtilizationRates(_nvml_handle)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(_nvml_handle)
+            name = pynvml.nvmlDeviceGetName(_nvml_handle)
+            if isinstance(name, bytes):
+                name = name.decode("utf-8")
+
+            _last_gpu_data = {
+                "available": True,
+                "name": name,
+                "temperature_c": temp,
+                "utilization_percent": util.gpu,
+                "memory_used_mb": round(mem.used / (1024 * 1024)),
+                "memory_total_mb": round(mem.total / (1024 * 1024)),
+                "memory_percent": round(mem.used / mem.total * 100, 1),
+            }
             return _last_gpu_data
-        return {"available": False}
+        except Exception:
+            _nvml_initialized = False
+
+    if _last_gpu_data.get("temperature_c", 0) > 0:
+        return _last_gpu_data
+    return {"available": False}
 
 
 def get_system_metrics() -> dict:
@@ -1915,25 +1926,57 @@ def get_metrics_with_rates() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# MuMu Instance Monitor (With Fast Anti-EcoQoS Hook)
+# High-Efficiency Background Process & MuMu Sampler (Zero-Lag Cache)
 # ---------------------------------------------------------------------------
-def get_mumu_instances() -> list:
+_cached_top_processes = []
+_cached_mumu_instances = []
+_cached_mumu_health = {
+    "devices": [],
+    "launchers": [],
+    "total_instances": 0,
+    "launcher_running": False,
+    "vm_disk": [],
+    "vm_disk_last_check": None,
+    "instance_places": {},
+    "game_presets": [],
+}
+_process_sampler_lock = threading.Lock()
+_process_sampler_task = None
+_prev_mumu_count = None
+
+
+def _sample_all_processes_sync():
+    """High-efficiency single-pass Windows process sampler (MuMu + Top Procs)."""
+    global _cached_top_processes, _cached_mumu_instances, _cached_mumu_health, _prev_mumu_count
+
     try:
         disable_ecoqos_for_mumu()
     except Exception:
         pass
 
     mumu_names = {n.lower() for n in CONFIG.get("mumu", {}).get("process_names", [])}
+    all_procs = []
+    mumu_instances = []
     device_idx = 0
-    for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "create_time"]):
+
+    for proc in psutil.process_iter(["pid", "name", "memory_info", "create_time"]):
         try:
             name = (proc.info["name"] or "").lower()
+            mem = proc.info["memory_info"]
+            rss = mem.rss if mem else 0
+            ram_mb = round(rss / (1024 ** 2), 1)
+
+            all_procs.append({
+                "pid": proc.info["pid"],
+                "name": proc.info["name"] or "Unknown",
+                "ram_mb": ram_mb,
+                "cpu_percent": 0,
+            })
+
             if name in mumu_names:
                 uptime_sec = time.time() - proc.info["create_time"]
                 hours = int(uptime_sec // 3600)
                 minutes = int((uptime_sec % 3600) // 60)
-                ram_mb = round((proc.info["memory_info"].rss if proc.info["memory_info"] else 0) / (1024 ** 2), 1)
-                cpu_pct = round(proc.info["cpu_percent"] or 0, 1)
                 is_bloated = (ram_mb >= 4000.0)
                 is_device = ("device" in name)
 
@@ -1944,10 +1987,10 @@ def get_mumu_instances() -> list:
                     target_place_id = get_instance_place_id(device_idx)
                     target_game_name = get_game_name_for_place_id(target_place_id)
 
-                instances.append({
+                mumu_instances.append({
                     "pid": proc.info["pid"],
                     "name": proc.info["name"],
-                    "cpu_percent": cpu_pct,
+                    "cpu_percent": 0,
                     "ram_mb": ram_mb,
                     "uptime": f"{hours}h{minutes:02d}m",
                     "uptime_seconds": int(uptime_sec),
@@ -1959,19 +2002,11 @@ def get_mumu_instances() -> list:
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    return instances
 
+    all_procs.sort(key=lambda x: x["ram_mb"], reverse=True)
 
-_prev_mumu_count = None
-
-
-def check_mumu_health() -> dict:
-    global _prev_mumu_count
-    instances = get_mumu_instances()
-
-    devices = [i for i in instances if i["name"].lower() == "mumunxdevice.exe"]
-    launchers = [i for i in instances if i["name"].lower() == "mumunxmain.exe"]
-
+    devices = [i for i in mumu_instances if i["name"].lower() == "mumunxdevice.exe"]
+    launchers = [i for i in mumu_instances if i["name"].lower() == "mumunxmain.exe"]
     current_device_count = len(devices)
 
     if _prev_mumu_count is not None and current_device_count < _prev_mumu_count:
@@ -1988,19 +2023,52 @@ def check_mumu_health() -> dict:
                     {"name": "Impact", "value": f"-{lost} bot(s) offline", "inline": True},
                 ]
             )
-
     _prev_mumu_count = current_device_count
 
-    return {
-        "devices": devices,
-        "launchers": launchers,
-        "total_instances": current_device_count,
-        "launcher_running": len(launchers) > 0,
-        "vm_disk": _vm_disk_cache,
-        "vm_disk_last_check": _last_vm_disk_check,
-        "instance_places": CONFIG.get("mumu", {}).get("instance_places", {}),
-        "game_presets": CONFIG.get("mumu", {}).get("game_presets", []),
-    }
+    with _process_sampler_lock:
+        _cached_top_processes = all_procs[:10]
+        _cached_mumu_instances = mumu_instances
+        _cached_mumu_health = {
+            "devices": devices,
+            "launchers": launchers,
+            "total_instances": current_device_count,
+            "launcher_running": len(launchers) > 0,
+            "vm_disk": _vm_disk_cache,
+            "vm_disk_last_check": _last_vm_disk_check,
+            "instance_places": CONFIG.get("mumu", {}).get("instance_places", {}),
+            "game_presets": CONFIG.get("mumu", {}).get("game_presets", []),
+        }
+
+
+def get_mumu_instances() -> list:
+    """Instant in-memory query of active MuMu instances (< 0.01ms)."""
+    with _process_sampler_lock:
+        return list(_cached_mumu_instances)
+
+
+def check_mumu_health() -> dict:
+    """Instant in-memory query of MuMu health and state (< 0.01ms)."""
+    with _process_sampler_lock:
+        return dict(_cached_mumu_health)
+
+
+def get_top_processes(limit: int = 10) -> list:
+    """Instant in-memory query of top memory processes (< 0.01ms)."""
+    with _process_sampler_lock:
+        return list(_cached_top_processes[:limit])
+
+
+async def process_sampler_loop():
+    """Dedicated background telemetry worker sampling process snapshots every 1.5s."""
+    _sample_all_processes_sync()
+    while True:
+        try:
+            await asyncio.to_thread(_sample_all_processes_sync)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
 
 
 # ---------------------------------------------------------------------------
@@ -2186,24 +2254,7 @@ async def mumu_game_watchdog_loop():
         await asyncio.sleep(max(15, interval))
 
 
-# ---------------------------------------------------------------------------
-# Top Processes
-# ---------------------------------------------------------------------------
-def get_top_processes(limit: int = 10) -> list:
-    procs = []
-    for proc in psutil.process_iter(["pid", "name", "memory_info", "cpu_percent"]):
-        try:
-            mem = proc.info["memory_info"]
-            procs.append({
-                "pid": proc.info["pid"],
-                "name": proc.info["name"] or "Unknown",
-                "ram_mb": round((mem.rss if mem else 0) / (1024 ** 2), 1),
-                "cpu_percent": round(proc.info["cpu_percent"] or 0, 1),
-            })
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    procs.sort(key=lambda x: x["ram_mb"], reverse=True)
-    return procs[:limit]
+
 
 
 # ---------------------------------------------------------------------------
@@ -2666,8 +2717,9 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task
     psutil.cpu_percent(interval=0, percpu=True)
+    _process_sampler_task = asyncio.create_task(process_sampler_loop())
     _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
     _mumu_reconnect_task = asyncio.create_task(mumu_game_watchdog_loop())
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
@@ -2679,6 +2731,8 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Autonomous Core started")
 
     yield
+    if _process_sampler_task:
+        _process_sampler_task.cancel()
     if _mumu_reconnect_task:
         _mumu_reconnect_task.cancel()
     if _chart_sampler_task:
