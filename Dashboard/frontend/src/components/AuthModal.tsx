@@ -80,7 +80,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                 maxLength={8}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
-                placeholder="Enter PIN (e.g. 8666)"
+                placeholder="••••"
                 autoFocus
                 className="w-full text-center tracking-widest text-lg font-mono py-2.5 px-4 bg-black/40 border border-white/10 rounded-lg text-white placeholder:text-slate-600 focus:outline-none focus:border-genesis-accent focus:ring-1 focus:ring-genesis-accent"
               />

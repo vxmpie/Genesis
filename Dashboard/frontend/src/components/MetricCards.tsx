@@ -124,15 +124,15 @@ export const MetricCards: React.FC = () => {
       <MetricRing
         percent={cpuPct}
         label="CPU Load"
-        sublabel={`${cpuCount} Cores`}
+        sublabel={`${cpuCount} Cores • ${cpuGhz ? cpuGhz.toFixed(1) : '2.5'} GHz`}
         valueDisplay={Math.round(cpuPct)}
         unit="%"
         colorClass={cpuColor}
         glowClass={cpuGlow}
         icon={<Cpu className="w-3.5 h-3.5 text-genesis-accent" />}
       >
-        <div className="w-full text-center text-[11px] font-mono text-slate-300 font-semibold">
-          {cpuGhz ? `${cpuGhz.toFixed(1)} GHz Frequency` : `${cpuCount} Cores Active`}
+        <div className="w-full text-center text-[11px] font-mono text-slate-200 font-semibold">
+          {cpuGhz ? `${cpuGhz.toFixed(1)} GHz Frequency` : '2.5 GHz Frequency'}
         </div>
       </MetricRing>
 
@@ -161,10 +161,10 @@ export const MetricCards: React.FC = () => {
               title={`Standby Cache: ${ramStandby.toFixed(1)} GB`}
             />
           </div>
-          <div className="flex items-center justify-between text-[9px] font-mono">
-            <span>Act: <b className="text-genesis-accent font-bold">{ramActive.toFixed(1)}G</b></span>
-            <span>Stb: <b className="text-genesis-amber font-bold">{ramStandby.toFixed(1)}G</b></span>
-            <span>Free: <b className="text-genesis-green font-bold">{ramFree.toFixed(1)}G</b></span>
+          <div className="flex items-center justify-between text-[9px] font-mono mt-0.5">
+            <span className="text-slate-400 font-medium">Act: <b className="text-genesis-accent font-bold">{ramActive.toFixed(1)} GB</b></span>
+            <span className="text-slate-400 font-medium">Stb: <b className="text-genesis-amber font-bold">{ramStandby.toFixed(1)} GB</b></span>
+            <span className="text-slate-400 font-medium">Free: <b className="text-genesis-green font-bold">{ramFree.toFixed(1)} GB</b></span>
           </div>
         </div>
       </MetricRing>

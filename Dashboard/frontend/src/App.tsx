@@ -89,7 +89,7 @@ export function App() {
         {(activeView === 'overview' || activeView === 'bots') && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <MuMuCard
-              onTrimMemory={(index) => requireAuthGuard(() => sendCommand('trim_mumu', { instance: index }))}
+              onTrimMemory={(pid, index) => requireAuthGuard(() => sendCommand('trim_mumu_instance', { pid, instance: index }))}
             />
             <AutoBoostCard
               onToggle={(enabled) => sendCommand('set_auto_boost', { enabled })}

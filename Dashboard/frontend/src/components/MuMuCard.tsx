@@ -3,7 +3,7 @@ import { Gamepad2, Edit3, Scissors } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 interface MuMuCardProps {
-  onTrimMemory: (index: number) => void;
+  onTrimMemory: (pid: number, index: number) => void;
 }
 
 export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
@@ -14,9 +14,9 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
   const runningCount = devices.length;
 
   return (
-    <div className="cyber-card p-4 flex flex-col justify-between">
+    <div className="cyber-card p-4 flex flex-col justify-start gap-3">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
           <Gamepad2 className="w-4 h-4 text-genesis-cyan" />
           MuMu Instances
@@ -92,7 +92,7 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                     <td className="py-2.5 px-3 text-right">
                       {isEmulator && (
                         <button
-                          onClick={() => onTrimMemory(index)}
+                          onClick={() => onTrimMemory(dev.pid, index)}
                           className="p-1 rounded bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border border-white/10 hover:border-genesis-accent/30 transition-all"
                           title="Trim working set memory"
                         >

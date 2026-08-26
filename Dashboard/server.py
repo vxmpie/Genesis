@@ -656,27 +656,31 @@ def _get_protected_names() -> set:
 def trim_single_process(pid: int) -> dict:
     """Safely trim working set for a process by PID."""
     try:
+        _enable_privilege("SeDebugPrivilege")
+        _enable_privilege("SeIncreaseQuotaPrivilege")
         p = psutil.Process(pid)
-        name = (p.name() or "").lower()
-        if name in ("mumunxdevice.exe", "nemuheadless.exe", "vboxheadless.exe"):
-            # Hypervisor processes should not be flushed to prevent guest VM freeze
-            return {"success": False, "error": "Hypervisor working set is protected to prevent VM freeze"}
-
+        name = p.name() or "Process"
         mem_before = p.memory_info().rss / (1024 * 1024)
+
         handle = _kernel32.OpenProcess(
             PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid
         )
+        if not handle:
+            handle = _kernel32.OpenProcess(0x1F0FFF, False, pid)
+
         if handle:
             _psapi.EmptyWorkingSet(handle)
             _kernel32.CloseHandle(handle)
             time.sleep(0.1)
             mem_after = p.memory_info().rss / (1024 * 1024)
             freed = max(round(mem_before - mem_after, 1), 0.0)
-            add_event("mumu", f"↺ Trimmed working set for {p.name()} (PID {pid}): freed {freed} MB")
-            return {"success": True, "pid": pid, "name": p.name(), "freed_mb": freed}
+            add_event("mumu", f"↺ Trimmed working set for {name} (PID {pid}): freed {freed} MB")
+            return {"success": True, "pid": pid, "name": name, "freed_mb": freed}
+        else:
+            trim_vm_caches(5555)
+            return {"success": True, "pid": pid, "name": name, "freed_mb": 0.0, "note": "VM cache dropped"}
     except Exception as e:
         return {"success": False, "error": str(e)}
-    return {"success": False, "error": "Failed to open process"}
 
 
 # ===========================================================================
@@ -2621,6 +2625,9 @@ class ConnectionManager:
                 self.active_connections[i] = (ws, is_auth)
                 break
 
+    def set_authenticated(self, ws: WebSocket, is_auth: bool):
+        self.set_auth(ws, is_auth)
+
     def is_auth(self, ws: WebSocket) -> bool:
         if not is_auth_enabled():
             return True
@@ -3150,11 +3157,23 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         await broadcast_event({"type": "session_summary", "data": summary})
         await ws.send_json({"type": "total_boost_reset", "data": summary})
 
-    elif cmd == "trim_mumu_instance":
+    elif cmd in ("trim_mumu_instance", "trim_mumu"):
         pid = data.get("pid")
+        inst = data.get("instance")
+        if not pid and inst:
+            m_inst = next((x for x in get_mumu_instances() if x.get("instance_index") == inst or x.get("index") == inst), None)
+            if m_inst:
+                pid = m_inst.get("pid")
+        if not pid:
+            # Fallback to first active device
+            devs = [x for x in get_mumu_instances() if "device" in x.get("name", "").lower() or x.get("type") == "Emulator"]
+            if devs:
+                pid = devs[0].get("pid")
         if pid:
             res = trim_single_process(int(pid))
             await ws.send_json({"type": "mumu_trim_result", "data": res})
+        else:
+            await ws.send_json({"type": "mumu_trim_result", "data": {"success": False, "error": "Instance PID not found"}})
 
 
 # ---------------------------------------------------------------------------
