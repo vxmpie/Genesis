@@ -3055,3 +3055,268 @@ body {
     font-size: 12px;
 }
 
+/* ============================================================
+   MASTER RESPONSIVE & MOBILE DESIGN SYSTEM (AAA Grade)
+   ============================================================ */
+
+/* 1. TABLET & MEDIUM SCREENS (<= 1024px) */
+@media (max-width: 1024px) {
+    .dashboard {
+        max-width: 100%;
+        padding: 16px;
+        gap: 16px;
+    }
+    
+    .metrics-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+    }
+
+    .hardening-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .two-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 2. MOBILE LANDSCAPE & SMALL TABLETS (<= 768px) */
+@media (max-width: 768px) {
+    html {
+        font-size: 13px;
+    }
+
+    /* Mobile Header Layout */
+    .header {
+        padding: 10px 14px;
+        gap: 10px;
+    }
+
+    .header-left {
+        gap: 10px;
+    }
+
+    .logo {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+    }
+
+    .logo-svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .title-group h1 {
+        font-size: 15px;
+    }
+
+    .title-group p {
+        display: none; /* Hide subtitle on mobile for ultra clean header */
+    }
+
+    .header-right {
+        gap: 6px;
+        margin-left: auto;
+    }
+
+    .auth-badge {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .connection-status {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .uptime {
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+
+    /* Mobile Workspace Tabs: Full-width Smooth Horizontal Bar */
+    .nav-workspaces {
+        order: 3;
+        width: 100%;
+        display: flex;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 4px 2px;
+        gap: 6px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        margin-top: 2px;
+    }
+
+    .nav-workspaces::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-tab {
+        flex: 1 0 auto;
+        padding: 6px 12px;
+        font-size: 11px;
+        white-space: nowrap;
+        text-align: center;
+        justify-content: center;
+    }
+
+    /* Dashboard Layout on Mobile */
+    .dashboard {
+        padding: 12px 10px;
+        gap: 14px;
+    }
+
+    .card {
+        padding: 14px 12px;
+        border-radius: 10px;
+    }
+
+    /* HUD Summary Grid */
+    .summary-hud-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .summary-tile {
+        padding: 10px 10px;
+        min-height: auto;
+    }
+
+    .summary-tile-label {
+        font-size: 10px;
+    }
+
+    .summary-val-hero {
+        font-size: 15px;
+    }
+
+    .summary-subval-tag {
+        font-size: 10px;
+        padding: 1px 4px;
+    }
+
+    /* Metric Cards (2x2 Grid) */
+    .metrics-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+
+    .metric-card {
+        padding: 14px 10px;
+        gap: 8px;
+    }
+
+    .metric-ring-container {
+        width: 72px;
+        height: 72px;
+    }
+
+    .ring-number {
+        font-size: 18px;
+    }
+
+    .metric-label {
+        font-size: 11px;
+        letter-spacing: 1px;
+    }
+
+    /* CPU Per-Core Chart: 2 rows of 8 on mobile */
+    .cores-chart {
+        grid-template-columns: repeat(8, 1fr);
+        row-gap: 8px;
+        height: 110px;
+    }
+
+    .core-bar-wrap {
+        height: 50px;
+    }
+
+    /* Hardening Grid */
+    .hardening-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .hardening-item {
+        padding: 10px 8px;
+    }
+
+    /* Responsive Horizontal Scroll Tables */
+    .mumu-table-wrap, .procs-table-wrap, .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 8px;
+    }
+
+    .mumu-table, .procs-table {
+        min-width: 540px;
+    }
+
+    /* Defender Grid */
+    .defender-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    /* Network Observatory */
+    .observatory-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    /* Chart Container */
+    .chart-container-wrap {
+        min-height: 180px;
+    }
+
+    /* Floating Hub Button */
+    .btn-quick-hub {
+        bottom: 16px;
+        right: 16px;
+        width: 44px;
+        height: 44px;
+    }
+}
+
+/* 3. SMALL MOBILE PHONES (<= 480px) */
+@media (max-width: 480px) {
+    .header {
+        padding: 8px 10px;
+    }
+
+    .summary-hud-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .summary-tile-status-wide {
+        grid-column: span 1;
+    }
+
+    .metrics-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .defender-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hardening-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .auth-modal {
+        width: 92%;
+        padding: 20px 16px;
+    }
+
+    .cmd-palette-box {
+        width: 95%;
+    }
+}
+
