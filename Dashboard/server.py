@@ -1903,28 +1903,46 @@ def get_cpu_brand() -> str:
     return _cpu_brand_name
 
 
+_cpu_raw_history: list[float] = []
+_cpu_per_core_history: list[list[float]] = []
+
+
 def _sample_cpu_sync():
-    global _latest_cpu_total, _latest_cpu_per_core, _latest_cpu_freq_ghz, _smoothed_per_core, _smoothed_cpu_total
+    global _latest_cpu_total, _latest_cpu_per_core, _latest_cpu_freq_ghz, _cpu_raw_history, _cpu_per_core_history
     try:
         raw_per_core = psutil.cpu_percent(interval=None, percpu=True)
         raw_total = psutil.cpu_percent(interval=None)
         freq = psutil.cpu_freq()
         ghz = round(freq.current / 1000, 2) if freq else 2.5
 
-        if _smoothed_per_core is None or len(_smoothed_per_core) != len(raw_per_core):
-            _smoothed_per_core = [float(x) for x in raw_per_core]
-            _smoothed_cpu_total = float(raw_total)
-        else:
-            # 50/50 Exponential Moving Average over strict 1s interval provides Task Manager grade smoothness
-            _smoothed_per_core = [
-                round(_smoothed_per_core[i] * 0.50 + raw_per_core[i] * 0.50, 1)
+        _cpu_raw_history.append(float(raw_total))
+        if len(_cpu_raw_history) > 3:
+            _cpu_raw_history.pop(0)
+
+        _cpu_per_core_history.append([float(x) for x in raw_per_core])
+        if len(_cpu_per_core_history) > 3:
+            _cpu_per_core_history.pop(0)
+
+        # 3-Tap Weighted Low-Pass Filter (50% current, 30% t-1, 20% t-2) for Task Manager grade stability
+        if len(_cpu_raw_history) == 3:
+            smooth_total = round(_cpu_raw_history[2] * 0.50 + _cpu_raw_history[1] * 0.30 + _cpu_raw_history[0] * 0.20, 1)
+            smooth_per_core = [
+                round(_cpu_per_core_history[2][i] * 0.50 + _cpu_per_core_history[1][i] * 0.30 + _cpu_per_core_history[0][i] * 0.20, 1)
                 for i in range(len(raw_per_core))
             ]
-            _smoothed_cpu_total = round(_smoothed_cpu_total * 0.50 + raw_total * 0.50, 1)
+        elif len(_cpu_raw_history) == 2:
+            smooth_total = round(_cpu_raw_history[1] * 0.60 + _cpu_raw_history[0] * 0.40, 1)
+            smooth_per_core = [
+                round(_cpu_per_core_history[1][i] * 0.60 + _cpu_per_core_history[0][i] * 0.40, 1)
+                for i in range(len(raw_per_core))
+            ]
+        else:
+            smooth_total = round(raw_total, 1)
+            smooth_per_core = [round(float(x), 1) for x in raw_per_core]
 
         with _cpu_sampler_lock:
-            _latest_cpu_total = _smoothed_cpu_total
-            _latest_cpu_per_core = list(_smoothed_per_core)
+            _latest_cpu_total = smooth_total
+            _latest_cpu_per_core = smooth_per_core
             _latest_cpu_freq_ghz = ghz
     except Exception:
         pass

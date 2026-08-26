@@ -23,7 +23,7 @@ export const EventLogCard: React.FC = () => {
   };
 
   return (
-    <div className="cyber-card p-4">
+    <div className="cyber-card p-4 flex flex-col justify-start h-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
@@ -39,15 +39,15 @@ export const EventLogCard: React.FC = () => {
         </button>
       </div>
 
-      {/* Log Console */}
-      <div className="h-44 sm:h-52 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/40 p-2.5 space-y-1.5 font-mono text-xs">
+      {/* Log Console - Matches Top Processes Table Height */}
+      <div className="h-[380px] sm:h-[390px] overflow-y-auto rounded-lg border border-white/[0.06] bg-black/40 p-2.5 space-y-1.5 font-mono text-xs">
         {eventHistory.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-500 font-sans text-xs">
             No events recorded yet.
           </div>
         ) : (
           eventHistory.map((entry, idx) => (
-            <div key={idx} className="flex items-start gap-2 text-slate-300 hover:bg-white/[0.02] p-1 rounded">
+            <div key={idx} className="flex items-start gap-2 text-slate-300 hover:bg-white/[0.02] p-1 rounded transition-colors">
               <span className="text-[10px] text-slate-500 shrink-0 font-mono pt-0.5">{entry.time}</span>
               {getEventIcon(entry.type)}
               <span className="text-xs break-all leading-tight">{entry.message}</span>
