@@ -208,18 +208,11 @@ def is_auth_enabled() -> bool:
 
 
 def is_ip_locked(ip: str) -> bool:
-    attempts = _failed_attempts.get(ip, [])
-    now = time.time()
-    recent = [t for t in attempts if now - t < LOCKOUT_SECONDS]
-    _failed_attempts[ip] = recent
-    return len(recent) >= MAX_FAILED_ATTEMPTS
+    return False
 
 
 def record_failed_attempt(ip: str):
-    now = time.time()
-    if ip not in _failed_attempts:
-        _failed_attempts[ip] = []
-    _failed_attempts[ip].append(now)
+    pass
 
 
 def verify_session_token(token: str | None) -> bool:
