@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Gamepad2, Edit3, Scissors } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
@@ -9,16 +9,23 @@ interface MuMuCardProps {
 export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
   const mumu = useDashboardStore((s) => s.mumu);
   const openEditGameModal = useDashboardStore((s) => s.openEditGameModal);
+  const [trimmingPid, setTrimmingPid] = useState<number | null>(null);
 
   const devices = mumu?.devices || [];
   const runningCount = devices.length;
+
+  const handleTrim = (pid: number, index: number) => {
+    setTrimmingPid(pid);
+    onTrimMemory(pid, index);
+    setTimeout(() => setTrimmingPid(null), 1000);
+  };
 
   return (
     <div className="cyber-card p-4 flex flex-col justify-start gap-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-          <Gamepad2 className="w-4 h-4 text-genesis-cyan" />
+          <Gamepad2 className="w-4 h-4 text-genesis-cyan animate-pulse" />
           MuMu Instances
         </span>
         <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
@@ -56,6 +63,7 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                 const index = dev.index ?? dev.instance_index ?? (idx + 1);
                 const isEmulator = (dev.type || '').toLowerCase().includes('emulator') || (dev.name || '').toLowerCase().includes('device');
                 const targetGame = dev.target_game || dev.target_game_name || 'Storage Hunters';
+                const isTrimming = trimmingPid === dev.pid;
 
                 return (
                   <tr key={dev.pid || index} className="hover:bg-white/[0.02] transition-colors">
@@ -75,10 +83,10 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                       {isEmulator ? (
                         <button
                           onClick={() => openEditGameModal(dev)}
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-genesis-cyan/10 hover:bg-genesis-cyan/20 border border-genesis-cyan/30 text-genesis-cyan text-[11px] font-bold transition-all group"
+                          className="btn-cyber inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-genesis-cyan/10 hover:bg-genesis-cyan/20 border border-genesis-cyan/30 text-genesis-cyan text-[11px] font-bold active:scale-95 transition-all group"
                           title="Click to change target game / place ID"
                         >
-                          <Gamepad2 className="w-3 h-3" />
+                          <Gamepad2 className="w-3 h-3 group-hover:rotate-12 transition-transform" />
                           <span>{targetGame}</span>
                           <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
                         </button>
@@ -92,11 +100,16 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                     <td className="py-2.5 px-3 text-right">
                       {isEmulator && (
                         <button
-                          onClick={() => onTrimMemory(dev.pid, index)}
-                          className="p-1 rounded bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border border-white/10 hover:border-genesis-accent/30 transition-all"
+                          onClick={() => handleTrim(dev.pid, index)}
+                          disabled={isTrimming}
+                          className={`btn-cyber p-1.5 rounded border transition-all active:scale-90 ${
+                            isTrimming
+                              ? 'bg-genesis-accent text-white border-genesis-accent animate-pulse shadow-glow-accent'
+                              : 'bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border-white/10 hover:border-genesis-accent/30'
+                          }`}
                           title="Trim working set memory"
                         >
-                          <Scissors className="w-3.5 h-3.5" />
+                          <Scissors className={`w-3.5 h-3.5 ${isTrimming ? 'animate-spin' : 'hover:scale-110'} transition-transform`} />
                         </button>
                       )}
                     </td>

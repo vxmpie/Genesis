@@ -28,7 +28,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
   const handleBoost = () => {
     setBoosting(true);
     onBoostNow();
-    setTimeout(() => setBoosting(false), 800);
+    setTimeout(() => setBoosting(false), 1200);
   };
 
   return (
@@ -37,11 +37,11 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
       <div>
         <div className="flex items-center justify-between mb-3">
           <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-            <Zap className="w-4 h-4 text-genesis-accent" />
+            <Zap className="w-4 h-4 text-genesis-accent animate-pulse" />
             Auto-Boost Engine
           </span>
           <span
-            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
               enabled
                 ? 'bg-genesis-green/10 text-genesis-green border-genesis-green/30 shadow-glow-green'
                 : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -55,15 +55,15 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
         <div className="flex flex-col gap-2.5 divide-y divide-white/[0.06]">
           {/* 1. Status Toggle */}
           <div className="flex items-center justify-between pt-1">
-            <label className="text-xs font-medium text-slate-300">Status</label>
+            <label className="text-xs font-medium text-slate-300">Autonomous Sentinel</label>
             <button
               onClick={() => onToggle(!enabled)}
-              className={`w-11 h-6 rounded-full transition-all relative p-0.5 ${
+              className={`w-11 h-6 rounded-full transition-all relative p-0.5 btn-cyber active:scale-90 ${
                 enabled ? 'bg-genesis-green shadow-glow-green' : 'bg-slate-700'
               }`}
             >
               <div
-                className={`w-5 h-5 rounded-full bg-white transition-all transform ${
+                className={`w-5 h-5 rounded-full bg-white transition-all transform duration-200 ${
                   enabled ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
@@ -76,7 +76,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => onSetThreshold(Math.max(10, threshold - 5))}
-                className="w-6 h-6 rounded bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-slate-300 border border-white/10 font-mono text-xs"
+                className="btn-cyber w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] hover:text-white flex items-center justify-center text-slate-300 border border-white/10 font-mono text-sm font-bold active:scale-90"
               >
                 -
               </button>
@@ -85,7 +85,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
               </span>
               <button
                 onClick={() => onSetThreshold(Math.min(95, threshold + 5))}
-                className="w-6 h-6 rounded bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-slate-300 border border-white/10 font-mono text-xs"
+                className="btn-cyber w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] hover:text-white flex items-center justify-center text-slate-300 border border-white/10 font-mono text-sm font-bold active:scale-90"
               >
                 +
               </button>
@@ -94,13 +94,13 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
 
           {/* 3. Mode Selector */}
           <div className="flex items-center justify-between pt-2">
-            <label className="text-xs font-medium text-slate-300">Mode</label>
+            <label className="text-xs font-medium text-slate-300">Operating Mode</label>
             <select
               value={mode}
               onChange={(e) => onSetMode(e.target.value as any)}
-              className="bg-black/50 border border-white/10 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none focus:border-genesis-accent"
+              className="bg-black/50 border border-white/10 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none focus:border-genesis-accent hover:border-white/20 transition-colors"
             >
-              <option value="scheduled">Scheduled</option>
+              <option value="scheduled">Scheduled Clock</option>
               <option value="auto">Dynamic Threshold</option>
             </select>
           </div>
@@ -112,7 +112,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
               <select
                 value={intervalMinutes}
                 onChange={(e) => onSetInterval(Number(e.target.value))}
-                className="bg-black/50 border border-white/10 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none focus:border-genesis-accent"
+                className="bg-black/50 border border-white/10 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none focus:border-genesis-accent hover:border-white/20 transition-colors"
               >
                 <option value={15}>15 min</option>
                 <option value={30}>30 min</option>
@@ -126,20 +126,21 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
 
       {/* Boost Button & Last Boost Status */}
       <div className="mt-4 pt-2 border-t border-white/[0.06]">
-        <div className="text-[10px] font-mono text-slate-400 mb-2 truncate">
-          Last boost: {autoBoost?.last_boost_time || 'Never'}
+        <div className="text-[10px] font-mono text-slate-400 mb-2 truncate flex items-center justify-between">
+          <span>Last boost: {autoBoost?.last_boost_time || 'Never'}</span>
+          <span className="text-genesis-accent text-[9px]">NtSetSystemInfo</span>
         </div>
         <button
           onClick={handleBoost}
           disabled={boosting}
-          className={`w-full py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-200 ${
+          className={`btn-cyber w-full py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
             boosting
-              ? 'bg-genesis-accent/50 text-white scale-[0.98]'
-              : 'bg-gradient-to-r from-red-600 via-genesis-accent to-orange-500 hover:opacity-95 text-white shadow-glow-accent active:scale-[0.98]'
+              ? 'bg-gradient-to-r from-orange-600 via-genesis-accent to-red-600 text-white animate-pulse shadow-glow-accent'
+              : 'bg-gradient-to-r from-red-600 via-genesis-accent to-orange-500 hover:brightness-110 text-white shadow-glow-accent'
           }`}
         >
-          <Zap className={`w-4 h-4 ${boosting ? 'animate-spin' : ''}`} />
-          <span>{boosting ? 'OPTIMIZING SYSTEM...' : 'BOOST NOW'}</span>
+          <Zap className={`w-4 h-4 ${boosting ? 'animate-spin text-white' : 'animate-bounce'}`} />
+          <span>{boosting ? 'Purging Standby & Processes...' : 'Boost RAM Now'}</span>
         </button>
       </div>
     </div>

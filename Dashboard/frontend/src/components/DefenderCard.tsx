@@ -25,15 +25,15 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-          <Shield className="w-4 h-4 text-genesis-green" />
+          <Shield className="w-4 h-4 text-genesis-green animate-pulse" />
           Windows Defender Sentinel
         </span>
         <button
           onClick={handleScan}
           disabled={scanning}
-          className="px-3 py-1 text-xs font-medium text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 rounded-md transition-all flex items-center gap-1.5"
+          className="btn-cyber px-3 py-1 text-xs font-medium text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] hover:text-white border border-white/10 hover:border-genesis-green/40 rounded-md transition-all flex items-center gap-1.5 active:scale-95 shadow-sm hover:shadow-glow-green"
         >
-          <Search className={`w-3.5 h-3.5 ${scanning ? 'animate-spin text-genesis-green' : ''}`} />
+          <Search className={`w-3.5 h-3.5 ${scanning ? 'animate-spin text-genesis-green' : 'group-hover:scale-110'} transition-transform`} />
           <span>{scanning ? 'Scanning...' : 'Quick Scan'}</span>
         </button>
       </div>
@@ -41,7 +41,7 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
       {/* Grid: 2 cols on mobile, 4 cols on desktop */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         {/* 1. Signatures */}
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex flex-col justify-between">
+        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-all flex flex-col justify-between">
           <span className="text-[10px] uppercase font-bold text-slate-400">Signatures</span>
           <div className="mt-1">
             <span
@@ -55,7 +55,7 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
         </div>
 
         {/* 2. Last Quick Scan */}
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex flex-col justify-between">
+        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-all flex flex-col justify-between">
           <span className="text-[10px] uppercase font-bold text-slate-400">Last Quick Scan</span>
           <div className="mt-1">
             <span
@@ -69,7 +69,7 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
         </div>
 
         {/* 3. Real-Time Protection */}
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex flex-col justify-between">
+        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-all flex flex-col justify-between">
           <span className="text-[10px] uppercase font-bold text-slate-400">Real-Time</span>
           <div className="mt-1">
             <span
@@ -83,7 +83,7 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
         </div>
 
         {/* 4. Downloads Sweep */}
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] flex flex-col justify-between">
+        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-all flex flex-col justify-between">
           <span className="text-[10px] uppercase font-bold text-slate-400">Downloads Sweep</span>
           <div className="mt-1">
             <span className="font-mono text-sm font-bold text-genesis-cyan">

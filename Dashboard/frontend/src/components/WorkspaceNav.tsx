@@ -42,13 +42,13 @@ export const WorkspaceNav: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveView(tab.id)}
-            className={`flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg text-xs font-semibold transition-all duration-200 select-none ${
+            className={`btn-cyber flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg text-xs font-semibold select-none ${
               isActive
-                ? 'bg-gradient-to-r from-genesis-accent/25 to-orange-500/15 text-white border border-genesis-accent/40 shadow-glow-accent'
+                ? 'bg-gradient-to-r from-genesis-accent/25 to-orange-500/15 text-white border border-genesis-accent/40 shadow-glow-accent scale-[1.02]'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.05] border border-transparent'
             }`}
           >
-            <span className={isActive ? 'text-genesis-accent' : 'text-slate-400'}>{tab.icon}</span>
+            <span className={isActive ? 'text-genesis-accent animate-pulse' : 'text-slate-400'}>{tab.icon}</span>
             <span className="hidden md:inline">{tab.label}</span>
             <span className="inline md:hidden text-[11px] truncate">{tab.shortLabel}</span>
           </button>

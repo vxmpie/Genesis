@@ -31,7 +31,7 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
         <div className="bg-white/[0.02] border border-white/[0.06] hover:border-genesis-cyan/30 rounded-lg p-2.5 sm:p-3 flex flex-col justify-between transition-all">
           <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="flex items-center gap-1.5 text-genesis-cyan truncate">
-              <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+              <Clock className="w-3.5 h-3.5 flex-shrink-0 animate-pulse" />
               Uptime
             </span>
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-genesis-green/10 text-genesis-green border border-genesis-green/20 font-bold">
@@ -50,7 +50,7 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
         <div className="bg-white/[0.02] border border-white/[0.06] hover:border-genesis-accent/30 rounded-lg p-2.5 sm:p-3 flex flex-col justify-between transition-all">
           <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="flex items-center gap-1.5 text-genesis-accent truncate">
-              <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+              <Zap className="w-3.5 h-3.5 flex-shrink-0 animate-bounce" />
               Boosts
             </span>
             <span className="text-[9px] font-mono font-bold text-slate-400 bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06]">
@@ -67,14 +67,14 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
             <div className="flex items-center gap-1">
               <button
                 onClick={onResetSession}
-                className="text-[9px] px-1 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/10"
+                className="btn-cyber text-[9px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 hover:text-white border border-white/10 active:scale-90 font-mono transition-transform"
                 title="Reset Session Boost Counter"
               >
                 ↺ Sess
               </button>
               <button
                 onClick={onResetTotal}
-                className="text-[9px] px-1 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 border border-white/10"
+                className="btn-cyber text-[9px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-white border border-white/10 active:scale-90 font-mono transition-transform"
                 title="Reset Total Lifetime Counter"
               >
                 ↺ Total
@@ -87,7 +87,7 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
         <div className="bg-white/[0.02] border border-white/[0.06] hover:border-genesis-green/30 rounded-lg p-2.5 sm:p-3 flex flex-col justify-between transition-all">
           <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="flex items-center gap-1.5 text-genesis-green truncate">
-              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
+              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0 text-genesis-green" />
               Standby Guard
             </span>
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-genesis-green/10 text-genesis-green border border-genesis-green/20 font-bold">
@@ -108,7 +108,7 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
         <div className="bg-white/[0.02] border border-white/[0.06] hover:border-genesis-cyan/30 rounded-lg p-2.5 sm:p-3 flex flex-col justify-between transition-all">
           <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="flex items-center gap-1.5 text-genesis-cyan truncate">
-              <HardDrive className="w-3.5 h-3.5 flex-shrink-0" />
+              <HardDrive className="w-3.5 h-3.5 flex-shrink-0 text-genesis-cyan" />
               NVMe (C:)
             </span>
             <span className="text-[9px] font-mono text-slate-400 font-bold">{diskPercent}%</span>

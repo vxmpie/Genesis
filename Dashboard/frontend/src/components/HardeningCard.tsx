@@ -13,7 +13,7 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
   const handleRefresh = () => {
     setSpinning(true);
     onRefresh();
-    setTimeout(() => setSpinning(false), 800);
+    setTimeout(() => setSpinning(false), 900);
   };
 
   const items = [
@@ -29,21 +29,21 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
         return {
           icon: <CheckCircle2 className="w-5 h-5 text-genesis-green" />,
           text: 'Protected',
-          borderClass: 'border-genesis-green/20 bg-genesis-green/[0.03]',
+          borderClass: 'border-genesis-green/20 bg-genesis-green/[0.03] hover:border-genesis-green/40 hover:bg-genesis-green/[0.06]',
           textColor: 'text-genesis-green',
         };
       case 'drift':
         return {
           icon: <AlertTriangle className="w-5 h-5 text-genesis-amber animate-pulse" />,
           text: 'Drift Detected',
-          borderClass: 'border-genesis-amber/40 bg-genesis-amber/[0.05]',
+          borderClass: 'border-genesis-amber/40 bg-genesis-amber/[0.05] hover:border-genesis-amber/60 hover:bg-genesis-amber/[0.08]',
           textColor: 'text-genesis-amber font-bold',
         };
       case 'disabled':
         return {
           icon: <XCircle className="w-5 h-5 text-genesis-accent" />,
           text: 'Disabled',
-          borderClass: 'border-genesis-accent/40 bg-genesis-accent/[0.05]',
+          borderClass: 'border-genesis-accent/40 bg-genesis-accent/[0.05] hover:border-genesis-accent/60',
           textColor: 'text-genesis-accent',
         };
       default:
@@ -61,15 +61,15 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-          <ShieldCheck className="w-4 h-4 text-genesis-green" />
+          <ShieldCheck className="w-4 h-4 text-genesis-green animate-pulse" />
           System Hardening
         </span>
         <button
           onClick={handleRefresh}
-          className="p-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.1] text-slate-400 hover:text-white transition-all border border-white/10"
+          className="btn-cyber p-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.1] text-slate-400 hover:text-white transition-all border border-white/10 active:scale-90"
           title="Audit System Hardening"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${spinning ? 'animate-spin text-genesis-cyan' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${spinning ? 'animate-spin text-genesis-cyan' : 'hover:rotate-180 transition-transform duration-300'}`} />
         </button>
       </div>
 
@@ -80,7 +80,7 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
           return (
             <div
               key={item.key}
-              className={`p-3 rounded-lg border flex flex-col items-center justify-center text-center gap-1.5 transition-all hover:scale-[1.02] ${badge.borderClass}`}
+              className={`p-3 rounded-lg border flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer hover:scale-[1.03] active:scale-[0.98] ${badge.borderClass}`}
             >
               {badge.icon}
               <span className="font-bold text-xs text-white">{item.name}</span>

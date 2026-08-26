@@ -39,6 +39,27 @@
     @apply border-genesis-cyan/30;
   }
 
+  /* Universal Interactive Cyber Button */
+  .btn-cyber {
+    @apply relative overflow-hidden transition-all duration-150 active:scale-95 select-none focus:outline-none focus:ring-1 focus:ring-genesis-cyan/40;
+  }
+
+  .btn-cyber::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+    transition: transform 0.6s ease;
+    pointer-events: none;
+  }
+
+  .btn-cyber:hover::after {
+    transform: translateX(200%);
+  }
+
   /* Glow Elements */
   .glow-cyan {
     filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.4));
@@ -55,9 +76,19 @@
 
 @keyframes pulseGlow {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.1); }
+  50% { opacity: 0.6; transform: scale(1.08); }
+}
+
+@keyframes buttonPressRipple {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.5); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 229, 255, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
 }
 
 .animate-pulse-glow {
   animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-click-ripple:active {
+  animation: buttonPressRipple 0.3s ease-out;
 }

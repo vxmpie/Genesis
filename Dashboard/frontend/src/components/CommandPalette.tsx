@@ -59,7 +59,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => 
           />
           <button
             onClick={() => setOpen(false)}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.05]"
+            className="btn-cyber p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.05] active:scale-90"
           >
             <X className="w-4 h-4" />
           </button>
@@ -77,9 +77,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => 
                   setOpen(false);
                   onExecute(cmd.id);
                 }}
-                className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.06] text-left transition-all group"
+                className="btn-cyber w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.06] text-left transition-all group active:scale-[0.98]"
               >
-                <div className="p-2 rounded-md bg-white/[0.03] border border-white/[0.06] group-hover:border-genesis-cyan/40">
+                <div className="p-2 rounded-md bg-white/[0.03] border border-white/[0.06] group-hover:border-genesis-cyan/40 group-hover:scale-110 transition-transform">
                   {cmd.icon}
                 </div>
                 <div>
