@@ -122,9 +122,7 @@ export function useWebSocket() {
         }
         break;
       case 'boost_result':
-        if (data.result) {
-          addToast('boost', `RAM Boost Complete: Purged Standby & Processes (Freed ${data.result.freed_mb || 0} MB)`);
-        }
+        // Handled cleanly via live broadcast event
         break;
       case 'config_updated':
         if (data.auto_boost) {

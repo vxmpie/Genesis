@@ -3238,9 +3238,6 @@ async def handle_ws_command(ws: WebSocket, data: dict):
     if cmd == "boost":
         result = await asyncio.to_thread(ram_boost, True)
         summary = get_session_summary()
-        latest_event = event_history[-1] if event_history else None
-        if latest_event:
-            await manager.broadcast({"type": "event", "event": latest_event})
         await ws.send_json({"type": "boost_result", "result": result, "summary": summary})
         # Broadcast updated summary and boost info to all connected dashboards immediately
         await manager.broadcast({

@@ -77,7 +77,7 @@ interface DashboardState {
   updateMetricsPayload: (data: any) => void;
 }
 
-export const useDashboardStore = create<DashboardState>((set) => ({
+export const useDashboardStore = create<DashboardState>((set, get) => ({
   activeView: 'overview',
   connected: false,
   authenticated: false,
@@ -136,6 +136,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   closeEditGameModal: () => set({ editGameModalOpen: false, editingDevice: null }),
 
   addToast: (type, message) => {
+    // Suppress duplicate identical active toast
+    const active = get().toasts;
+    if (active.some((t) => t.message === message)) return;
+
     const id = `${Date.now()}_${Math.random()}`;
     set((s) => ({ toasts: [...s.toasts, { id, type, message }] }));
     setTimeout(() => {
