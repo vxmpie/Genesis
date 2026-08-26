@@ -488,7 +488,8 @@ function updateMetrics(m) {
     const cpuTotal = Math.round(m.cpu.total_percent);
     DOM.cpuPercent.textContent = cpuTotal;
     setRing(DOM.cpuRing, cpuTotal);
-    DOM.cpuSub.textContent = `${m.cpu.core_count} Threads`;
+    const ghzText = m.cpu.frequency_ghz > 0 ? ` • ${m.cpu.frequency_ghz} GHz` : '';
+    DOM.cpuSub.textContent = `${m.cpu.core_count} Cores${ghzText}`;
 
     const ramPct = Math.round(m.ram.percent);
     DOM.ramPercent.textContent = ramPct;
@@ -528,8 +529,9 @@ function updateMetrics(m) {
     setRing(DOM.diskRing, Math.min(diskTotal, 100), 100);
     DOM.diskSub.textContent = `R: ${diskRead.toFixed(1)} / W: ${diskWrite.toFixed(1)}`;
 
+    const pingText = m.network.roblox_ping_ms > 0 ? ` (⚡${m.network.roblox_ping_ms}ms)` : '';
     DOM.netUpSpeed.textContent = `${(m.network.sent_speed_mbs || 0).toFixed(2)} MB/s`;
-    DOM.netDownSpeed.textContent = `${(m.network.recv_speed_mbs || 0).toFixed(2)} MB/s`;
+    DOM.netDownSpeed.textContent = `${(m.network.recv_speed_mbs || 0).toFixed(2)} MB/s${pingText}`;
     DOM.netTotalUp.textContent = `${m.network.sent_mb} MB`;
     DOM.netTotalDown.textContent = `${m.network.recv_mb} MB`;
 

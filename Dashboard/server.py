@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import struct
 import subprocess
 import tempfile
@@ -1833,21 +1834,57 @@ def get_gpu_metrics() -> dict:
     return {"available": False}
 
 
+_last_roblox_ping_ms = 0
+_ping_sampler_task = None
+
+
+async def roblox_ping_sampler_loop():
+    """Background latency sampler to Roblox Cloud Edge CDN every 10s."""
+    global _last_roblox_ping_ms
+    while True:
+        try:
+            def _ping():
+                t0 = time.perf_counter()
+                try:
+                    s = socket.create_connection(("clientsettingscdn.roblox.com", 443), timeout=3)
+                    s.close()
+                    return round((time.perf_counter() - t0) * 1000, 1)
+                except Exception:
+                    return 0
+            _last_roblox_ping_ms = await asyncio.to_thread(_ping)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+
 def get_system_metrics() -> dict:
     cpu_per_core = psutil.cpu_percent(interval=0, percpu=True)
     cpu_total = psutil.cpu_percent(interval=0)
     mem = psutil.virtual_memory()
     disk_io = psutil.disk_io_counters()
     net_io = psutil.net_io_counters()
+    swap = psutil.swap_memory()
+    freq = psutil.cpu_freq()
+    boot_time = psutil.boot_time()
+    uptime_sec = time.time() - boot_time
+    hours = int(uptime_sec // 3600)
+    mins = int((uptime_sec % 3600) // 60)
 
     return {
         "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "system": {
+            "uptime": f"{hours}h {mins:02d}m",
+            "uptime_seconds": int(uptime_sec),
+        },
         "cpu": {
             "total_percent": cpu_total,
             "per_core": cpu_per_core,
             "core_count": len(cpu_per_core),
             "p_cores": cpu_per_core[:8],
             "e_cores": cpu_per_core[8:],
+            "frequency_ghz": round(freq.current / 1000, 2) if freq else 0.0,
         },
         "ram": {
             "total_gb": round(mem.total / (1024 ** 3), 1),
@@ -1855,6 +1892,11 @@ def get_system_metrics() -> dict:
             "available_gb": round(mem.available / (1024 ** 3), 1),
             "percent": mem.percent,
             "breakdown": get_ram_breakdown(),
+            "pagefile": {
+                "used_gb": round(swap.used / (1024 ** 3), 1),
+                "total_gb": round(swap.total / (1024 ** 3), 1),
+                "percent": swap.percent,
+            },
         },
         "gpu": get_gpu_metrics(),
         "disk": {
@@ -1864,6 +1906,7 @@ def get_system_metrics() -> dict:
         "network": {
             "sent_mb": round(net_io.bytes_sent / (1024 ** 2), 1),
             "recv_mb": round(net_io.bytes_recv / (1024 ** 2), 1),
+            "roblox_ping_ms": _last_roblox_ping_ms,
         },
         "storage": {
             "c_drive": {
@@ -2717,8 +2760,9 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task
     psutil.cpu_percent(interval=0, percpu=True)
+    _ping_sampler_task = asyncio.create_task(roblox_ping_sampler_loop())
     _process_sampler_task = asyncio.create_task(process_sampler_loop())
     _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
     _mumu_reconnect_task = asyncio.create_task(mumu_game_watchdog_loop())
@@ -2731,6 +2775,8 @@ async def lifespan(app: FastAPI):
     add_event("system", "Genesis Autonomous Core started")
 
     yield
+    if _ping_sampler_task:
+        _ping_sampler_task.cancel()
     if _process_sampler_task:
         _process_sampler_task.cancel()
     if _mumu_reconnect_task:
