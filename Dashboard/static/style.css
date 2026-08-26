@@ -3225,13 +3225,23 @@ body {
 
     /* CPU Per-Core Chart: 2 rows of 8 on mobile */
     .cores-chart {
-        grid-template-columns: repeat(8, 1fr);
-        row-gap: 8px;
-        height: 110px;
+        grid-template-columns: repeat(8, 1fr) !important;
+        grid-template-rows: 55px 55px !important;
+        row-gap: 12px !important;
+        column-gap: 4px !important;
+        height: auto !important;
+        min-height: 122px !important;
+        align-items: stretch !important;
     }
 
     .core-bar-wrap {
-        height: 50px;
+        height: 55px !important;
+        justify-content: flex-end !important;
+    }
+
+    .core-label {
+        font-size: 8px !important;
+        margin-top: 2px;
     }
 
     /* Hardening Grid */
