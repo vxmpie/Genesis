@@ -61,6 +61,7 @@ interface DashboardState {
   setDeepCleanPreview: (items: DeepCleanPreviewItem[]) => void;
   setIsDeepCleaning: (v: boolean) => void;
   setIsScanningClean: (v: boolean) => void;
+  updateAutoBoost: (partial: Partial<NonNullable<DashboardState['autoBoost']>>) => void;
 
   setAuthModalOpen: (open: boolean) => void;
   setCmdPaletteOpen: (open: boolean) => void;
@@ -124,6 +125,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setDeepCleanPreview: (deepCleanPreview) => set({ deepCleanPreview }),
   setIsDeepCleaning: (isDeepCleaning) => set({ isDeepCleaning }),
   setIsScanningClean: (isScanningClean) => set({ isScanningClean }),
+  updateAutoBoost: (partial) =>
+    set((s) => ({
+      autoBoost: s.autoBoost ? { ...s.autoBoost, ...partial } : (partial as any),
+    })),
 
   setAuthModalOpen: (authModalOpen) => set({ authModalOpen }),
   setCmdPaletteOpen: (cmdPaletteOpen) => set({ cmdPaletteOpen }),

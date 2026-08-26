@@ -94,10 +94,22 @@ export function App() {
               onTrimMemory={(pid, index) => requireAuthGuard(() => sendCommand('trim_mumu_instance', { pid, instance: index }))}
             />
             <AutoBoostCard
-              onToggle={(enabled) => sendCommand('set_auto_boost', { enabled })}
-              onSetThreshold={(threshold) => sendCommand('set_threshold', { threshold })}
-              onSetMode={(mode) => sendCommand('set_boost_mode', { mode })}
-              onSetInterval={(interval_minutes) => sendCommand('set_boost_interval', { interval_minutes })}
+              onToggle={(enabled) => {
+                useDashboardStore.getState().updateAutoBoost({ enabled });
+                sendCommand('set_auto_boost', { enabled });
+              }}
+              onSetThreshold={(threshold) => {
+                useDashboardStore.getState().updateAutoBoost({ threshold });
+                sendCommand('set_threshold', { threshold });
+              }}
+              onSetMode={(mode) => {
+                useDashboardStore.getState().updateAutoBoost({ mode });
+                sendCommand('set_boost_mode', { mode });
+              }}
+              onSetInterval={(interval_minutes) => {
+                useDashboardStore.getState().updateAutoBoost({ interval_minutes });
+                sendCommand('set_boost_interval', { interval_minutes });
+              }}
               onBoostNow={() => requireAuthGuard(() => sendCommand('boost'))}
             />
           </div>
@@ -117,8 +129,14 @@ export function App() {
         {/* Deep Clean Engine (Overview, System) */}
         {(activeView === 'overview' || activeView === 'system') && (
           <DeepCleanCard
-            onScan={() => sendCommand('deep_clean_preview')}
-            onExecuteClean={() => requireAuthGuard(() => sendCommand('deep_clean_execute'))}
+            onScan={() => {
+              useDashboardStore.getState().setIsScanningClean(true);
+              sendCommand('deep_clean_preview');
+            }}
+            onExecuteClean={() => {
+              useDashboardStore.getState().setIsDeepCleaning(true);
+              requireAuthGuard(() => sendCommand('deep_clean_execute'));
+            }}
           />
         )}
 

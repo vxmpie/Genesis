@@ -121,6 +121,20 @@ export function useWebSocket() {
           addToast('error', 'Deep clean completed with warnings');
         }
         break;
+      case 'boost_result':
+        if (data.result) {
+          addToast('boost', `RAM Boost Complete: Purged Standby & Processes (Freed ${data.result.freed_mb || 0} MB)`);
+        }
+        break;
+      case 'config_updated':
+        if (data.auto_boost) {
+          useDashboardStore.getState().updateAutoBoost(data.auto_boost);
+          addToast('system', `Auto-Boost Configuration Updated (${data.auto_boost.enabled ? 'Armed' : 'Disarmed'})`);
+        }
+        break;
+      case 'quick_scan_result':
+        addToast('system', data.success ? 'Windows Defender Quick Scan Started in Background' : 'Quick Scan Initiated');
+        break;
       case 'flush_dns_result':
         addToast('system', data.success ? 'DNS resolver cache flushed' : 'Failed to flush DNS');
         break;

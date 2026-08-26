@@ -3168,18 +3168,39 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         result = ram_boost(force_standby=True)
         await ws.send_json({"type": "boost_result", "result": result})
 
-    elif cmd == "update_config":
+    elif cmd in ("update_config", "set_auto_boost", "toggle_auto_boost", "set_threshold", "set_boost_mode", "set_boost_interval"):
         payload = data.get("config", {})
-        if "threshold_percent" in payload:
-            CONFIG["auto_boost"]["threshold_percent"] = int(payload["threshold_percent"])
-        if "mode" in payload:
-            CONFIG["auto_boost"]["mode"] = payload["mode"]
-        if "enabled" in payload:
+        if "enabled" in data:
+            CONFIG["auto_boost"]["enabled"] = bool(data["enabled"])
+        elif "enabled" in payload:
             CONFIG["auto_boost"]["enabled"] = bool(payload["enabled"])
-        if "interval_minutes" in payload:
+
+        if "threshold" in data:
+            CONFIG["auto_boost"]["threshold_percent"] = int(data["threshold"])
+        elif "threshold_percent" in payload:
+            CONFIG["auto_boost"]["threshold_percent"] = int(payload["threshold_percent"])
+
+        if "mode" in data:
+            CONFIG["auto_boost"]["mode"] = str(data["mode"])
+        elif "mode" in payload:
+            CONFIG["auto_boost"]["mode"] = str(payload["mode"])
+
+        if "interval_minutes" in data:
+            CONFIG["auto_boost"]["interval_minutes"] = int(data["interval_minutes"])
+        elif "interval_minutes" in payload:
             CONFIG["auto_boost"]["interval_minutes"] = int(payload["interval_minutes"])
+
         save_config(CONFIG)
-        await ws.send_json({"type": "config_updated", "config": CONFIG})
+        await ws.send_json({
+            "type": "config_updated",
+            "config": CONFIG,
+            "auto_boost": {
+                "enabled": CONFIG["auto_boost"]["enabled"],
+                "mode": CONFIG["auto_boost"]["mode"],
+                "threshold": CONFIG["auto_boost"]["threshold_percent"],
+                "interval_minutes": CONFIG["auto_boost"]["interval_minutes"],
+            }
+        })
 
     elif cmd in ("deep_clean_preview", "scan_deep_clean", "scan_targets"):
         preview = await asyncio.to_thread(deep_clean_preview)
