@@ -2797,13 +2797,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Genesis Dashboard", version="2.4.0", lifespan=lifespan)
 
 static_dir = BASE_DIR / "static"
-static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+frontend_dist_dir = BASE_DIR / "frontend" / "dist"
+legacy_static_dir = BASE_DIR / "static"
 
+if frontend_dist_dir.exists():
+    assets_dir = frontend_dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    
+    @app.get("/")
+    async def serve_dashboard():
+        return FileResponse(str(frontend_dist_dir / "index.html"))
+else:
+    legacy_static_dir.mkdir(exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(legacy_static_dir)), name="static")
 
-@app.get("/")
-async def serve_dashboard():
-    return FileResponse(str(static_dir / "index.html"))
+    @app.get("/")
+    async def serve_dashboard():
+        return FileResponse(str(legacy_static_dir / "index.html"))
 
 
 # ---------------------------------------------------------------------------
@@ -2812,21 +2823,15 @@ async def serve_dashboard():
 @app.post("/api/auth/login")
 async def api_auth_login(request: Request, payload: dict):
     client_ip = get_client_ip(request)
-    if is_ip_locked(client_ip):
-        return JSONResponse(
-            {"error": "Too many failed attempts. Locked for 10 minutes."},
-            status_code=429,
-        )
-
     pin = str(payload.get("pin", "")).strip()
 
     if verify_pin_input(pin):
         token = create_session_token()
-        add_event("system", f"🔑 Session unlocked (IP: {client_ip})")
+        add_event("system", f"Session unlocked (IP: {client_ip})")
         return JSONResponse({"ok": True, "token": token})
     else:
         record_failed_attempt(client_ip)
-        add_event("warning", f"🚫 Failed PIN attempt from IP: {client_ip}")
+        add_event("warning", f"Failed PIN attempt from IP: {client_ip}")
         return JSONResponse({"error": "Invalid PIN"}, status_code=401)
 
 

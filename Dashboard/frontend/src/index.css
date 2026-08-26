@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom Sleek Scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a0f;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 229, 255, 0.4);
+  }
+}
+
+@layer components {
+  /* Cyberpunk Glass Card Base */
+  .cyber-card {
+    @apply bg-genesis-card/90 border border-white/[0.08] rounded-card shadow-card backdrop-blur-md transition-all duration-200 relative overflow-hidden;
+  }
+  
+  .cyber-card:hover {
+    @apply border-genesis-cyan/30;
+  }
+
+  /* Glow Elements */
+  .glow-cyan {
+    filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.4));
+  }
+  
+  .glow-accent {
+    filter: drop-shadow(0 0 8px rgba(255, 60, 60, 0.4));
+  }
+  
+  .glow-green {
+    filter: drop-shadow(0 0 8px rgba(0, 255, 136, 0.4));
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.1); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

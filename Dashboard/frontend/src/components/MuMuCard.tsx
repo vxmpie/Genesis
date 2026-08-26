@@ -1,0 +1,102 @@
+import React from 'react';
+import { Gamepad2, Edit3, Scissors } from 'lucide-react';
+import { useDashboardStore } from '../store/useDashboard';
+
+interface MuMuCardProps {
+  onTrimMemory: (index: number) => void;
+}
+
+export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
+  const mumu = useDashboardStore((s) => s.mumu);
+  const openEditGameModal = useDashboardStore((s) => s.openEditGameModal);
+
+  const devices = mumu?.devices || [];
+  const runningCount = devices.filter((d) => (d?.type || '').toLowerCase().includes('emulator')).length;
+
+  return (
+    <div className="cyber-card p-4 flex flex-col justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
+          <Gamepad2 className="w-4 h-4 text-genesis-cyan" />
+          MuMu Instances
+        </span>
+        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-genesis-cyan/10 text-genesis-cyan border border-genesis-cyan/20">
+          {runningCount} {runningCount === 1 ? 'instance' : 'instances'} running
+        </span>
+      </div>
+
+      {/* Responsive Table Container */}
+      <div className="w-full overflow-x-auto rounded-lg border border-white/[0.06] bg-black/20">
+        <table className="w-full text-left text-xs font-mono min-w-[500px]">
+          <thead className="bg-white/[0.03] text-slate-400 border-b border-white/[0.06] text-[10px] uppercase">
+            <tr>
+              <th className="py-2 px-3">#</th>
+              <th className="py-2 px-3">Type</th>
+              <th className="py-2 px-3">Target Game</th>
+              <th className="py-2 px-3">CPU%</th>
+              <th className="py-2 px-3">RAM</th>
+              <th className="py-2 px-3">Uptime</th>
+              <th className="py-2 px-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.04] text-slate-200">
+            {devices.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-6 text-center text-slate-500 font-sans">
+                  No active MuMu Player instances detected
+                </td>
+              </tr>
+            ) : (
+              devices.map((dev) => (
+                <tr key={dev.index} className="hover:bg-white/[0.02] transition-colors">
+                  <td className="py-2.5 px-3 font-bold text-white">{dev.index}</td>
+                  <td className="py-2.5 px-3">
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        (dev.type || '') === 'Emulator'
+                          ? 'bg-genesis-cyan/10 text-genesis-cyan border border-genesis-cyan/20'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {dev.type || 'Process'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3">
+                    {(dev.type || '') === 'Emulator' ? (
+                      <button
+                        onClick={() => openEditGameModal(dev)}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-genesis-cyan/10 hover:bg-genesis-cyan/20 border border-genesis-cyan/30 text-genesis-cyan text-[11px] font-bold transition-all group"
+                        title="Click to change target game / place ID"
+                      >
+                        <Gamepad2 className="w-3 h-3" />
+                        <span>{dev.target_game || 'Storage Hunters'}</span>
+                        <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
+                      </button>
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3 text-slate-300">{dev.cpu_percent}%</td>
+                  <td className="py-2.5 px-3 text-genesis-blue font-bold">{dev.ram_mb} MB</td>
+                  <td className="py-2.5 px-3 text-slate-400">{dev.uptime || '—'}</td>
+                  <td className="py-2.5 px-3 text-right">
+                    {(dev.type || '') === 'Emulator' && (
+                      <button
+                        onClick={() => onTrimMemory(dev.index)}
+                        className="p-1 rounded bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border border-white/10 hover:border-genesis-accent/30 transition-all"
+                        title="Trim working set memory"
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
