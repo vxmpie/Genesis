@@ -2363,8 +2363,14 @@ def get_game_name_for_place_id(place_id: int) -> str:
     return f"Place {place_id}"
 
 
+_bot_heartbeats: dict = {}  # serial -> {"last_seen": float, "place_id": int, "status": str, "player": str, "extra": dict}
+
+
 def recover_roblox_instance(serial: str, place_id: int | None = None, instance_idx: int | str = 1) -> bool:
-    """Safely restart and rejoin Roblox on a specific MuMu Android instance."""
+    """Smart Zero-Lag Multi-Tier Recovery Engine:
+    Tier 1: Precision Soft-Tap on Roblox Reconnect modal.
+    Tier 2: Instant Deep Link Rejoin if modal fails or app exits.
+    """
     adb = _find_mumu_adb()
     if not adb:
         return False
@@ -2374,17 +2380,44 @@ def recover_roblox_instance(serial: str, place_id: int | None = None, instance_i
     game_name = get_game_name_for_place_id(place_id)
 
     try:
-        # 1. Force stop Roblox client
-        subprocess.run([str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"], capture_output=True, timeout=5)
-        time.sleep(1)
-        # 2. Start Roblox with Deep Link into target Place ID
-        deep_link = f"roblox://placeId={place_id}"
-        subprocess.run([str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link], capture_output=True, timeout=5)
+        # Phase 1: Precision Soft Tap on Reconnect Modal
+        # Get screen dimensions (e.g. 1600x900, 1280x720, 1920x1080)
+        r_wm = subprocess.run([str(adb), "-s", serial, "shell", "wm", "size"], capture_output=True, text=True, timeout=4)
+        w, h = 1600, 900
+        if "Physical size:" in r_wm.stdout:
+            dim_str = r_wm.stdout.split("Physical size:")[1].strip().split("x")
+            if len(dim_str) == 2:
+                dim_a, dim_b = int(dim_str[0]), int(dim_str[1])
+                w, h = max(dim_a, dim_b), min(dim_a, dim_b)  # Always landscape
+
+        # On Roblox Error 277 / Disconnect dialog in landscape, Reconnect button is on right side
+        tap_x = int(w * 0.575)
+        tap_y = int(h * 0.622)
+
+        # Send gentle tap to trigger Reconnect
+        subprocess.run([str(adb), "-s", serial, "shell", "input", "tap", str(tap_x), str(tap_y)], capture_output=True, timeout=4)
+        time.sleep(3)
+
+        # Check if Roblox process is focused and running
+        r_win = subprocess.run([str(adb), "-s", serial, "shell", "dumpsys", "window", "displays"], capture_output=True, text=True, timeout=5)
+        is_roblox_focused = "ActivityNativeMain" in r_win.stdout and "Lawnchair" not in r_win.stdout
+
+        if not is_roblox_focused:
+            # Phase 2: Instant Deep Link Rejoin
+            subprocess.run([str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"], capture_output=True, timeout=5)
+            time.sleep(0.5)
+            deep_link = f"roblox://placeId={place_id}"
+            subprocess.run([str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link], capture_output=True, timeout=5)
+
+        # Increment recovery metric counter
+        if "summary" in globals() and summary:
+            summary.net_recoveries = summary.net_recoveries + 1
+
         add_event("system", f"🔄 MuMu Watchdog: Auto-recovered Roblox on Instance {instance_idx} ({serial}) -> {game_name}")
         if CONFIG.get("alerts", {}).get("notify_on_watchdog_recovery", True):
             send_discord_alert(
                 "🔄 Roblox Game Auto-Recovered",
-                f"MuMu Autonomous Watchdog detected disconnect/freeze on **Instance {instance_idx}** (`{serial}`).\nRoblox process was safely restarted and rejoined into **{game_name}** (`{place_id}`).",
+                f"MuMu Autonomous Watchdog detected disconnect/freeze on **Instance {instance_idx}** (`{serial}`).\nRoblox was safely rejoined into **{game_name}** (`{place_id}`).",
                 color=0x00D2FF,
                 fields=[
                     {"name": "Instance", "value": f"Instance {instance_idx} (`{serial}`)", "inline": True},
@@ -2403,45 +2436,50 @@ _mumu_reconnect_task = None
 
 
 async def mumu_game_watchdog_loop():
-    """Autonomous background supervisor to auto-detect and fix Roblox disconnects/hangs."""
-    await asyncio.sleep(20)  # Wait for initial boot
+    """Smart Zero-Lag Autonomous Watchdog.
+    - Zero ADB polling while game is playing smoothly with active heartbeats.
+    - Wakes up ONLY when heartbeat is missing > 45s or when disconnect event is received.
+    """
+    await asyncio.sleep(20)  # Gentle initial boot delay
     while True:
         try:
             mumu_cfg = CONFIG.get("mumu", {})
             if mumu_cfg.get("auto_reconnect", True):
+                now = time.time()
                 adb = _find_mumu_adb()
                 if adb:
                     devices = await asyncio.to_thread(get_mumu_adb_devices)
-
                     for idx, serial in enumerate(devices, 1):
-                        place_id = get_instance_place_id(idx, serial)
-
-                        # Check if Roblox process is running
-                        r_pid = await asyncio.to_thread(
-                            lambda s=serial: subprocess.run([str(adb), "-s", s, "shell", "pidof", "com.roblox.client"], capture_output=True, text=True, timeout=5)
-                        )
-                        pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
-
-                        # Check focused window
-                        r_win = await asyncio.to_thread(
-                            lambda s=serial: subprocess.run([str(adb), "-s", s, "shell", "dumpsys", "window"], capture_output=True, text=True, timeout=5)
-                        )
-                        win_out = r_win.stdout if r_win.returncode == 0 else ""
-
-                        is_error_dialog = ("ErrorPrompt" in win_out or "Application Not Responding" in win_out or "is not responding" in win_out)
-
-                        if not pid_out or is_error_dialog:
-                            _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
-                            if _mumu_consecutive_idle[serial] >= 2:  # 2 checks in a row (~60s)
-                                print(f"[MUMU WATCHDOG] Instance {idx} ({serial}) disconnected/frozen. Recovering to Place {place_id}...")
+                        hb = _bot_heartbeats.get(serial)
+                        if hb:
+                            last_seen = hb.get("last_seen", 0)
+                            # Heartbeat timed out (> 45s) -> Disconnected / Frozen / Error 277
+                            if now - last_seen > 45:
+                                place_id = get_instance_place_id(idx, serial)
+                                print(f"[SMART WATCHDOG] Instance {idx} ({serial}) heartbeat timed out ({int(now - last_seen)}s). Auto-recovering...")
                                 await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
-                                _mumu_consecutive_idle[serial] = 0
+                                _bot_heartbeats[serial]["last_seen"] = now  # Reset timer to avoid spamming
                         else:
-                            _mumu_consecutive_idle[serial] = 0
+                            # If no heartbeat sent yet, check if Roblox process is completely missing
+                            r_pid = await asyncio.to_thread(
+                                lambda s=serial: subprocess.run([str(adb), "-s", s, "shell", "pidof", "com.roblox.client"], capture_output=True, text=True, timeout=5)
+                            )
+                            pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
+                            if not pid_out:
+                                _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
+                                if _mumu_consecutive_idle[serial] >= 3:
+                                    place_id = get_instance_place_id(idx, serial)
+                                    print(f"[SMART WATCHDOG] Instance {idx} ({serial}) idle without Roblox. Launching Place {place_id}...")
+                                    await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
+                                    _mumu_consecutive_idle[serial] = 0
+                            else:
+                                _mumu_consecutive_idle[serial] = 0
         except asyncio.CancelledError:
             break
         except Exception as e:
             print(f"[MUMU WATCHDOG ERROR] {e}")
+        await asyncio.sleep(20)  # Gentle 20s interval, zero ADB polling while playing!
+
 
         interval = int(CONFIG.get("mumu", {}).get("check_interval_seconds", 30))
         await asyncio.sleep(max(15, interval))
@@ -3065,6 +3103,8 @@ async def api_bot_heartbeat(request: Request):
     place_id = None
     inst_id = 1
     player = "Unknown"
+    status = "playing"
+    extra = {}
 
     if request.method == "POST":
         try:
@@ -3072,29 +3112,54 @@ async def api_bot_heartbeat(request: Request):
             place_id = body.get("place_id") or body.get("placeId")
             inst_id = body.get("instance") or 1
             player = body.get("player") or "Unknown"
+            status = body.get("status") or "playing"
+            extra = body.get("extra") or {}
         except Exception:
             pass
     else:
         place_id = request.query_params.get("place_id") or request.query_params.get("placeId")
         inst_id = request.query_params.get("instance") or 1
         player = request.query_params.get("player") or "Unknown"
+        status = request.query_params.get("status") or "playing"
+
+    now = time.time()
+    adb = _find_mumu_adb()
+    devices = get_mumu_adb_devices() if adb else []
+    serial = devices[0] if devices else "127.0.0.1:16384"
 
     if place_id:
         try:
             place_num = int(place_id)
-            record_instance_active_place(inst_id, place_num)
-            game_name = get_game_name_for_place_id(place_num)
-            return JSONResponse({
-                "ok": True,
-                "instance": inst_id,
-                "place_id": place_num,
-                "game_name": game_name,
-                "status": "synced"
-            })
+            record_instance_active_place(inst_id, place_num, serial)
         except ValueError:
-            pass
+            place_num = None
+    else:
+        place_num = get_instance_place_id(inst_id, serial)
 
-    return JSONResponse({"ok": False, "error": "Missing or invalid place_id"}, status_code=400)
+    _bot_heartbeats[serial] = {
+        "last_seen": now,
+        "status": status,
+        "place_id": place_num,
+        "player": player,
+        "extra": extra
+    }
+
+    # If in-game script reports disconnected (e.g. Error 277), trigger Smart Recovery immediately!
+    if status == "disconnected":
+        reason = extra.get("reason", "Disconnect Error 277")
+        add_event("warning", f"⚠️ In-Game Bot: {reason} on Instance {inst_id} ({serial})")
+        asyncio.create_task(asyncio.to_thread(recover_roblox_instance, serial, place_num, inst_id))
+
+    game_name = get_game_name_for_place_id(place_num) if place_num else "Roblox"
+    return JSONResponse({
+        "ok": True,
+        "instance": inst_id,
+        "serial": serial,
+        "place_id": place_num,
+        "game_name": game_name,
+        "status": status,
+        "ack": now
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -4,13 +4,95 @@ local GuiService = game:GetService("GuiService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = nil
+pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
 local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local isReconnecting = false
 local initialized = false
 
 local LOADER_URL = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/loader.lua"
+
+local function sendDashboardHeartbeat(status, extra)
+    pcall(function()
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        if not req then return end
+        
+        local payload = {
+            status = status or "playing",
+            place_id = game.PlaceId,
+            job_id = game.JobId,
+            player = LocalPlayer and LocalPlayer.Name or "Player",
+            timestamp = os.time(),
+            extra = extra or {}
+        }
+        
+        local body = HttpService:JSONEncode(payload)
+        
+        -- Try emulator host IP first (10.0.2.2), then localhost (127.0.0.1)
+        task.spawn(function()
+            pcall(function()
+                req({
+                    Url = "http://10.0.2.2:7700/api/bot/heartbeat",
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = body,
+                    Timeout = 3
+                })
+            end)
+        end)
+    end)
+end
+
+local function clickNativeReconnectButton()
+    pcall(function()
+        local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+        if not promptGui then return false end
+        
+        local promptOverlay = promptGui:FindFirstChild("promptOverlay")
+        if not promptOverlay then return false end
+        
+        -- Recursively search for any Reconnect button in promptOverlay
+        local function searchAndClick(parent)
+            for _, child in ipairs(parent:GetChildren()) do
+                if child:IsA("GuiButton") or child:IsA("TextButton") or child:IsA("ImageButton") then
+                    local text = (child:IsA("TextButton") and child.Text) or child.Name
+                    if string.find(text:lower(), "reconnect") or string.find(text:lower(), "retry") then
+                        warn("[GENESIS AUTO-RECONNECT] Found Native Reconnect Button: " .. child:GetFullName())
+                        
+                        -- Method 1: Fire activated signal
+                        pcall(function()
+                            if firesignal then
+                                firesignal(child.Activated)
+                                firesignal(child.MouseButton1Click)
+                            end
+                        end)
+                        
+                        -- Method 2: VirtualInputManager click
+                        pcall(function()
+                            if VirtualInputManager then
+                                local pos = child.AbsolutePosition + (child.AbsoluteSize / 2)
+                                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
+                                task.wait(0.05)
+                                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
+                            end
+                        end)
+                        
+                        return true
+                    end
+                end
+                if searchAndClick(child) then
+                    return true
+                end
+            end
+            return false
+        end
+        
+        return searchAndClick(promptOverlay)
+    end)
+end
 
 local function queueScriptOnTeleport()
     pcall(function()
@@ -30,23 +112,39 @@ local function executeRejoin(reason)
     isReconnecting = true
     warn("[GENESIS AUTO-RECONNECT] Triggered: " .. tostring(reason or "Connection lost"))
 
+    -- Notify local supervisor dashboard immediately
+    sendDashboardHeartbeat("disconnected", { reason = tostring(reason) })
+
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "GENESIS AUTO-RECONNECT",
-            Text = "Connection lost! Auto-rejoining in 3s...",
+            Text = "Disconnect detected! Auto-rejoining...",
             Duration = 5
         })
     end)
 
     queueScriptOnTeleport()
 
+    -- Try Tier 1: Click native Reconnect button directly on screen
+    task.spawn(function()
+        for i = 1, 5 do
+            local clicked = clickNativeReconnectButton()
+            if clicked then
+                warn("[GENESIS AUTO-RECONNECT] Successfully clicked native modal Reconnect button.")
+                break
+            end
+            task.wait(0.5)
+        end
+    end)
+
+    -- Try Tier 2: TeleportService fallback
     task.spawn(function()
         task.wait(2)
         local placeId = game.PlaceId
         local jobId = game.JobId
 
-        for attempt = 1, 10 do
-            warn("[GENESIS AUTO-RECONNECT] Rejoin attempt " .. attempt .. "/10...")
+        for attempt = 1, 6 do
+            warn("[GENESIS AUTO-RECONNECT] Teleport attempt " .. attempt .. "/6...")
             local success = pcall(function()
                 if jobId and #jobId > 0 and #Players:GetPlayers() <= 1 then
                     TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
@@ -67,8 +165,9 @@ function Reconnect.Start()
     if initialized then return end
     initialized = true
 
-    print("[GENESIS] Universal Auto-Reconnect & Anti-AFK Active.")
+    print("[GENESIS] Universal Smart Auto-Reconnect & Anti-AFK Active.")
 
+    -- 1. Anti-AFK Engine
     pcall(function()
         LocalPlayer.Idled:Connect(function()
             pcall(function()
@@ -79,6 +178,7 @@ function Reconnect.Start()
         end)
     end)
 
+    -- 2. Error Message Listener (Error 277, 268, 279, etc.)
     pcall(function()
         GuiService.ErrorMessageChanged:Connect(function(errorMessage)
             if errorMessage and #errorMessage > 0 then
@@ -90,6 +190,7 @@ function Reconnect.Start()
         end)
     end)
 
+    -- 3. CoreGui Prompt Overlay Listener
     task.spawn(function()
         pcall(function()
             local promptGui = CoreGui:WaitForChild("RobloxPromptGui", 10)
@@ -97,14 +198,26 @@ function Reconnect.Start()
                 local promptOverlay = promptGui:WaitForChild("promptOverlay", 10)
                 if promptOverlay then
                     promptOverlay.ChildAdded:Connect(function(child)
-                        if child.Name == "ErrorPrompt" or string.find(child.Name, "Prompt") then
-                            task.wait(0.5)
+                        if child.Name == "ErrorPrompt" or string.find(child.Name:lower(), "prompt") or string.find(child.Name:lower(), "error") then
+                            task.wait(0.2)
                             executeRejoin("Roblox ErrorPrompt Detected: " .. child.Name)
                         end
                     end)
                 end
             end
         end)
+    end)
+
+    -- 4. Passive Lightweight Heartbeat to Local Dashboard (Runs every 15s)
+    task.spawn(function()
+        -- Send initial boot heartbeat
+        sendDashboardHeartbeat("playing")
+        
+        while task.wait(15) do
+            if not isReconnecting then
+                sendDashboardHeartbeat("playing")
+            end
+        end
     end)
 end
 
