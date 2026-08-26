@@ -39,6 +39,9 @@ export default {
       },
       borderRadius: {
         'card': '12px',
+      },
+      gridTemplateColumns: {
+        '16': 'repeat(16, minmax(0, 1fr))',
       }
     },
   },
