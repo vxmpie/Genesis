@@ -148,16 +148,28 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   clearEvents: () => set({ eventHistory: [] }),
 
   updateInitPayload: (data) =>
-    set((s) => ({
-      authRequired: data.auth_required ?? s.authRequired,
-      authenticated: data.authenticated ?? s.authenticated,
-      hardening: data.hardening ?? s.hardening,
-      defender: data.defender ?? s.defender,
-      observatory: data.observatory ?? s.observatory,
-      summary: data.summary ?? s.summary,
-      eventHistory: data.history ?? s.eventHistory,
-      chartHistory: data.chart_history ?? s.chartHistory,
-    })),
+    set((s) => {
+      let chartHist = data.chart_history || s.chartHistory;
+      if (chartHist && (!chartHist.timestamps || chartHist.timestamps.length === 0)) {
+        // Seed initial history point
+        const now = Date.now();
+        chartHist = {
+          ram: [data.metrics?.ram?.percent || 40],
+          cpu: [data.metrics?.cpu?.total_percent || 15],
+          timestamps: [now],
+        };
+      }
+      return {
+        authRequired: data.auth_required ?? s.authRequired,
+        authenticated: data.authenticated ?? s.authenticated,
+        hardening: data.hardening ?? s.hardening,
+        defender: data.defender ?? s.defender,
+        observatory: data.observatory ?? s.observatory,
+        summary: data.summary ?? s.summary,
+        eventHistory: data.history ?? s.eventHistory,
+        chartHistory: chartHist,
+      };
+    }),
 
   updateMetricsPayload: (data) =>
     set((s) => {
@@ -174,28 +186,55 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           newMetrics.ram.standby_gb = newMetrics.ram.breakdown.standby_gb;
           newMetrics.ram.free_gb = newMetrics.ram.breakdown.free_gb;
         }
+        if (newMetrics.disk) {
+          newMetrics.disk.read_mb_s = newMetrics.disk.read_mb_s ?? (newMetrics.disk as any).read_speed_mbs ?? 0;
+          newMetrics.disk.write_mb_s = newMetrics.disk.write_mb_s ?? (newMetrics.disk as any).write_speed_mbs ?? 0;
+        }
+        if (newMetrics.network) {
+          const sentMbs = (newMetrics.network as any).sent_speed_mbs ?? ((newMetrics.network.bytes_sent_sec || 0) / (1024 * 1024));
+          const recvMbs = (newMetrics.network as any).recv_speed_mbs ?? ((newMetrics.network.bytes_recv_sec || 0) / (1024 * 1024));
+          (newMetrics.network as any).sent_speed_mbs = sentMbs;
+          (newMetrics.network as any).recv_speed_mbs = recvMbs;
+          newMetrics.network.bytes_sent_sec = newMetrics.network.bytes_sent_sec || Math.round(sentMbs * 1024 * 1024);
+          newMetrics.network.bytes_recv_sec = newMetrics.network.bytes_recv_sec || Math.round(recvMbs * 1024 * 1024);
+        }
+      }
+
+      // Normalize MuMu data
+      let mumuData = data.mumu || s.mumu;
+      if (mumuData && mumuData.devices) {
+        mumuData = {
+          ...mumuData,
+          devices: mumuData.devices.map((d: any, idx: number) => ({
+            ...d,
+            index: d.index ?? d.instance_index ?? (idx + 1),
+            type: d.type ?? (d.name?.toLowerCase().includes('device') ? 'Emulator' : 'Launcher'),
+            target_game: d.target_game ?? d.target_game_name ?? 'Storage Hunters',
+            place_id: d.place_id ?? d.target_place_id ?? 98800969324557,
+          })),
+        };
       }
 
       const ramPct = newMetrics?.ram?.percent;
       const cpuPct = newMetrics?.cpu?.total_percent;
       const now = Date.now();
 
-      // Update 30-min chart buffer on ~30s interval
+      // Rolling chart buffer (records sample every ~1000-2000ms for continuous silky smooth canvas)
       let newChart = s.chartHistory;
       if (ramPct !== undefined && cpuPct !== undefined) {
         const lastTs = s.chartHistory.timestamps[s.chartHistory.timestamps.length - 1] || 0;
-        if (now - lastTs >= 28000 || s.chartHistory.timestamps.length === 0) {
+        if (now - lastTs >= 1000 || s.chartHistory.timestamps.length === 0) {
           newChart = {
-            ram: [...s.chartHistory.ram.slice(-59), ramPct],
-            cpu: [...s.chartHistory.cpu.slice(-59), cpuPct],
-            timestamps: [...s.chartHistory.timestamps.slice(-59), now],
+            ram: [...s.chartHistory.ram.slice(-180), ramPct],
+            cpu: [...s.chartHistory.cpu.slice(-180), cpuPct],
+            timestamps: [...s.chartHistory.timestamps.slice(-180), now],
           };
         }
       }
 
       return {
         metrics: newMetrics,
-        mumu: data.mumu || s.mumu,
+        mumu: mumuData,
         topProcesses: data.top_processes || s.topProcesses,
         summary: data.summary || s.summary,
         autoBoost: data.auto_boost || s.autoBoost,

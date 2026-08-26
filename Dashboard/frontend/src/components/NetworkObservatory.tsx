@@ -22,8 +22,17 @@ export const NetworkObservatory: React.FC<NetworkObservatoryProps> = ({ onFlushD
   const wd = observatory?.watchdog;
   const net = metrics?.network;
 
-  const upSpeed = net?.bytes_sent_sec ? (net.bytes_sent_sec / (1024 * 1024)).toFixed(2) : '0.00';
-  const downSpeed = net?.bytes_recv_sec ? (net.bytes_recv_sec / (1024 * 1024)).toFixed(2) : '0.00';
+  const upSpeed = (net as any)?.sent_speed_mbs !== undefined && (net as any)?.sent_speed_mbs !== null
+    ? Number((net as any).sent_speed_mbs).toFixed(2)
+    : net?.bytes_sent_sec
+    ? (net.bytes_sent_sec / (1024 * 1024)).toFixed(2)
+    : '0.00';
+
+  const downSpeed = (net as any)?.recv_speed_mbs !== undefined && (net as any)?.recv_speed_mbs !== null
+    ? Number((net as any).recv_speed_mbs).toFixed(2)
+    : net?.bytes_recv_sec
+    ? (net.bytes_recv_sec / (1024 * 1024)).toFixed(2)
+    : '0.00';
 
   return (
     <div className="cyber-card p-4">

@@ -55,21 +55,27 @@ export const CpuCoresCard: React.FC = () => {
           </div>
 
           {/* 8 P-Core Vertical Bars */}
-          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-28 pt-2">
+          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-32 pt-2">
             {Array.from({ length: 8 }).map((_, i) => {
               const load = pCores[i] !== undefined ? Math.round(pCores[i]) : 0;
               return (
                 <div key={`p_${i}`} className="flex flex-col items-center justify-end h-full gap-1 group">
                   {/* Live Value % above bar */}
-                  <span className="font-mono text-[9px] font-bold text-slate-300 group-hover:text-genesis-accent transition-colors">
+                  <span className={`font-mono text-[9px] font-bold transition-colors ${load > 70 ? 'text-red-400 font-extrabold' : 'text-slate-300 group-hover:text-genesis-accent'}`}>
                     {load}%
                   </span>
 
                   {/* Load Bar Container */}
-                  <div className="w-full h-18 bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-red-500/30">
+                  <div
+                    className="w-full bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-red-500/40"
+                    style={{ height: '84px' }}
+                  >
                     <div
-                      className="w-full bg-gradient-to-t from-red-600 via-genesis-accent to-orange-400 shadow-glow-accent rounded-t-sm transition-all duration-500"
-                      style={{ height: `${Math.max(load, 4)}%` }}
+                      className="w-full bg-gradient-to-t from-red-600 via-genesis-accent to-orange-400 rounded-t-sm transition-all duration-300 ease-out"
+                      style={{
+                        height: `${Math.min(Math.max(load, 4), 100)}%`,
+                        boxShadow: load > 15 ? '0 0 10px rgba(255, 60, 60, 0.5)' : 'none',
+                      }}
                       title={`P-Core #${i}: ${load}%`}
                     />
                   </div>
@@ -97,22 +103,28 @@ export const CpuCoresCard: React.FC = () => {
           </div>
 
           {/* 8 E-Core Vertical Bars */}
-          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-28 pt-2">
+          <div className="grid grid-cols-8 gap-1.5 sm:gap-2 items-end h-32 pt-2">
             {Array.from({ length: 8 }).map((_, i) => {
               const coreIdx = i + 8;
               const load = eCores[i] !== undefined ? Math.round(eCores[i]) : 0;
               return (
                 <div key={`e_${coreIdx}`} className="flex flex-col items-center justify-end h-full gap-1 group">
                   {/* Live Value % above bar */}
-                  <span className="font-mono text-[9px] font-bold text-slate-300 group-hover:text-genesis-cyan transition-colors">
+                  <span className={`font-mono text-[9px] font-bold transition-colors ${load > 70 ? 'text-cyan-300 font-extrabold' : 'text-slate-300 group-hover:text-genesis-cyan'}`}>
                     {load}%
                   </span>
 
                   {/* Load Bar Container */}
-                  <div className="w-full h-18 bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-genesis-cyan/30">
+                  <div
+                    className="w-full bg-white/[0.04] rounded-t-md flex items-end overflow-hidden relative border-b border-genesis-cyan/40"
+                    style={{ height: '84px' }}
+                  >
                     <div
-                      className="w-full bg-gradient-to-t from-blue-600 via-genesis-cyan to-teal-300 shadow-glow-cyan rounded-t-sm transition-all duration-500"
-                      style={{ height: `${Math.max(load, 4)}%` }}
+                      className="w-full bg-gradient-to-t from-blue-600 via-genesis-cyan to-teal-300 rounded-t-sm transition-all duration-300 ease-out"
+                      style={{
+                        height: `${Math.min(Math.max(load, 4), 100)}%`,
+                        boxShadow: load > 15 ? '0 0 10px rgba(0, 229, 255, 0.5)' : 'none',
+                      }}
                       title={`E-Core #${coreIdx}: ${load}%`}
                     />
                   </div>

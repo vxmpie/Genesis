@@ -1852,9 +1852,28 @@ async def roblox_ping_sampler_loop():
         await asyncio.sleep(10)
 
 
+_smoothed_per_core = None
+_smoothed_cpu_total = None
+
+
 def get_system_metrics() -> dict:
-    cpu_per_core = psutil.cpu_percent(interval=0, percpu=True)
-    cpu_total = psutil.cpu_percent(interval=0)
+    global _smoothed_per_core, _smoothed_cpu_total
+    raw_per_core = psutil.cpu_percent(interval=0, percpu=True)
+    raw_total = psutil.cpu_percent(interval=0)
+
+    if _smoothed_per_core is None or len(_smoothed_per_core) != len(raw_per_core):
+        _smoothed_per_core = [float(x) for x in raw_per_core]
+        _smoothed_cpu_total = float(raw_total)
+    else:
+        _smoothed_per_core = [
+            round(_smoothed_per_core[i] * 0.35 + raw_per_core[i] * 0.65, 1)
+            for i in range(len(raw_per_core))
+        ]
+        _smoothed_cpu_total = round(_smoothed_cpu_total * 0.35 + raw_total * 0.65, 1)
+
+    cpu_per_core = _smoothed_per_core
+    cpu_total = _smoothed_cpu_total
+
     mem = psutil.virtual_memory()
     disk_io = psutil.disk_io_counters()
     net_io = psutil.net_io_counters()
@@ -1895,10 +1914,16 @@ def get_system_metrics() -> dict:
         "disk": {
             "read_mb": round(disk_io.read_bytes / (1024 ** 2), 1) if disk_io else 0,
             "write_mb": round(disk_io.write_bytes / (1024 ** 2), 1) if disk_io else 0,
+            "read_mb_s": 0.0,
+            "write_mb_s": 0.0,
         },
         "network": {
             "sent_mb": round(net_io.bytes_sent / (1024 ** 2), 1),
             "recv_mb": round(net_io.bytes_recv / (1024 ** 2), 1),
+            "bytes_sent_sec": 0,
+            "bytes_recv_sec": 0,
+            "sent_speed_mbs": 0.0,
+            "recv_speed_mbs": 0.0,
             "roblox_ping_ms": _last_roblox_ping_ms,
         },
         "storage": {
@@ -1930,23 +1955,29 @@ def get_metrics_with_rates() -> dict:
     if _prev_disk_io and _prev_net_io and _prev_time:
         dt = now - _prev_time
         if dt > 0:
-            metrics["disk"]["read_speed_mbs"] = round(
-                (disk_io.read_bytes - _prev_disk_io.read_bytes) / (1024 ** 2) / dt, 2
-            )
-            metrics["disk"]["write_speed_mbs"] = round(
-                (disk_io.write_bytes - _prev_disk_io.write_bytes) / (1024 ** 2) / dt, 2
-            )
-            metrics["network"]["sent_speed_mbs"] = round(
-                (net_io.bytes_sent - _prev_net_io.bytes_sent) / (1024 ** 2) / dt, 2
-            )
-            metrics["network"]["recv_speed_mbs"] = round(
-                (net_io.bytes_recv - _prev_net_io.bytes_recv) / (1024 ** 2) / dt, 2
-            )
+            r_speed = round((disk_io.read_bytes - _prev_disk_io.read_bytes) / (1024 ** 2) / dt, 2)
+            w_speed = round((disk_io.write_bytes - _prev_disk_io.write_bytes) / (1024 ** 2) / dt, 2)
+            s_speed = round((net_io.bytes_sent - _prev_net_io.bytes_sent) / (1024 ** 2) / dt, 2)
+            recv_spd = round((net_io.bytes_recv - _prev_net_io.bytes_recv) / (1024 ** 2) / dt, 2)
+
+            metrics["disk"]["read_speed_mbs"] = r_speed
+            metrics["disk"]["read_mb_s"] = r_speed
+            metrics["disk"]["write_speed_mbs"] = w_speed
+            metrics["disk"]["write_mb_s"] = w_speed
+
+            metrics["network"]["sent_speed_mbs"] = s_speed
+            metrics["network"]["bytes_sent_sec"] = int(s_speed * 1024 * 1024)
+            metrics["network"]["recv_speed_mbs"] = recv_spd
+            metrics["network"]["bytes_recv_sec"] = int(recv_spd * 1024 * 1024)
     else:
-        metrics["disk"]["read_speed_mbs"] = 0
-        metrics["disk"]["write_speed_mbs"] = 0
-        metrics["network"]["sent_speed_mbs"] = 0
-        metrics["network"]["recv_speed_mbs"] = 0
+        metrics["disk"]["read_speed_mbs"] = 0.0
+        metrics["disk"]["read_mb_s"] = 0.0
+        metrics["disk"]["write_speed_mbs"] = 0.0
+        metrics["disk"]["write_mb_s"] = 0.0
+        metrics["network"]["sent_speed_mbs"] = 0.0
+        metrics["network"]["bytes_sent_sec"] = 0
+        metrics["network"]["recv_speed_mbs"] = 0.0
+        metrics["network"]["bytes_recv_sec"] = 0
 
     _prev_disk_io = disk_io
     _prev_net_io = net_io
@@ -1991,6 +2022,9 @@ def _sample_all_processes_sync():
         pass
 
     mumu_names = {n.lower() for n in CONFIG.get("mumu", {}).get("process_names", [])}
+    if not mumu_names:
+        mumu_names = {"mumunxdevice.exe", "mumunxmain.exe", "mumuplayer.exe", "nemuheadless.exe"}
+
     all_procs = []
     mumu_instances = []
     device_idx = 0
@@ -2009,7 +2043,7 @@ def _sample_all_processes_sync():
                 "cpu_percent": 0,
             })
 
-            if name in mumu_names:
+            if name in mumu_names or "mumunxdevice" in name or "mumunxmain" in name:
                 uptime_sec = time.time() - proc.info["create_time"]
                 hours = int(uptime_sec // 3600)
                 minutes = int((uptime_sec % 3600) // 60)
@@ -2032,17 +2066,21 @@ def _sample_all_processes_sync():
                     "uptime_seconds": int(uptime_sec),
                     "status": "running",
                     "is_bloated": is_bloated,
-                    "instance_index": device_idx if is_device else None,
-                    "target_place_id": target_place_id,
-                    "target_game_name": target_game_name,
+                    "index": device_idx if is_device else 0,
+                    "instance_index": device_idx if is_device else 0,
+                    "type": "Emulator" if is_device else "Launcher",
+                    "place_id": target_place_id or 98800969324557,
+                    "target_place_id": target_place_id or 98800969324557,
+                    "target_game": target_game_name or "Storage Hunters",
+                    "target_game_name": target_game_name or "Storage Hunters",
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
     all_procs.sort(key=lambda x: x["ram_mb"], reverse=True)
 
-    devices = [i for i in mumu_instances if i["name"].lower() == "mumunxdevice.exe"]
-    launchers = [i for i in mumu_instances if i["name"].lower() == "mumunxmain.exe"]
+    devices = [i for i in mumu_instances if i.get("type") == "Emulator" or "device" in i["name"].lower()]
+    launchers = [i for i in mumu_instances if i.get("type") == "Launcher" or "main" in i["name"].lower()]
     current_device_count = len(devices)
 
     if _prev_mumu_count is not None and current_device_count < _prev_mumu_count:
@@ -2068,6 +2106,8 @@ def _sample_all_processes_sync():
             "devices": devices,
             "launchers": launchers,
             "total_instances": current_device_count,
+            "running": current_device_count > 0,
+            "count": current_device_count,
             "launcher_running": len(launchers) > 0,
             "vm_disk": _vm_disk_cache,
             "vm_disk_last_check": _last_vm_disk_check,
@@ -2083,7 +2123,7 @@ def get_mumu_instances() -> list:
 
 
 def check_mumu_health() -> dict:
-    """Instant in-memory query of MuMu health and state (< 0.01ms)."""
+    """Zero-overhead memory snapshot query of MuMu health."""
     with _process_sampler_lock:
         return dict(_cached_mumu_health)
 
@@ -3017,12 +3057,24 @@ async def handle_ws_command(ws: WebSocket, data: dict):
 
     elif cmd in ("deep_clean_preview", "scan_deep_clean", "scan_targets"):
         preview = await asyncio.to_thread(deep_clean_preview)
-        await ws.send_json({"type": "deep_clean_preview", "data": preview})
+        total_files = sum(p.get("file_count", 0) for p in preview)
+        total_mb = round(sum(p.get("size_mb", 0) for p in preview), 1)
+        await ws.send_json({
+            "type": "deep_clean_preview",
+            "data": preview,
+            "items": preview,
+            "total_files": total_files,
+            "total_size_mb": total_mb,
+        })
 
     elif cmd in ("deep_clean_execute", "clean_all"):
         targets = data.get("targets")
         result = await asyncio.to_thread(deep_clean_execute, targets)
-        await ws.send_json({"type": "deep_clean_result", "data": result})
+        await ws.send_json({
+            "type": "deep_clean_result",
+            "data": result,
+            "result": result,
+        })
 
     elif cmd == "vm_disk_refresh":
         vm_data = get_vm_disk_status()

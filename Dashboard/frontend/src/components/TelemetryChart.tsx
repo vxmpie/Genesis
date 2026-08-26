@@ -7,6 +7,7 @@ export const TelemetryChart: React.FC = () => {
   const chartZoom = useDashboardStore((s) => s.chartZoom);
   const setChartZoom = useDashboardStore((s) => s.setChartZoom);
   const chartHistory = useDashboardStore((s) => s.chartHistory);
+  const metrics = useDashboardStore((s) => s.metrics);
 
   const [hoverInfo, setHoverInfo] = useState<{
     x: number;
@@ -16,13 +17,13 @@ export const TelemetryChart: React.FC = () => {
     ram: number;
   } | null>(null);
 
-  const cpuHistory = chartHistory.cpu || [];
-  const ramHistory = chartHistory.ram || [];
-  const timestamps = chartHistory.timestamps || [];
+  const cpuHistory = chartHistory?.cpu || [];
+  const ramHistory = chartHistory?.ram || [];
+  const timestamps = chartHistory?.timestamps || [];
 
-  // Calculate Summary Statistics for Active Window
-  const visibleCpu = cpuHistory.slice(-chartZoom * 2);
-  const visibleRam = ramHistory.slice(-chartZoom * 2);
+  // Summary Statistics
+  const visibleCpu = cpuHistory.length > 0 ? cpuHistory.slice(-chartZoom * 2) : [metrics?.cpu?.total_percent || 0];
+  const visibleRam = ramHistory.length > 0 ? ramHistory.slice(-chartZoom * 2) : [metrics?.ram?.percent || 0];
 
   const avgCpu = visibleCpu.length ? Math.round(visibleCpu.reduce((a, b) => a + b, 0) / visibleCpu.length) : 0;
   const maxCpu = visibleCpu.length ? Math.round(Math.max(...visibleCpu)) : 0;
@@ -102,28 +103,62 @@ export const TelemetryChart: React.FC = () => {
       ctx.fillText(timeStr, x, padTop + plotH + 16);
     }
 
-    // Collect visible points in window
-    const visiblePoints: any[] = [];
-    for (let i = 0; i < cpuHistory.length; i++) {
-      const ts = timestamps[i] || now - (cpuHistory.length - 1 - i) * 30000;
-      if (ts >= windowStart - 30000) {
-        const x = padLeft + Math.min(Math.max((ts - windowStart) / windowMs, 0), 1) * plotW;
-        const cpuVal = cpuHistory[i] || 0;
-        const ramVal = ramHistory[i] || 0;
-        const cpuY = padTop + plotH * (1 - Math.min(Math.max(cpuVal, 0), 100) / 100);
-        const ramY = padTop + plotH * (1 - Math.min(Math.max(ramVal, 0), 100) / 100);
-        visiblePoints.push({ index: i, ts, x, cpuVal, ramVal, cpuY, ramY });
+    // 3. Prepare continuous plot points
+    const currentCpu = metrics?.cpu?.total_percent || (cpuHistory[cpuHistory.length - 1] ?? 15);
+    const currentRam = metrics?.ram?.percent || (ramHistory[ramHistory.length - 1] ?? 40);
+
+    const rawPoints: Array<{ ts: number; cpu: number; ram: number }> = [];
+    if (timestamps.length > 0) {
+      for (let i = 0; i < timestamps.length; i++) {
+        rawPoints.push({
+          ts: timestamps[i],
+          cpu: cpuHistory[i] !== undefined ? cpuHistory[i] : currentCpu,
+          ram: ramHistory[i] !== undefined ? ramHistory[i] : currentRam,
+        });
       }
+    } else {
+      rawPoints.push({ ts: now, cpu: currentCpu, ram: currentRam });
     }
 
-    // Render Series Lines with Luminous Glow
-    const drawSeries = (points: any[], yKey: string, color: string, glowColor: string) => {
+    // Ensure latest point is current timestamp
+    if (rawPoints.length === 0 || now - rawPoints[rawPoints.length - 1].ts > 1000) {
+      rawPoints.push({ ts: now, cpu: currentCpu, ram: currentRam });
+    }
+
+    // Map to plot coordinates
+    let plotPoints = rawPoints.map((p) => {
+      const relX = Math.min(Math.max((p.ts - windowStart) / windowMs, 0), 1);
+      const x = padLeft + relX * plotW;
+      const cpuY = padTop + plotH * (1 - Math.min(Math.max(p.cpu, 0), 100) / 100);
+      const ramY = padTop + plotH * (1 - Math.min(Math.max(p.ram, 0), 100) / 100);
+      return { ts: p.ts, x, cpuVal: p.cpu, ramVal: p.ram, cpuY, ramY };
+    });
+
+    // Sort by X coordinate
+    plotPoints.sort((a, b) => a.x - b.x);
+
+    // If points are on the right half, extrapolate backwards to left boundary so the line is NEVER broken
+    if (plotPoints.length > 0 && plotPoints[0].x > padLeft) {
+      const first = plotPoints[0];
+      plotPoints = [
+        { ...first, x: padLeft, ts: windowStart },
+        ...plotPoints,
+      ];
+    }
+
+    // If only 1 point, clone to right edge
+    if (plotPoints.length === 1) {
+      plotPoints.push({ ...plotPoints[0], x: padLeft + plotW, ts: now });
+    }
+
+    // 4. Render Series Lines with Luminous Glow
+    const drawSeries = (points: typeof plotPoints, yKey: 'ramY' | 'cpuY', color: string, glowColor: string) => {
       if (points.length < 2) return;
 
       // Glow pass
       ctx.beginPath();
       ctx.strokeStyle = glowColor;
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 5;
       ctx.lineJoin = 'round';
       points.forEach((p, idx) => {
         if (idx === 0) ctx.moveTo(p.x, p[yKey]);
@@ -157,26 +192,54 @@ export const TelemetryChart: React.FC = () => {
       grad.addColorStop(1, 'transparent');
       ctx.fillStyle = grad;
       ctx.fill();
+
+      // Current Value Pulsing Dot at rightmost end
+      const last = points[points.length - 1];
+      ctx.beginPath();
+      ctx.arc(last.x, last[yKey], 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
     };
 
-    drawSeries(visiblePoints, 'ramY', '#3B82F6', 'rgba(59,130,246,0.18)');
-    drawSeries(visiblePoints, 'cpuY', '#FF3C3C', 'rgba(255,60,60,0.22)');
+    drawSeries(plotPoints, 'ramY', '#3B82F6', 'rgba(59,130,246,0.22)');
+    drawSeries(plotPoints, 'cpuY', '#FF3C3C', 'rgba(255,60,60,0.25)');
 
-    // Render Hover Crosshair & Data Points if hovering
+    // 5. Render Hover Crosshair & Points
     if (hoverInfo) {
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.setLineDash([3, 3]);
       ctx.moveTo(hoverInfo.x, padTop);
       ctx.lineTo(hoverInfo.x, padTop + plotH);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      const hoveredCpuY = padTop + plotH * (1 - Math.min(Math.max(hoverInfo.cpu, 0), 100) / 100);
+      const hoveredRamY = padTop + plotH * (1 - Math.min(Math.max(hoverInfo.ram, 0), 100) / 100);
+
+      // Dot for CPU
+      ctx.beginPath();
+      ctx.arc(hoverInfo.x, hoveredCpuY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#FF3C3C';
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Dot for RAM
+      ctx.beginPath();
+      ctx.arc(hoverInfo.x, hoveredRamY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#3B82F6';
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
-  }, [chartHistory, chartZoom, hoverInfo]);
+  }, [chartHistory, chartZoom, hoverInfo, metrics]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || timestamps.length === 0) return;
+    if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -193,123 +256,137 @@ export const TelemetryChart: React.FC = () => {
     const targetTs = now - windowMs + relX * windowMs;
 
     // Find closest timestamp point
-    let closestIdx = 0;
-    let minDiff = Infinity;
-    for (let i = 0; i < timestamps.length; i++) {
-      const diff = Math.abs(timestamps[i] - targetTs);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIdx = i;
+    let closestCpu = metrics?.cpu?.total_percent || 0;
+    let closestRam = metrics?.ram?.percent || 0;
+
+    if (timestamps.length > 0) {
+      let minDiff = Infinity;
+      for (let i = 0; i < timestamps.length; i++) {
+        const diff = Math.abs(timestamps[i] - targetTs);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestCpu = cpuHistory[i] !== undefined ? cpuHistory[i] : closestCpu;
+          closestRam = ramHistory[i] !== undefined ? ramHistory[i] : closestRam;
+        }
       }
     }
 
-    const ts = timestamps[closestIdx] || now;
-    const d = new Date(ts);
-    const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+    const dateObj = new Date(targetTs);
+    const hh = String(dateObj.getHours()).padStart(2, '0');
+    const mm = String(dateObj.getMinutes()).padStart(2, '0');
+    const ss = String(dateObj.getSeconds()).padStart(2, '0');
 
     setHoverInfo({
       x,
       y,
-      time: timeStr,
-      cpu: Math.round(cpuHistory[closestIdx] || 0),
-      ram: Math.round(ramHistory[closestIdx] || 0),
+      time: `${hh}:${mm}:${ss}`,
+      cpu: Math.round(closestCpu),
+      ram: Math.round(closestRam),
     });
   };
 
+  const handleMouseLeave = () => {
+    setHoverInfo(null);
+  };
+
   return (
-    <div className="cyber-card p-4">
-      {/* Header with Zoom & Legend */}
+    <div className="cyber-card p-4 flex flex-col justify-between relative">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-genesis-cyan" />
           <span className="text-xs font-bold text-white uppercase tracking-wider">
-            Autonomous Telemetry Observatory
+            Autonomous Telemetry (Dual-Curve Stream)
           </span>
-          <span className="text-[10px] font-mono text-slate-400">
-            Window: {chartZoom}m
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-400 border border-white/[0.08]">
+            60 FPS Canvas
           </span>
         </div>
 
-        <div className="flex items-center gap-4 text-xs font-mono">
+        {/* Controls & Legend */}
+        <div className="flex items-center gap-4">
           {/* Legend */}
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-genesis-accent font-bold">
-              <span className="w-2 h-2 rounded-full bg-genesis-accent shadow-glow-accent" />
-              CPU Load
+          <div className="flex items-center gap-3 text-[11px] font-mono">
+            <span className="flex items-center gap-1 text-genesis-accent font-bold">
+              <span className="w-2.5 h-2.5 rounded-full bg-genesis-accent shadow-glow-accent" />
+              CPU Load ({Math.round(metrics?.cpu?.total_percent || 0)}%)
             </span>
-            <span className="flex items-center gap-1.5 text-genesis-blue font-bold">
-              <span className="w-2 h-2 rounded-full bg-genesis-blue shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-              RAM Usage
+            <span className="flex items-center gap-1 text-genesis-blue font-bold">
+              <span className="w-2.5 h-2.5 rounded-full bg-genesis-blue shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+              RAM ({Math.round(metrics?.ram?.percent || 0)}%)
             </span>
           </div>
 
-          {/* Time Zoom Stepper */}
-          <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded-lg p-0.5">
-            {[5, 15, 30].map((m) => (
+          {/* Timeframe Zoom Pills */}
+          <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/[0.08] text-[10px] font-mono">
+            {([5, 15, 30] as const).map((mins) => (
               <button
-                key={m}
-                onClick={() => setChartZoom(m as any)}
-                className={`px-2.5 py-0.5 rounded text-[11px] font-mono font-bold transition-all ${
-                  chartZoom === m
-                    ? 'bg-genesis-cyan/20 text-genesis-cyan border border-genesis-cyan/30 shadow-glow-cyan'
+                key={mins}
+                onClick={() => setChartZoom(mins)}
+                className={`px-2.5 py-1 rounded transition-all font-bold ${
+                  chartZoom === mins
+                    ? 'bg-genesis-cyan/20 text-genesis-cyan border border-genesis-cyan/40 shadow-[0_0_8px_rgba(0,229,255,0.3)]'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {m}M
+                {mins}M
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Main Canvas Area */}
-      <div className="w-full h-44 sm:h-56 rounded-xl overflow-hidden border border-white/[0.08] bg-[#0B0C14] relative">
+      {/* Canvas Chart Area with Hover Crosshair Tooltip */}
+      <div className="relative w-full h-56 bg-black/30 rounded-xl overflow-hidden border border-white/[0.06]">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
-          onMouseLeave={() => setHoverInfo(null)}
-          className="w-full h-full block cursor-crosshair"
+          onMouseLeave={handleMouseLeave}
+          className="w-full h-full cursor-crosshair block"
         />
 
-        {/* Floating Tooltip upon Hover */}
+        {/* Floating Tooltip during Hover */}
         {hoverInfo && (
           <div
-            className="absolute z-10 pointer-events-none bg-[#121320]/95 border border-white/15 rounded-lg p-2 text-xs font-mono shadow-2xl backdrop-blur-md transform -translate-x-1/2 -translate-y-full"
-            style={{ left: hoverInfo.x, top: Math.max(hoverInfo.y - 12, 10) }}
+            className="absolute pointer-events-none z-20 bg-slate-900/95 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg shadow-2xl flex flex-col gap-1 text-[11px] font-mono"
+            style={{
+              left: `${Math.min(Math.max(hoverInfo.x - 60, 10), (canvasRef.current?.getBoundingClientRect().width || 300) - 130)}px`,
+              top: '12px',
+            }}
           >
-            <div className="text-[10px] text-slate-400 border-b border-white/10 pb-1 mb-1 flex items-center gap-1">
+            <div className="flex items-center gap-1 text-slate-400 text-[10px] border-b border-white/10 pb-1">
               <Clock className="w-3 h-3 text-slate-400" />
-              {hoverInfo.time}
+              <span>{hoverInfo.time}</span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-genesis-accent font-bold">CPU: {hoverInfo.cpu}%</span>
-              <span className="text-genesis-blue font-bold">RAM: {hoverInfo.ram}%</span>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-genesis-accent font-bold">CPU:</span>
+              <span className="text-white font-extrabold">{hoverInfo.cpu}%</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-genesis-blue font-bold">RAM:</span>
+              <span className="text-white font-extrabold">{hoverInfo.ram}%</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Analytics Summary Footer Pill Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-2 border-t border-white/[0.04] text-[11px] font-mono">
-        <div className="flex items-center justify-between p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-          <span className="text-slate-400">CPU Avg / Peak:</span>
-          <span className="font-bold text-white">
-            <span className="text-genesis-accent">{avgCpu}%</span> / {maxCpu}%
-          </span>
+      {/* Summary Analytics Footer Bar */}
+      <div className="mt-3 pt-2 border-t border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs font-mono">
+        <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
+          <span className="text-[10px] text-slate-500 uppercase block">CPU Window Avg</span>
+          <span className="font-extrabold text-genesis-accent">{avgCpu}%</span>
         </div>
-        <div className="flex items-center justify-between p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-          <span className="text-slate-400">RAM Avg / Peak:</span>
-          <span className="font-bold text-white">
-            <span className="text-genesis-blue">{avgRam}%</span> / {maxRam}%
-          </span>
+        <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
+          <span className="text-[10px] text-slate-500 uppercase block">CPU Peak</span>
+          <span className="font-extrabold text-red-400">{maxCpu}%</span>
         </div>
-        <div className="flex items-center justify-between p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-          <span className="text-slate-400">Sample Frequency:</span>
-          <span className="font-bold text-genesis-green">1.0s real-time</span>
+        <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
+          <span className="text-[10px] text-slate-500 uppercase block">RAM Window Avg</span>
+          <span className="font-extrabold text-genesis-blue">{avgRam}%</span>
         </div>
-        <div className="flex items-center justify-between p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-          <span className="text-slate-400">Engine Health:</span>
-          <span className="font-bold text-genesis-cyan">100% 60 FPS</span>
+        <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
+          <span className="text-[10px] text-slate-500 uppercase block">RAM Peak</span>
+          <span className="font-extrabold text-blue-400">{maxRam}%</span>
         </div>
       </div>
     </div>

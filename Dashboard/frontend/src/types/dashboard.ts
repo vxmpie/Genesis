@@ -64,6 +64,10 @@ export interface MuMuDevice {
   status: string;
   target_game?: string;
   place_id?: number;
+  instance_index?: number;
+  target_game_name?: string;
+  target_place_id?: number;
+  is_bloated?: boolean;
 }
 
 export interface MuMuHealth {

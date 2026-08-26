@@ -98,16 +98,16 @@ export function useWebSocket() {
         break;
       case 'deep_clean_preview':
         setIsScanningClean(false);
-        if (data.items) {
-          setDeepCleanPreview(data.items);
-          addToast('system', `Found ${data.total_files || 0} junk files (${data.total_size_mb || 0} MB)`);
-        }
+        const cleanItems = data.data || data.items || [];
+        setDeepCleanPreview(cleanItems);
+        addToast('system', `Scanned ${data.total_files || cleanItems.length} junk targets (${data.total_size_mb || 0} MB)`);
         break;
       case 'deep_clean_result':
         setIsDeepCleaning(false);
         setDeepCleanPreview([]);
-        if (data.success) {
-          addToast('system', `Cleaned ${data.freed_mb || 0} MB temporary files`);
+        const cleanRes = data.result || data.data || data;
+        if (cleanRes && (cleanRes.success !== false || cleanRes.total_freed_mb !== undefined)) {
+          addToast('system', `Cleaned ${cleanRes.total_freed_mb || cleanRes.freed_mb || 0} MB junk files`);
         } else {
           addToast('error', 'Deep clean completed with warnings');
         }
