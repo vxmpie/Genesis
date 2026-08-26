@@ -64,7 +64,13 @@ function Config.Load()
             local decoded = HttpService:JSONDecode(content)
             if type(decoded) == "table" then
                 for k, v in pairs(decoded) do
-                    Config.State[k] = v
+                    if type(v) == "table" and type(Config.State[k]) == "table" then
+                        for subK, subV in pairs(v) do
+                            Config.State[k][subK] = subV
+                        end
+                    else
+                        Config.State[k] = v
+                    end
                 end
             end
         end)

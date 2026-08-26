@@ -82,8 +82,8 @@ end
 function GradingModule.IsSafeAllowed(safeName, State)
     if not State or not State.AllowedSafes then return true end
     for k, v in pairs(State.AllowedSafes) do
-        if string.find(string.lower(safeName), string.lower(k)) and v == true then
-            return true
+        if string.find(string.lower(safeName), string.lower(k)) then
+            return (v == true)
         end
     end
     return true

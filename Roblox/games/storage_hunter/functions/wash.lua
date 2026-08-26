@@ -75,11 +75,11 @@ function WashModule.IsRarityAllowed(rarityName, State)
     if not State or not State.WashRarities then return true end
     local norm = normalizeRarity(rarityName)
     if State.WashRarities[norm] ~= nil then
-        return State.WashRarities[norm] == true
+        return (State.WashRarities[norm] == true)
     end
     for k, v in pairs(State.WashRarities) do
-        if normalizeRarity(k) == norm and v == true then
-            return true
+        if normalizeRarity(k) == norm then
+            return (v == true)
         end
     end
     return true

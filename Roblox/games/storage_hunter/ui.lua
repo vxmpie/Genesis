@@ -457,7 +457,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
             knobCorner.CornerRadius = UDim.new(1, 0)
             knobCorner.Parent = knob
 
-            local state = default
+            local state = (default == true)
             btn.MouseButton1Click:Connect(function()
                 state = not state
                 TweenService:Create(btn, TweenInfo.new(0.15), {
@@ -508,7 +508,10 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     local state = Config.GetState()
     local rarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Lost", "Exclusive"}
     for _, r in ipairs(rarities) do
-        local isAllowed = (state.WashRarities and state.WashRarities[r] ~= nil) and state.WashRarities[r] or true
+        local isAllowed = true
+        if state.WashRarities and state.WashRarities[r] ~= nil then
+            isAllowed = (state.WashRarities[r] == true)
+        end
         washRarityCard:AddToggle(r, isAllowed, function(val)
             if not state.WashRarities then state.WashRarities = {} end
             state.WashRarities[r] = val
@@ -546,7 +549,10 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     for _, safeInfo in ipairs(safeNames) do
         local sName = safeInfo[1]
         local sRarity = safeInfo[2]
-        local isAllowed = (state.AllowedSafes and state.AllowedSafes[sName] ~= nil) and state.AllowedSafes[sName] or true
+        local isAllowed = true
+        if state.AllowedSafes and state.AllowedSafes[sName] ~= nil then
+            isAllowed = (state.AllowedSafes[sName] == true)
+        end
         safeListCard:AddToggle(sName .. " (" .. sRarity .. ")", isAllowed, function(val)
             if not state.AllowedSafes then state.AllowedSafes = {} end
             state.AllowedSafes[sName] = val
