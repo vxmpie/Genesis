@@ -851,7 +851,7 @@ function updateMuMu(mumu) {
     DOM.mumuCount.textContent = `${devices.length} instance${devices.length !== 1 ? 's' : ''} running`;
 
     if (all.length === 0) {
-        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="8">No instances detected</td></tr>';
+        DOM.mumuBody.innerHTML = '<tr class="mumu-empty"><td colspan="9">No instances detected</td></tr>';
         return;
     }
 
@@ -876,6 +876,19 @@ function updateMuMu(mumu) {
             }
         }
 
+        let gameHtml = '<span class="mumu-game-na">—</span>';
+        if (isDevice) {
+            const instIdx = inst.instance_index || (devices.indexOf(inst) + 1);
+            const gameName = inst.target_game_name || 'Storage Hunters';
+            const placeId = inst.target_place_id || 98800969324557;
+            gameHtml = `
+                <div class="mumu-game-cell" title="Target Game for Auto-Reconnect (Place: ${placeId})">
+                    <span class="mumu-game-badge">🎮 ${escapeHtml(gameName)}</span>
+                    <button class="btn-game-edit" data-instance="${instIdx}" data-place="${placeId}" title="Change Target Game for Instance #${instIdx}">✏️</button>
+                </div>
+            `;
+        }
+
         const bloatBadge = inst.is_bloated ? '<span class="badge-bloat" title="High memory consumption (>4.5GB)">⚠️ Bloat</span>' : '';
         const trimBtn = `<button class="btn-trim-mini" data-pid="${inst.pid}" title="Trim working set for PID ${inst.pid}">↺ Trim</button>`;
 
@@ -883,6 +896,7 @@ function updateMuMu(mumu) {
             <tr>
                 <td>${i + 1}</td>
                 <td>${type}</td>
+                <td>${gameHtml}</td>
                 <td>${inst.cpu_percent}%</td>
                 <td>${inst.ram_mb} MB${bloatBadge}</td>
                 <td>${inst.uptime}</td>
@@ -906,6 +920,23 @@ function updateMuMu(mumu) {
                 btn.textContent = '↺ Trim';
                 btn.disabled = false;
             }, 2500);
+        });
+    });
+
+    // Attach click listeners to per-instance game edit buttons
+    DOM.mumuBody.querySelectorAll('.btn-game-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const instIdx = parseInt(btn.dataset.instance) || 1;
+            const currentPlace = btn.dataset.place || '98800969324557';
+            
+            const promptMsg = `Enter target Roblox Place ID for Instance #${instIdx}:\n(Presets: Storage Hunters = 98800969324557)`;
+            const newPlace = prompt(promptMsg, currentPlace);
+            if (newPlace && !isNaN(parseInt(newPlace)) && parseInt(newPlace) > 0) {
+                const placeNum = parseInt(newPlace);
+                sendCommand('set_instance_game', { instance: instIdx, place_id: placeNum });
+                showToast('system', `🎮 Target Game for Instance #${instIdx} set to Place ID ${placeNum}`);
+            }
         });
     });
 }

@@ -2897,3 +2897,51 @@ body {
     to { transform: scale(1); opacity: 1; }
 }
 
+/* ============================================================
+   MuMu Instance Custom Game Styling
+   ============================================================ */
+.mumu-game-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 229, 255, 0.06);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 6px;
+    padding: 3px 8px;
+    transition: var(--transition);
+}
+
+.mumu-game-cell:hover {
+    background: rgba(0, 229, 255, 0.12);
+    border-color: rgba(0, 229, 255, 0.45);
+}
+
+.mumu-game-badge {
+    font-size: 12px;
+    font-weight: 700;
+    color: #00E5FF;
+    white-space: nowrap;
+}
+
+.btn-game-edit {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+
+.btn-game-edit:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #FFFFFF;
+    transform: scale(1.15);
+}
+
+.mumu-game-na {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+

@@ -1924,7 +1924,7 @@ def get_mumu_instances() -> list:
         pass
 
     mumu_names = {n.lower() for n in CONFIG.get("mumu", {}).get("process_names", [])}
-    instances = []
+    device_idx = 0
     for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "create_time"]):
         try:
             name = (proc.info["name"] or "").lower()
@@ -1935,6 +1935,15 @@ def get_mumu_instances() -> list:
                 ram_mb = round((proc.info["memory_info"].rss if proc.info["memory_info"] else 0) / (1024 ** 2), 1)
                 cpu_pct = round(proc.info["cpu_percent"] or 0, 1)
                 is_bloated = (ram_mb >= 4000.0)
+                is_device = ("device" in name)
+
+                target_place_id = None
+                target_game_name = None
+                if is_device:
+                    device_idx += 1
+                    target_place_id = get_instance_place_id(device_idx)
+                    target_game_name = get_game_name_for_place_id(target_place_id)
+
                 instances.append({
                     "pid": proc.info["pid"],
                     "name": proc.info["name"],
@@ -1944,6 +1953,9 @@ def get_mumu_instances() -> list:
                     "uptime_seconds": int(uptime_sec),
                     "status": "running",
                     "is_bloated": is_bloated,
+                    "instance_index": device_idx if is_device else None,
+                    "target_place_id": target_place_id,
+                    "target_game_name": target_game_name,
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
@@ -1986,6 +1998,8 @@ def check_mumu_health() -> dict:
         "launcher_running": len(launchers) > 0,
         "vm_disk": _vm_disk_cache,
         "vm_disk_last_check": _last_vm_disk_check,
+        "instance_places": CONFIG.get("mumu", {}).get("instance_places", {}),
+        "game_presets": CONFIG.get("mumu", {}).get("game_presets", []),
     }
 
 
@@ -2023,11 +2037,59 @@ def get_mumu_adb_devices() -> list[str]:
     return []
 
 
-def recover_roblox_instance(serial: str, place_id: int = 98800969324557) -> bool:
+def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
+    """Resolve target Place ID for a specific MuMu instance index or serial."""
+    mumu_cfg = CONFIG.get("mumu", {})
+    instance_places = mumu_cfg.get("instance_places", {})
+    if str(instance_idx) in instance_places:
+        try:
+            return int(instance_places[str(instance_idx)])
+        except (ValueError, TypeError):
+            pass
+    if serial and serial in instance_places:
+        try:
+            return int(instance_places[serial])
+        except (ValueError, TypeError):
+            pass
+    return int(mumu_cfg.get("default_place_id", 98800969324557))
+
+
+def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
+    """Save custom target Place ID for an instance to config."""
+    try:
+        if "mumu" not in CONFIG:
+            CONFIG["mumu"] = {}
+        if "instance_places" not in CONFIG["mumu"]:
+            CONFIG["mumu"]["instance_places"] = {}
+        CONFIG["mumu"]["instance_places"][str(instance_idx)] = int(place_id)
+        save_config(CONFIG)
+        add_event("system", f"🎮 Instance {instance_idx} target Place ID set to {place_id}")
+        return True
+    except Exception as e:
+        print(f"[SET INSTANCE GAME ERROR] {e}")
+        return False
+
+
+def get_game_name_for_place_id(place_id: int) -> str:
+    """Get friendly game title from Place ID."""
+    if place_id in (98800969324557, 9640154):
+        return "Storage Hunters"
+    for p in CONFIG.get("mumu", {}).get("game_presets", []):
+        if p.get("place_id") == place_id:
+            return p.get("name", f"Place {place_id}")
+    return f"Place {place_id}"
+
+
+def recover_roblox_instance(serial: str, place_id: int | None = None, instance_idx: int | str = 1) -> bool:
     """Safely restart and rejoin Roblox on a specific MuMu Android instance."""
     adb = _find_mumu_adb()
     if not adb:
         return False
+    if not place_id or place_id <= 0:
+        place_id = get_instance_place_id(instance_idx, serial)
+
+    game_name = get_game_name_for_place_id(place_id)
+
     try:
         # 1. Force stop Roblox client
         subprocess.run([str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"], capture_output=True, timeout=5)
@@ -2035,15 +2097,15 @@ def recover_roblox_instance(serial: str, place_id: int = 98800969324557) -> bool
         # 2. Start Roblox with Deep Link into target Place ID
         deep_link = f"roblox://placeId={place_id}"
         subprocess.run([str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link], capture_output=True, timeout=5)
-        add_event("system", f"🔄 MuMu Watchdog: Auto-recovered Roblox on {serial} (Place: {place_id})")
+        add_event("system", f"🔄 MuMu Watchdog: Auto-recovered Roblox on Instance {instance_idx} ({serial}) -> {game_name}")
         if CONFIG.get("alerts", {}).get("notify_on_watchdog_recovery", True):
             send_discord_alert(
                 "🔄 Roblox Game Auto-Recovered",
-                f"MuMu Autonomous Watchdog detected disconnect/freeze on **{serial}**.\nRoblox process was safely restarted and rejoined into Place ID `{place_id}`.",
+                f"MuMu Autonomous Watchdog detected disconnect/freeze on **Instance {instance_idx}** (`{serial}`).\nRoblox process was safely restarted and rejoined into **{game_name}** (`{place_id}`).",
                 color=0x00D2FF,
                 fields=[
-                    {"name": "Instance", "value": serial, "inline": True},
-                    {"name": "Target Place", "value": str(place_id), "inline": True},
+                    {"name": "Instance", "value": f"Instance {instance_idx} (`{serial}`)", "inline": True},
+                    {"name": "Target Game", "value": f"**{game_name}**\n`{place_id}`", "inline": True},
                     {"name": "Status", "value": "Rejoined successfully", "inline": True},
                 ]
             )
@@ -2067,18 +2129,19 @@ async def mumu_game_watchdog_loop():
                 adb = _find_mumu_adb()
                 if adb:
                     devices = await asyncio.to_thread(get_mumu_adb_devices)
-                    place_id = int(mumu_cfg.get("default_place_id", 98800969324557))
 
-                    for serial in devices:
+                    for idx, serial in enumerate(devices, 1):
+                        place_id = get_instance_place_id(idx, serial)
+
                         # Check if Roblox process is running
                         r_pid = await asyncio.to_thread(
-                            lambda: subprocess.run([str(adb), "-s", serial, "shell", "pidof", "com.roblox.client"], capture_output=True, text=True, timeout=5)
+                            lambda s=serial: subprocess.run([str(adb), "-s", s, "shell", "pidof", "com.roblox.client"], capture_output=True, text=True, timeout=5)
                         )
                         pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
 
                         # Check focused window
                         r_win = await asyncio.to_thread(
-                            lambda: subprocess.run([str(adb), "-s", serial, "shell", "dumpsys", "window"], capture_output=True, text=True, timeout=5)
+                            lambda s=serial: subprocess.run([str(adb), "-s", s, "shell", "dumpsys", "window"], capture_output=True, text=True, timeout=5)
                         )
                         win_out = r_win.stdout if r_win.returncode == 0 else ""
 
@@ -2087,8 +2150,8 @@ async def mumu_game_watchdog_loop():
                         if not pid_out or is_error_dialog:
                             _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
                             if _mumu_consecutive_idle[serial] >= 2:  # 2 checks in a row (~60s)
-                                print(f"[MUMU WATCHDOG] Instance {serial} disconnected/frozen. Triggering recovery...")
-                                await asyncio.to_thread(recover_roblox_instance, serial, place_id)
+                                print(f"[MUMU WATCHDOG] Instance {idx} ({serial}) disconnected/frozen. Recovering to Place {place_id}...")
+                                await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
                                 _mumu_consecutive_idle[serial] = 0
                         else:
                             _mumu_consecutive_idle[serial] = 0
@@ -2661,6 +2724,19 @@ async def api_auth_status(request: Request):
     })
 
 
+@app.post("/api/mumu/set_game")
+async def api_mumu_set_game(request: Request, payload: dict):
+    inst_id = payload.get("instance", 1)
+    place_id = int(payload.get("place_id", 98800969324557))
+    ok = set_instance_place_id(inst_id, place_id)
+    return JSONResponse({
+        "ok": ok,
+        "instance": inst_id,
+        "place_id": place_id,
+        "game_name": get_game_name_for_place_id(place_id),
+    })
+
+
 # ---------------------------------------------------------------------------
 # PWA Root Assets
 # ---------------------------------------------------------------------------
@@ -2802,6 +2878,18 @@ async def handle_ws_command(ws: WebSocket, data: dict):
     elif cmd in ("check_hardening", "refresh_hardening"):
         result = check_hardening_drift()
         await ws.send_json({"type": "hardening_status", "data": result})
+
+    elif cmd == "set_instance_game":
+        inst_id = data.get("instance", 1)
+        place_id = int(data.get("place_id", 98800969324557))
+        ok = set_instance_place_id(inst_id, place_id)
+        await ws.send_json({
+            "type": "instance_game_updated",
+            "instance": inst_id,
+            "place_id": place_id,
+            "game_name": get_game_name_for_place_id(place_id),
+            "ok": ok,
+        })
 
     elif cmd == "defender_status":
         status = get_defender_status()
