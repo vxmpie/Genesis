@@ -1000,11 +1000,17 @@ def ram_boost(force_standby: bool = True) -> dict:
     _last_boost_time = time.time()
     _last_boost_result = result
 
-    msg_parts = [f"Boost: freed {freed_mb} MB RAM ({freed_count} procs in {duration_ms}ms)"]
+    msg_parts = [f"⚡ Boost: freed {freed_mb} MB RAM ({freed_count} procs in {duration_ms}ms)"]
     if standby_purged:
         msg_parts.append(f"purged {breakdown_before.get('standby_gb', 0)}GB Standby")
+    else:
+        msg_parts.append(f"Standby {breakdown_before.get('standby_gb', 0)}GB verified")
+
     if freed_temp_mb > 0 or deleted_files > 0:
         msg_parts.append(f"cleaned {freed_temp_mb} MB Temp ({deleted_files} files)")
+    else:
+        msg_parts.append("0 Temp files (Clean)")
+
     add_event("boost", " + ".join(msg_parts))
 
     return result

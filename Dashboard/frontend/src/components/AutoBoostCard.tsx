@@ -75,7 +75,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
             <label className="text-xs font-medium text-slate-300">RAM Threshold</label>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => onSetThreshold(Math.max(10, threshold - 5))}
+                onClick={() => onSetThreshold(Math.max(10, Math.floor((threshold - 1) / 5) * 5))}
                 className="btn-cyber w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] hover:text-white flex items-center justify-center text-slate-300 border border-white/10 font-mono text-sm font-bold active:scale-90"
               >
                 -
@@ -84,7 +84,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
                 {threshold}%
               </span>
               <button
-                onClick={() => onSetThreshold(Math.min(95, threshold + 5))}
+                onClick={() => onSetThreshold(Math.min(95, Math.ceil((threshold + 1) / 5) * 5))}
                 className="btn-cyber w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] hover:text-white flex items-center justify-center text-slate-300 border border-white/10 font-mono text-sm font-bold active:scale-90"
               >
                 +
