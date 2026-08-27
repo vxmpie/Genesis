@@ -32,9 +32,9 @@ const MetricRing: React.FC<MetricRingProps> = ({
   return (
     <div className="cyber-card p-4 flex flex-col items-center justify-between min-h-[185px] group hover:border-white/20 transition-all duration-300">
       {/* Top Header */}
-      <div className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
-        <span className="flex items-center gap-1.5">{icon} {label}</span>
-        <span className="font-mono text-[11px] text-slate-500 bg-white/[0.03] px-1.5 py-0.5 rounded border border-white/[0.04]">{sublabel}</span>
+      <div className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider gap-1 min-w-0">
+        <span className="flex items-center gap-1.5 min-w-0 truncate">{icon} <span className="truncate">{label}</span></span>
+        <span className="font-mono text-[10px] sm:text-[11px] text-slate-400 bg-white/[0.03] px-1.5 py-0.5 rounded border border-white/[0.04] shrink-0 whitespace-nowrap">{sublabel}</span>
       </div>
 
       {/* Center SVG Ring */}
@@ -123,15 +123,15 @@ export const MetricCards: React.FC = () => {
       <MetricRing
         percent={cpuPct}
         label="CPU Load"
-        sublabel={`12 Cores • ${cpuCount} Threads`}
+        sublabel={`12C • ${cpuCount}T`}
         valueDisplay={Math.round(cpuPct)}
         unit="%"
         colorClass={cpuColor}
         glowClass={cpuGlow}
-        icon={<Cpu className="w-3.5 h-3.5 text-genesis-accent" />}
+        icon={<Cpu className="w-3.5 h-3.5 text-genesis-accent shrink-0" />}
       >
         <div className="w-full text-center text-[10px] font-mono text-slate-300 font-semibold tracking-tight truncate px-1" title="12th Gen Intel Core i5-12500H @ 2.5 – 4.5 GHz">
-          i5-12500H • 2.5 – 4.5 GHz
+          i5-12500H • 4.5 GHz
         </div>
       </MetricRing>
 
@@ -139,14 +139,14 @@ export const MetricCards: React.FC = () => {
       <MetricRing
         percent={ramPct}
         label="RAM Capacity"
-        sublabel={`${ramUsed.toFixed(1)} / ${ramTotal.toFixed(0)} GB`}
+        sublabel={`${ramUsed.toFixed(1)}/${ramTotal.toFixed(0)} GB`}
         valueDisplay={Math.round(ramPct)}
         unit="%"
         colorClass="stroke-genesis-blue"
         glowClass="filter drop-shadow(0 0 8px rgba(59,130,246,0.4))"
-        icon={<MemoryStick className="w-3.5 h-3.5 text-genesis-blue" />}
+        icon={<MemoryStick className="w-3.5 h-3.5 text-genesis-blue shrink-0" />}
       >
-        <div className="w-full flex flex-col gap-1.5 mt-1">
+        <div className="w-full flex flex-col gap-1 mt-1">
           {/* Active vs Standby Segment Bar */}
           <div className="w-full h-2 bg-white/[0.08] rounded-full overflow-hidden flex border border-white/[0.06]">
             <div
@@ -160,10 +160,16 @@ export const MetricCards: React.FC = () => {
               title={`Standby Cache: ${ramStandby.toFixed(1)} GB`}
             />
           </div>
-          <div className="flex items-center justify-between text-[9px] font-mono mt-0.5">
-            <span className="text-slate-400 font-medium">Act: <b className="text-genesis-accent font-bold">{ramActive.toFixed(1)} GB</b></span>
-            <span className="text-slate-400 font-medium">Stb: <b className="text-genesis-amber font-bold">{ramStandby.toFixed(1)} GB</b></span>
-            <span className="text-slate-400 font-medium">Free: <b className="text-genesis-green font-bold">{ramFree.toFixed(1)} GB</b></span>
+          <div className="flex items-center justify-between text-[8.5px] sm:text-[9px] font-mono mt-0.5 gap-0.5">
+            <span className="text-slate-400 font-medium truncate" title={`Active: ${ramActive.toFixed(1)} GB`}>
+              Act: <b className="text-genesis-accent font-bold">{ramActive.toFixed(1)}G</b>
+            </span>
+            <span className="text-slate-400 font-medium truncate" title={`Standby: ${ramStandby.toFixed(1)} GB`}>
+              Stb: <b className="text-genesis-amber font-bold">{ramStandby.toFixed(1)}G</b>
+            </span>
+            <span className="text-slate-400 font-medium truncate" title={`Free: ${ramFree.toFixed(1)} GB`}>
+              Free: <b className="text-genesis-green font-bold">{ramFree.toFixed(1)}G</b>
+            </span>
           </div>
         </div>
       </MetricRing>

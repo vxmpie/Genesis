@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Gamepad2, X, Check, Save } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
@@ -11,7 +11,8 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
   const close = useDashboardStore((s) => s.closeEditGameModal);
   const device = useDashboardStore((s) => s.editingDevice);
 
-  const [placeId, setPlaceId] = useState<string>('');
+  const [customPlaceId, setCustomPlaceId] = useState<string | null>(null);
+  const placeId = customPlaceId ?? String(device?.place_id || '98800969324557');
 
   const presets = [
     { name: 'Storage Hunters', placeId: '98800969324557' },
@@ -20,19 +21,19 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
     { name: 'Blox Fruits', placeId: '2753915549' },
   ];
 
-  useEffect(() => {
-    if (device) {
-      setPlaceId(String(device.place_id || '98800969324557'));
-    }
-  }, [device]);
-
   if (!isOpen || !device) return null;
+
+  const handleClose = () => {
+    setCustomPlaceId(null);
+    close();
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     const pidNum = parseInt(placeId.trim());
     if (isNaN(pidNum) || pidNum <= 0) return;
     onSave(device.index, pidNum);
+    setCustomPlaceId(null);
     close();
   };
 
@@ -40,7 +41,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div className="w-full max-w-md bg-genesis-card border border-white/10 rounded-xl p-5 shadow-2xl relative">
         <button
-          onClick={close}
+          onClick={handleClose}
           className="btn-cyber absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-md active:scale-90 hover:rotate-90 transition-all duration-200"
         >
           <X className="w-4 h-4" />
@@ -66,7 +67,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
               <button
                 key={p.placeId}
                 type="button"
-                onClick={() => setPlaceId(p.placeId)}
+                onClick={() => setCustomPlaceId(p.placeId)}
                 className={`btn-cyber p-2 rounded border text-left text-xs font-mono transition-all active:scale-95 ${
                   placeId === p.placeId
                     ? 'bg-genesis-cyan/15 border-genesis-cyan/40 text-genesis-cyan font-bold shadow-[0_0_8px_rgba(0,229,255,0.2)]'
@@ -92,7 +93,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
             <input
               type="text"
               value={placeId}
-              onChange={(e) => setPlaceId(e.target.value)}
+              onChange={(e) => setCustomPlaceId(e.target.value)}
               placeholder="e.g. 98800969324557"
               className="w-full px-3 py-2 bg-black/50 border border-white/15 rounded-lg text-xs font-mono text-white outline-none focus:border-genesis-cyan focus:ring-1 focus:ring-genesis-cyan transition-all"
             />
@@ -101,7 +102,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={close}
+              onClick={handleClose}
               className="btn-cyber px-4 py-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 text-xs font-semibold border border-white/10 active:scale-95 transition-all"
             >
               Cancel

@@ -25,8 +25,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPalette, onOpenAuth }) => 
   const uptimeStr = formatUptime(summary?.uptime_seconds || 0);
 
   return (
-    <header className="sticky top-0 z-40 bg-genesis-bg/95 border-b border-white/[0.08] backdrop-blur-xl px-4 py-2.5 sm:px-6 sm:py-3 transition-all duration-200">
-      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+    <header className="sticky top-0 z-40 bg-genesis-bg/95 border-b border-white/[0.08] backdrop-blur-xl px-3 py-2 sm:px-6 sm:py-3 transition-all duration-200">
+      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 sm:gap-4">
         {/* Logo & Brand */}
         <div className="flex items-center gap-2.5 sm:gap-3.5 group cursor-pointer">
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-genesis-accent to-orange-500 flex items-center justify-center text-white shadow-glow-accent ring-1 ring-white/20 animate-pulse-glow group-hover:scale-105 group-active:rotate-6 transition-transform">

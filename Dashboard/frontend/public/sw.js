@@ -31,7 +31,7 @@ self.addEventListener('install', (event) => {
             for (const url of OPTIONAL_ASSETS) {
                 try {
                     await cache.add(url);
-                } catch (e) {
+                } catch {
                     console.warn('[SW] Optional external asset skipped:', url);
                 }
             }

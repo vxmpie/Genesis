@@ -46,6 +46,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
         setError(data.error || 'Invalid PIN code. Please try again.');
       }
     } catch (err) {
+      console.error('Auth error:', err);
       setError('Connection error. Could not verify PIN.');
     } finally {
       setLoading(false);

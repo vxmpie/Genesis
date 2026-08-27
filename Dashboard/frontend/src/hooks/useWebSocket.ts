@@ -1,9 +1,9 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useDashboardStore } from '../store/useDashboard';
 
 // Shared module-level singleton WebSocket connection
 let globalWs: WebSocket | null = null;
-let reconnectTimer: any = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingCommands: { command: string; payload: Record<string, any> }[] = [];
 
 export function useWebSocket() {
@@ -17,65 +17,9 @@ export function useWebSocket() {
   const setIsDeepCleaning = useDashboardStore((s) => s.setIsDeepCleaning);
   const setIsScanningClean = useDashboardStore((s) => s.setIsScanningClean);
 
-  const connect = useCallback(() => {
-    if (globalWs && (globalWs.readyState === WebSocket.OPEN || globalWs.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
+  const connectRef = useRef<() => void>(() => {});
 
-    const currentToken = useDashboardStore.getState().token;
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = window.location.host;
-    const tokenQuery = currentToken ? `?token=${encodeURIComponent(currentToken)}` : '';
-    const url = host.includes('5173') 
-      ? `ws://127.0.0.1:7700/ws${tokenQuery}`
-      : `${proto}://${host}/ws${tokenQuery}`;
-
-    try {
-      const ws = new WebSocket(url);
-      globalWs = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        const tok = useDashboardStore.getState().token;
-        if (tok) {
-          ws.send(JSON.stringify({ command: 'auth', token: tok }));
-        }
-
-        // Flush pending queued commands
-        if (pendingCommands.length > 0) {
-          pendingCommands.forEach(({ command, payload }) => {
-            ws.send(JSON.stringify({ command, token: tok, ...payload }));
-          });
-          pendingCommands = [];
-        }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        globalWs = null;
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, 1500);
-      };
-
-      ws.onerror = () => {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          handleIncomingMessage(data);
-        } catch (err) {
-          console.error('WS Parse Error:', err);
-        }
-      };
-    } catch (err) {
-      console.error('WS Connection error:', err);
-      reconnectTimer = setTimeout(connect, 2000);
-    }
-  }, [setConnected]);
-
-  const handleIncomingMessage = (data: any) => {
+  const handleIncomingMessage = useCallback((data: any) => {
     switch (data.type) {
       case 'init':
         updateInitPayload(data);
@@ -107,22 +51,25 @@ export function useWebSocket() {
         break;
       case 'deep_clean_preview':
         setIsScanningClean(false);
-        const cleanItems = data.data || data.items || [];
-        setDeepCleanPreview(cleanItems);
-        addToast('system', `Scanned ${data.total_files || cleanItems.length} junk targets (${data.total_size_mb || 0} MB)`);
+        {
+          const cleanItems = data.data || data.items || [];
+          setDeepCleanPreview(cleanItems);
+          addToast('system', `Scanned ${data.total_files || cleanItems.length} junk targets (${data.total_size_mb || 0} MB)`);
+        }
         break;
       case 'deep_clean_result':
         setIsDeepCleaning(false);
         setDeepCleanPreview([]);
-        const cleanRes = data.result || data.data || data;
-        if (cleanRes && (cleanRes.success !== false || cleanRes.total_freed_mb !== undefined)) {
-          addToast('system', `Cleaned ${cleanRes.total_freed_mb || cleanRes.freed_mb || 0} MB junk files`);
-        } else {
-          addToast('error', 'Deep clean completed with warnings');
+        {
+          const cleanRes = data.result || data.data || data;
+          if (cleanRes && (cleanRes.success !== false || cleanRes.total_freed_mb !== undefined)) {
+            addToast('system', `Cleaned ${cleanRes.total_freed_mb || cleanRes.freed_mb || 0} MB junk files`);
+          } else {
+            addToast('error', 'Deep clean completed with warnings');
+          }
         }
         break;
       case 'boost_result':
-        // Handled cleanly via live broadcast event
         break;
       case 'config_updated':
         if (data.auto_boost) {
@@ -142,7 +89,74 @@ export function useWebSocket() {
         }
         break;
     }
-  };
+  }, [addEvent, addToast, setAuthenticated, setDeepCleanPreview, setIsDeepCleaning, setIsScanningClean, updateInitPayload, updateMetricsPayload]);
+
+  const connect = useCallback(() => {
+    if (globalWs && (globalWs.readyState === WebSocket.OPEN || globalWs.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    const currentToken = useDashboardStore.getState().token;
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = window.location.host;
+    const tokenQuery = currentToken ? `?token=${encodeURIComponent(currentToken)}` : '';
+    const url = host.includes('5173')
+      ? `ws://127.0.0.1:7700/ws${tokenQuery}`
+      : `${proto}://${host}/ws${tokenQuery}`;
+
+    try {
+      const ws = new WebSocket(url);
+      globalWs = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        const tok = useDashboardStore.getState().token;
+        if (tok) {
+          ws.send(JSON.stringify({ command: 'auth', token: tok }));
+        }
+
+        // Flush pending queued commands
+        if (pendingCommands.length > 0) {
+          pendingCommands.forEach(({ command, payload }) => {
+            ws.send(JSON.stringify({ command, token: tok, ...payload }));
+          });
+          pendingCommands = [];
+        }
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        globalWs = null;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          connectRef.current();
+        }, 1500);
+      };
+
+      ws.onerror = () => {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          handleIncomingMessage(data);
+        } catch (err) {
+          console.error('WS Parse Error:', err);
+        }
+      };
+    } catch (err) {
+      console.error('WS Connection error:', err);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        connectRef.current();
+      }, 2000);
+    }
+  }, [handleIncomingMessage, setConnected]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const sendCommand = useCallback(
     (command: string, payload: Record<string, any> = {}) => {

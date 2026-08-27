@@ -5,6 +5,7 @@ export interface CpuMetrics {
   per_core: number[];
   count: number;
   frequency_ghz?: number;
+  model?: string;
 }
 
 export interface RamMetrics {
@@ -17,6 +18,11 @@ export interface RamMetrics {
   swap_total_gb?: number;
   swap_used_gb?: number;
   swap_percent?: number;
+  breakdown?: {
+    active_gb: number;
+    standby_gb: number;
+    free_gb: number;
+  };
 }
 
 export interface GpuMetrics {
@@ -30,6 +36,8 @@ export interface GpuMetrics {
 export interface DiskMetrics {
   read_mb_s: number;
   write_mb_s: number;
+  read_speed_mbs?: number;
+  write_speed_mbs?: number;
   system_percent?: number;
   system_free_gb?: number;
   system_total_gb?: number;
@@ -38,6 +46,8 @@ export interface DiskMetrics {
 export interface NetworkMetrics {
   bytes_sent_sec: number;
   bytes_recv_sec: number;
+  sent_speed_mbs?: number | string;
+  recv_speed_mbs?: number | string;
   total_sent_mb: number;
   total_recv_mb: number;
   roblox_ping_ms?: number;
@@ -49,6 +59,13 @@ export interface SystemMetrics {
   gpu: GpuMetrics;
   disk: DiskMetrics;
   network: NetworkMetrics;
+  storage?: {
+    c_drive?: {
+      free_gb: number;
+      total_gb: number;
+      percent: number;
+    };
+  };
   uptime_seconds?: number;
   timestamp?: string;
 }

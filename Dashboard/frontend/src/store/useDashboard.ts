@@ -185,7 +185,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       const newMetrics = data.metrics || s.metrics;
       if (newMetrics) {
         if (newMetrics.storage?.c_drive) {
-          if (!newMetrics.disk) newMetrics.disk = {} as any;
+          if (!newMetrics.disk) {
+            newMetrics.disk = {
+              read_mb_s: 0,
+              write_mb_s: 0,
+            };
+          }
           newMetrics.disk.system_free_gb = newMetrics.storage.c_drive.free_gb;
           newMetrics.disk.system_total_gb = newMetrics.storage.c_drive.total_gb;
           newMetrics.disk.system_percent = newMetrics.storage.c_drive.percent;
@@ -196,16 +201,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           newMetrics.ram.free_gb = newMetrics.ram.breakdown.free_gb;
         }
         if (newMetrics.disk) {
-          newMetrics.disk.read_mb_s = newMetrics.disk.read_mb_s ?? (newMetrics.disk as any).read_speed_mbs ?? 0;
-          newMetrics.disk.write_mb_s = newMetrics.disk.write_mb_s ?? (newMetrics.disk as any).write_speed_mbs ?? 0;
+          newMetrics.disk.read_mb_s = newMetrics.disk.read_mb_s ?? newMetrics.disk.read_speed_mbs ?? 0;
+          newMetrics.disk.write_mb_s = newMetrics.disk.write_mb_s ?? newMetrics.disk.write_speed_mbs ?? 0;
         }
         if (newMetrics.network) {
-          const sentMbs = (newMetrics.network as any).sent_speed_mbs ?? ((newMetrics.network.bytes_sent_sec || 0) / (1024 * 1024));
-          const recvMbs = (newMetrics.network as any).recv_speed_mbs ?? ((newMetrics.network.bytes_recv_sec || 0) / (1024 * 1024));
-          (newMetrics.network as any).sent_speed_mbs = sentMbs;
-          (newMetrics.network as any).recv_speed_mbs = recvMbs;
-          newMetrics.network.bytes_sent_sec = newMetrics.network.bytes_sent_sec || Math.round(sentMbs * 1024 * 1024);
-          newMetrics.network.bytes_recv_sec = newMetrics.network.bytes_recv_sec || Math.round(recvMbs * 1024 * 1024);
+          const sentMbs = newMetrics.network.sent_speed_mbs ?? ((newMetrics.network.bytes_sent_sec || 0) / (1024 * 1024));
+          const recvMbs = newMetrics.network.recv_speed_mbs ?? ((newMetrics.network.bytes_recv_sec || 0) / (1024 * 1024));
+          newMetrics.network.sent_speed_mbs = sentMbs;
+          newMetrics.network.recv_speed_mbs = recvMbs;
+          newMetrics.network.bytes_sent_sec = newMetrics.network.bytes_sent_sec || Math.round(Number(sentMbs) * 1024 * 1024);
+          newMetrics.network.bytes_recv_sec = newMetrics.network.bytes_recv_sec || Math.round(Number(recvMbs) * 1024 * 1024);
         }
       }
 

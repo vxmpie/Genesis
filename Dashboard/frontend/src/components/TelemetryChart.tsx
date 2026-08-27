@@ -1,9 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Activity, Clock } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 export const TelemetryChart: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const chartZoom = useDashboardStore((s) => s.chartZoom);
   const setChartZoom = useDashboardStore((s) => s.setChartZoom);
   const chartHistory = useDashboardStore((s) => s.chartHistory);
@@ -12,41 +13,69 @@ export const TelemetryChart: React.FC = () => {
   const [hoverInfo, setHoverInfo] = useState<{
     x: number;
     y: number;
+    tooltipLeft: number;
     time: string;
     cpu: number;
     ram: number;
   } | null>(null);
 
-  const cpuHistory = chartHistory?.cpu || [];
-  const ramHistory = chartHistory?.ram || [];
-  const timestamps = chartHistory?.timestamps || [];
+  const cpuHistory = chartHistory?.cpu;
+  const ramHistory = chartHistory?.ram;
 
   // Summary Statistics
-  const visibleCpu = cpuHistory.length > 0 ? cpuHistory.slice(-chartZoom * 2) : [metrics?.cpu?.total_percent || 0];
-  const visibleRam = ramHistory.length > 0 ? ramHistory.slice(-chartZoom * 2) : [metrics?.ram?.percent || 0];
+  const visibleCpu = cpuHistory && cpuHistory.length > 0 ? cpuHistory.slice(-chartZoom * 2) : [metrics?.cpu?.total_percent || 0];
+  const visibleRam = ramHistory && ramHistory.length > 0 ? ramHistory.slice(-chartZoom * 2) : [metrics?.ram?.percent || 0];
 
   const avgCpu = visibleCpu.length ? Math.round(visibleCpu.reduce((a, b) => a + b, 0) / visibleCpu.length) : 0;
   const maxCpu = visibleCpu.length ? Math.round(Math.max(...visibleCpu)) : 0;
   const avgRam = visibleRam.length ? Math.round(visibleRam.reduce((a, b) => a + b, 0) / visibleRam.length) : 0;
   const maxRam = visibleRam.length ? Math.round(Math.max(...visibleRam)) : 0;
 
+  // Handle Resize via ResizeObserver (only resize canvas when container dimensions change)
+  useEffect(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.round(width * dpr);
+          canvas.height = Math.round(height * dpr);
+        }
+      }
+    });
+
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   // 60 FPS Native Canvas Render Loop
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
+    const rect = container.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
+
+    if (w === 0 || h === 0) return;
+
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
     const padTop = 16;
     const padBot = 28;
     const padLeft = 36;
@@ -104,16 +133,20 @@ export const TelemetryChart: React.FC = () => {
     }
 
     // 3. Prepare continuous plot points
-    const currentCpu = metrics?.cpu?.total_percent || (cpuHistory[cpuHistory.length - 1] ?? 15);
-    const currentRam = metrics?.ram?.percent || (ramHistory[ramHistory.length - 1] ?? 40);
+    const cCpu = chartHistory?.cpu || [];
+    const cRam = chartHistory?.ram || [];
+    const cTs = chartHistory?.timestamps || [];
+
+    const currentCpu = metrics?.cpu?.total_percent || (cCpu[cCpu.length - 1] ?? 15);
+    const currentRam = metrics?.ram?.percent || (cRam[cRam.length - 1] ?? 40);
 
     const rawPoints: Array<{ ts: number; cpu: number; ram: number }> = [];
-    if (timestamps.length > 0) {
-      for (let i = 0; i < timestamps.length; i++) {
+    if (cTs.length > 0) {
+      for (let i = 0; i < cTs.length; i++) {
         rawPoints.push({
-          ts: timestamps[i],
-          cpu: cpuHistory[i] !== undefined ? cpuHistory[i] : currentCpu,
-          ram: ramHistory[i] !== undefined ? ramHistory[i] : currentRam,
+          ts: cTs[i],
+          cpu: cCpu[i] !== undefined ? cCpu[i] : currentCpu,
+          ram: cRam[i] !== undefined ? cRam[i] : currentRam,
         });
       }
     } else {
@@ -235,15 +268,17 @@ export const TelemetryChart: React.FC = () => {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+
+    ctx.restore();
   }, [chartHistory, chartZoom, hoverInfo, metrics]);
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  const calculateHoverPoint = useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
 
     const padLeft = 36;
     const padRight = 16;
@@ -259,14 +294,18 @@ export const TelemetryChart: React.FC = () => {
     let closestCpu = metrics?.cpu?.total_percent || 0;
     let closestRam = metrics?.ram?.percent || 0;
 
-    if (timestamps.length > 0) {
+    const cCpu = chartHistory?.cpu;
+    const cRam = chartHistory?.ram;
+    const cTs = chartHistory?.timestamps;
+
+    if (cTs && cTs.length > 0) {
       let minDiff = Infinity;
-      for (let i = 0; i < timestamps.length; i++) {
-        const diff = Math.abs(timestamps[i] - targetTs);
+      for (let i = 0; i < cTs.length; i++) {
+        const diff = Math.abs(cTs[i] - targetTs);
         if (diff < minDiff) {
           minDiff = diff;
-          closestCpu = cpuHistory[i] !== undefined ? cpuHistory[i] : closestCpu;
-          closestRam = ramHistory[i] !== undefined ? ramHistory[i] : closestRam;
+          closestCpu = cCpu && cCpu[i] !== undefined ? cCpu[i] : closestCpu;
+          closestRam = cRam && cRam[i] !== undefined ? cRam[i] : closestRam;
         }
       }
     }
@@ -276,13 +315,26 @@ export const TelemetryChart: React.FC = () => {
     const mm = String(dateObj.getMinutes()).padStart(2, '0');
     const ss = String(dateObj.getSeconds()).padStart(2, '0');
 
+    const tooltipLeft = Math.min(Math.max(x - 60, 10), rect.width - 130);
+
     setHoverInfo({
       x,
       y,
+      tooltipLeft,
       time: `${hh}:${mm}:${ss}`,
       cpu: Math.round(closestCpu),
       ram: Math.round(closestRam),
     });
+  }, [chartHistory, chartZoom, metrics?.cpu?.total_percent, metrics?.ram?.percent]);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    calculateHoverPoint(e.clientX, e.clientY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length > 0) {
+      calculateHoverPoint(e.touches[0].clientX, e.touches[0].clientY);
+    }
   };
 
   const handleMouseLeave = () => {
@@ -291,39 +343,41 @@ export const TelemetryChart: React.FC = () => {
 
   return (
     <div className="cyber-card p-4 flex flex-col justify-between relative">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-genesis-cyan" />
-          <span className="text-xs font-bold text-white uppercase tracking-wider">
-            Autonomous Telemetry (Dual-Curve Stream)
-          </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-400 border border-white/[0.08]">
-            60 FPS Canvas
+      {/* Header (Responsive Layout for Mobile & Desktop) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
+        <div className="flex items-center justify-between sm:justify-start gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Activity className="w-4 h-4 text-genesis-cyan shrink-0 animate-pulse" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider truncate">
+              Autonomous Telemetry
+            </span>
+          </div>
+          <span className="text-[9px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] text-slate-400 border border-white/[0.08] shrink-0">
+            60 FPS
           </span>
         </div>
 
         {/* Controls & Legend */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap">
           {/* Legend */}
-          <div className="flex items-center gap-3 text-[11px] font-mono">
+          <div className="flex items-center gap-2.5 text-[10px] sm:text-[11px] font-mono">
             <span className="flex items-center gap-1 text-genesis-accent font-bold">
-              <span className="w-2.5 h-2.5 rounded-full bg-genesis-accent shadow-glow-accent" />
-              CPU Load ({Math.round(metrics?.cpu?.total_percent || 0)}%)
+              <span className="w-2 h-2 rounded-full bg-genesis-accent shadow-glow-accent" />
+              CPU ({Math.round(metrics?.cpu?.total_percent || 0)}%)
             </span>
             <span className="flex items-center gap-1 text-genesis-blue font-bold">
-              <span className="w-2.5 h-2.5 rounded-full bg-genesis-blue shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+              <span className="w-2 h-2 rounded-full bg-genesis-blue shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
               RAM ({Math.round(metrics?.ram?.percent || 0)}%)
             </span>
           </div>
 
           {/* Timeframe Zoom Pills */}
-          <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/[0.08] text-[10px] font-mono">
+          <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/[0.08] text-[10px] font-mono shrink-0">
             {([5, 15, 30] as const).map((mins) => (
               <button
                 key={mins}
                 onClick={() => setChartZoom(mins)}
-                className={`px-2.5 py-1 rounded transition-all font-bold ${
+                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded transition-all font-bold ${
                   chartZoom === mins
                     ? 'bg-genesis-cyan/20 text-genesis-cyan border border-genesis-cyan/40 shadow-[0_0_8px_rgba(0,229,255,0.3)]'
                     : 'text-slate-400 hover:text-white'
@@ -336,26 +390,29 @@ export const TelemetryChart: React.FC = () => {
         </div>
       </div>
 
-      {/* Canvas Chart Area with Hover Crosshair Tooltip */}
-      <div className="relative w-full h-56 bg-black/30 rounded-xl overflow-hidden border border-white/[0.06]">
+      {/* Canvas Chart Area with Hover / Touch Tooltip */}
+      <div ref={containerRef} className="relative w-full h-52 sm:h-56 bg-black/30 rounded-xl overflow-hidden border border-white/[0.06] touch-none">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
+          onTouchStart={handleTouchMove}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleMouseLeave}
           className="w-full h-full cursor-crosshair block"
         />
 
-        {/* Floating Tooltip during Hover */}
+        {/* Floating Tooltip during Hover / Touch */}
         {hoverInfo && (
           <div
-            className="absolute pointer-events-none z-20 bg-slate-900/95 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg shadow-2xl flex flex-col gap-1 text-[11px] font-mono"
+            className="absolute pointer-events-none z-20 bg-slate-900/95 border border-white/20 backdrop-blur-md px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg shadow-2xl flex flex-col gap-1 text-[11px] font-mono"
             style={{
-              left: `${Math.min(Math.max(hoverInfo.x - 60, 10), (canvasRef.current?.getBoundingClientRect().width || 300) - 130)}px`,
+              left: `${hoverInfo.tooltipLeft}px`,
               top: '12px',
             }}
           >
             <div className="flex items-center gap-1 text-slate-400 text-[10px] border-b border-white/10 pb-1">
-              <Clock className="w-3 h-3 text-slate-400" />
+              <Clock className="w-3 h-3 text-slate-400 shrink-0" />
               <span>{hoverInfo.time}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -371,21 +428,21 @@ export const TelemetryChart: React.FC = () => {
       </div>
 
       {/* Summary Analytics Footer Bar */}
-      <div className="mt-3 pt-2 border-t border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs font-mono">
+      <div className="mt-3 pt-2 border-t border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-center text-xs font-mono">
         <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
-          <span className="text-[10px] text-slate-500 uppercase block">CPU Window Avg</span>
+          <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase block">CPU Window Avg</span>
           <span className="font-extrabold text-genesis-accent">{avgCpu}%</span>
         </div>
         <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
-          <span className="text-[10px] text-slate-500 uppercase block">CPU Peak</span>
+          <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase block">CPU Peak</span>
           <span className="font-extrabold text-red-400">{maxCpu}%</span>
         </div>
         <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
-          <span className="text-[10px] text-slate-500 uppercase block">RAM Window Avg</span>
+          <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase block">RAM Window Avg</span>
           <span className="font-extrabold text-genesis-blue">{avgRam}%</span>
         </div>
         <div className="bg-white/[0.02] p-1.5 rounded border border-white/[0.04]">
-          <span className="text-[10px] text-slate-500 uppercase block">RAM Peak</span>
+          <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase block">RAM Peak</span>
           <span className="font-extrabold text-blue-400">{maxRam}%</span>
         </div>
       </div>
