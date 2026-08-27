@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Sparkles, ShieldCheck, Globe, Search, RefreshCw, Trash2, X } from 'lucide-react';
+import { Zap, Sparkles, ShieldCheck, Globe, Search, RefreshCw, Trash2, X, Timer, Cpu, Layers } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 interface CommandPaletteProps {
@@ -9,10 +9,15 @@ interface CommandPaletteProps {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => {
   const isOpen = useDashboardStore((s) => s.cmdPaletteOpen);
   const setOpen = useDashboardStore((s) => s.setCmdPaletteOpen);
+  const timerRes = useDashboardStore((s) => s.timerResolution);
+  const pcore = useDashboardStore((s) => s.pcoreAffinity);
   const [search, setSearch] = useState('');
 
   const commands = [
     { id: 'boost', title: 'RAM Boost (NtSetSystemInfo)', desc: 'Trim processes & purge Standby Cache', icon: <Zap className="w-4 h-4 text-genesis-accent" /> },
+    { id: 'toggle_timer', title: `Kernel Timer (${timerRes?.active ? '0.500ms Active' : 'Default 15.6ms'})`, desc: 'Toggle 0.5ms high-precision micro-tick resolution', icon: <Timer className="w-4 h-4 text-genesis-green" /> },
+    { id: 'toggle_affinity', title: `P-Core Affinity Lock (${pcore?.enabled ? 'Active Cores 0-7' : 'Balanced'})`, desc: 'Bind MuMu/Roblox to Intel Performance Cores', icon: <Cpu className="w-4 h-4 text-genesis-cyan" /> },
+    { id: 'flush_shader', title: 'Flush GPU Shader Cache', desc: 'Clear NVIDIA DXCache & D3DSCache pipeline memory', icon: <Layers className="w-4 h-4 text-purple-400" /> },
     { id: 'scan_deep_clean', title: 'Deep Clean Scan', desc: 'Scan temp caches & dump files', icon: <Sparkles className="w-4 h-4 text-genesis-amber" /> },
     { id: 'refresh_hardening', title: 'Hardening Audit', desc: 'Verify 4/4 CIM security configuration', icon: <ShieldCheck className="w-4 h-4 text-genesis-green" /> },
     { id: 'flush_dns', title: 'Flush DNS Resolver', desc: 'Clear local DNS cache & ARP sockets', icon: <Globe className="w-4 h-4 text-genesis-cyan" /> },

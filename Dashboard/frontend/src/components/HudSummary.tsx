@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Zap, ShieldAlert, HardDrive, ShieldCheck, Sparkles, Activity } from 'lucide-react';
+import { Clock, Zap, ShieldAlert, HardDrive, ShieldCheck, Sparkles, Activity, Timer, Cpu } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 interface HudSummaryProps {
@@ -11,6 +11,8 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
   const summary = useDashboardStore((s) => s.summary);
   const metrics = useDashboardStore((s) => s.metrics);
   const autoBoost = useDashboardStore((s) => s.autoBoost);
+  const timerRes = useDashboardStore((s) => s.timerResolution);
+  const pcore = useDashboardStore((s) => s.pcoreAffinity);
 
   const uptimeSec = summary?.uptime_seconds || 0;
   const days = Math.floor(uptimeSec / 86400);
@@ -124,8 +126,8 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
         </div>
       </div>
 
-      {/* Unified Status Ribbon (Clean & Roomy on all screens) */}
-      <div className="mt-2.5 pt-2.5 border-t border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] font-mono">
+      {/* Unified Status Ribbon (6 Status Pills) */}
+      <div className="mt-2.5 pt-2.5 border-t border-white/[0.04] grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] font-mono">
         {/* Status 1: Watchdog Recoveries */}
         <div className="bg-black/30 border border-white/[0.04] rounded px-2 py-1.5 flex items-center justify-between min-w-0">
           <span className="text-slate-400 flex items-center gap-1 truncate font-sans text-[10px] sm:text-[11px] min-w-0 mr-1">
@@ -148,7 +150,29 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
           </span>
         </div>
 
-        {/* Status 3: Roblox CDN Edge Ping */}
+        {/* Status 3: Kernel Timer Resolution */}
+        <div className="bg-black/30 border border-white/[0.04] rounded px-2 py-1.5 flex items-center justify-between min-w-0">
+          <span className="text-slate-400 flex items-center gap-1 truncate font-sans text-[10px] sm:text-[11px] min-w-0 mr-1">
+            <Timer className="w-3 h-3 text-genesis-green shrink-0" />
+            <span className="truncate">Timer</span>
+          </span>
+          <span className="font-bold text-genesis-green shrink-0 text-[10px] sm:text-[11px]">
+            {timerRes?.resolution_ms !== undefined ? `${timerRes.resolution_ms}ms` : '0.50ms'}
+          </span>
+        </div>
+
+        {/* Status 4: CPU P-Core Lock */}
+        <div className="bg-black/30 border border-white/[0.04] rounded px-2 py-1.5 flex items-center justify-between min-w-0">
+          <span className="text-slate-400 flex items-center gap-1 truncate font-sans text-[10px] sm:text-[11px] min-w-0 mr-1">
+            <Cpu className="w-3 h-3 text-genesis-cyan shrink-0" />
+            <span className="truncate">P-Core</span>
+          </span>
+          <span className="font-bold text-genesis-cyan shrink-0 text-[10px] sm:text-[11px]">
+            {pcore?.enabled !== false ? 'Cores 0-7' : 'All Cores'}
+          </span>
+        </div>
+
+        {/* Status 5: Roblox CDN Edge Ping */}
         <div className="bg-black/30 border border-white/[0.04] rounded px-2 py-1.5 flex items-center justify-between min-w-0">
           <span className="text-slate-400 flex items-center gap-1 truncate font-sans text-[10px] sm:text-[11px] min-w-0 mr-1">
             <Activity className="w-3 h-3 text-genesis-green shrink-0 animate-pulse" />
@@ -159,7 +183,7 @@ export const HudSummary: React.FC<HudSummaryProps> = ({ onResetSession, onResetT
           </span>
         </div>
 
-        {/* Status 4: Ingress Protection */}
+        {/* Status 6: Ingress Protection */}
         <div className="bg-black/30 border border-white/[0.04] rounded px-2 py-1.5 flex items-center justify-between min-w-0">
           <span className="text-slate-400 flex items-center gap-1 truncate font-sans text-[10px] sm:text-[11px] min-w-0 mr-1">
             <ShieldCheck className="w-3 h-3 text-genesis-cyan shrink-0" />

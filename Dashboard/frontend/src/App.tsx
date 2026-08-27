@@ -62,6 +62,19 @@ export function App() {
       case 'reset_total':
         requireAuthGuard(() => sendCommand('reset_total_boosts'));
         break;
+      case 'toggle_timer':
+        sendCommand('toggle_timer_resolution', {
+          enabled: !useDashboardStore.getState().timerResolution?.active,
+        });
+        break;
+      case 'toggle_affinity':
+        sendCommand('toggle_pcore_affinity', {
+          enabled: !useDashboardStore.getState().pcoreAffinity?.enabled,
+        });
+        break;
+      case 'flush_shader':
+        requireAuthGuard(() => sendCommand('flush_shader_cache'));
+        break;
     }
   };
 
@@ -92,6 +105,7 @@ export function App() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <MuMuCard
               onTrimMemory={(pid, index) => requireAuthGuard(() => sendCommand('trim_mumu_instance', { pid, instance: index }))}
+              onGovernorAction={(instance, action) => requireAuthGuard(() => sendCommand('governor_action', { instance, action }))}
             />
             <AutoBoostCard
               onToggle={(enabled) => {

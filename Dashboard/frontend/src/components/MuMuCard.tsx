@@ -1,23 +1,30 @@
 import React, { useState } from 'react';
-import { Gamepad2, Edit3, Scissors } from 'lucide-react';
+import { Gamepad2, Edit3, Scissors, RotateCcw, Square } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 
 interface MuMuCardProps {
   onTrimMemory: (pid: number, index: number) => void;
+  onGovernorAction?: (instance: number, action: 'restart_game' | 'trim_ram' | 'kill_game') => void;
 }
 
-export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
+export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory, onGovernorAction }) => {
   const mumu = useDashboardStore((s) => s.mumu);
   const openEditGameModal = useDashboardStore((s) => s.openEditGameModal);
-  const [trimmingPid, setTrimmingPid] = useState<number | null>(null);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
 
   const devices = mumu?.devices || [];
   const runningCount = devices.length;
 
-  const handleTrim = (pid: number, index: number) => {
-    setTrimmingPid(pid);
-    onTrimMemory(pid, index);
-    setTimeout(() => setTrimmingPid(null), 1000);
+  const handleAction = (index: number, pid: number, action: 'restart_game' | 'trim_ram' | 'kill_game') => {
+    const key = `${index}_${action}`;
+    setActiveAction(key);
+    if (action === 'trim_ram') {
+      onTrimMemory(pid, index);
+    }
+    if (onGovernorAction) {
+      onGovernorAction(index, action);
+    }
+    setTimeout(() => setActiveAction(null), 1200);
   };
 
   return (
@@ -26,20 +33,20 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
           <Gamepad2 className="w-4 h-4 text-genesis-cyan animate-pulse" />
-          MuMu Instances
+          MuMu Instances & Governor
         </span>
         <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
           runningCount > 0
             ? 'bg-genesis-cyan/10 text-genesis-cyan border-genesis-cyan/30 shadow-[0_0_8px_rgba(0,229,255,0.2)]'
             : 'bg-white/[0.04] text-slate-500 border-white/[0.06]'
         }`}>
-          {runningCount} {runningCount === 1 ? 'instance' : 'instances'} running
+          {runningCount} {runningCount === 1 ? 'instance' : 'instances'} active
         </span>
       </div>
 
       {/* Responsive Table Container */}
       <div className="w-full overflow-x-auto rounded-lg border border-white/[0.06] bg-black/20">
-        <table className="w-full text-left text-xs font-mono min-w-[500px]">
+        <table className="w-full text-left text-xs font-mono min-w-[540px]">
           <thead className="bg-white/[0.03] text-slate-400 border-b border-white/[0.06] text-[10px] uppercase">
             <tr>
               <th className="py-2 px-3">#</th>
@@ -48,7 +55,7 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
               <th className="py-2 px-3">CPU%</th>
               <th className="py-2 px-3">RAM</th>
               <th className="py-2 px-3">Uptime</th>
-              <th className="py-2 px-3 text-right">Action</th>
+              <th className="py-2 px-3 text-right">Governor Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.04] text-slate-200">
@@ -63,7 +70,9 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                 const index = dev.index ?? dev.instance_index ?? (idx + 1);
                 const isEmulator = (dev.type || '').toLowerCase().includes('emulator') || (dev.name || '').toLowerCase().includes('device');
                 const targetGame = dev.target_game || dev.target_game_name || 'Storage Hunters';
-                const isTrimming = trimmingPid === dev.pid;
+                const isBusyRestart = activeAction === `${index}_restart_game`;
+                const isBusyTrim = activeAction === `${index}_trim_ram`;
+                const isBusyKill = activeAction === `${index}_kill_game`;
 
                 return (
                   <tr key={dev.pid || index} className="hover:bg-white/[0.02] transition-colors">
@@ -98,19 +107,52 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory }) => {
                     <td className="py-2.5 px-3 text-genesis-blue font-bold">{dev.ram_mb} MB</td>
                     <td className="py-2.5 px-3 text-slate-400">{dev.uptime || '—'}</td>
                     <td className="py-2.5 px-3 text-right">
-                      {isEmulator && (
-                        <button
-                          onClick={() => handleTrim(dev.pid, index)}
-                          disabled={isTrimming}
-                          className={`btn-cyber p-1.5 rounded border transition-all active:scale-90 ${
-                            isTrimming
-                              ? 'bg-genesis-accent text-white border-genesis-accent animate-pulse shadow-glow-accent'
-                              : 'bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border-white/10 hover:border-genesis-accent/30'
-                          }`}
-                          title="Trim working set memory"
-                        >
-                          <Scissors className={`w-3.5 h-3.5 ${isTrimming ? 'animate-spin' : 'hover:scale-110'} transition-transform`} />
-                        </button>
+                      {isEmulator ? (
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          {/* Restart Roblox */}
+                          <button
+                            onClick={() => handleAction(index, dev.pid, 'restart_game')}
+                            disabled={isBusyRestart}
+                            className={`btn-cyber p-1.5 rounded border transition-all active:scale-90 ${
+                              isBusyRestart
+                                ? 'bg-genesis-green text-black border-genesis-green shadow-[0_0_8px_rgba(0,230,118,0.4)]'
+                                : 'bg-white/[0.04] hover:bg-genesis-green/20 text-slate-400 hover:text-genesis-green border-white/10 hover:border-genesis-green/30'
+                            }`}
+                            title="Soft Restart Roblox on Instance"
+                          >
+                            <RotateCcw className={`w-3.5 h-3.5 ${isBusyRestart ? 'animate-spin' : 'hover:scale-110'} transition-transform`} />
+                          </button>
+
+                          {/* Trim RAM */}
+                          <button
+                            onClick={() => handleAction(index, dev.pid, 'trim_ram')}
+                            disabled={isBusyTrim}
+                            className={`btn-cyber p-1.5 rounded border transition-all active:scale-90 ${
+                              isBusyTrim
+                                ? 'bg-genesis-accent text-white border-genesis-accent animate-pulse shadow-glow-accent'
+                                : 'bg-white/[0.04] hover:bg-genesis-accent/20 text-slate-400 hover:text-genesis-accent border-white/10 hover:border-genesis-accent/30'
+                            }`}
+                            title="Trim RAM & Drop Caches on Instance"
+                          >
+                            <Scissors className={`w-3.5 h-3.5 ${isBusyTrim ? 'animate-spin' : 'hover:scale-110'} transition-transform`} />
+                          </button>
+
+                          {/* Kill Roblox */}
+                          <button
+                            onClick={() => handleAction(index, dev.pid, 'kill_game')}
+                            disabled={isBusyKill}
+                            className={`btn-cyber p-1.5 rounded border transition-all active:scale-90 ${
+                              isBusyKill
+                                ? 'bg-red-500 text-white border-red-500 animate-pulse'
+                                : 'bg-white/[0.04] hover:bg-red-500/20 text-slate-400 hover:text-red-400 border-white/10 hover:border-red-500/30'
+                            }`}
+                            title="Force Stop Roblox on Instance"
+                          >
+                            <Square className="w-3.5 h-3.5 hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500">—</span>
                       )}
                     </td>
                   </tr>
