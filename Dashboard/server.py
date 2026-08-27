@@ -641,7 +641,11 @@ def get_ram_breakdown() -> dict:
             vals = struct.unpack("22Q", buf.raw)
             zero_pages = vals[0]
             free_pages = vals[1]
-            standby_pages = sum(vals[13:21])
+            # In SYSTEM_MEMORY_LIST_INFORMATION:
+            # vals[0]: ZeroPageCount, vals[1]: FreePageCount, vals[2..4]: Modified/Bad
+            # vals[5:13]: PageCountByPriority[8] (Standby pages priority 0..7)
+            # vals[13:21]: RepurposedPagesByPriority[8] (Cumulative lifetime counter)
+            standby_pages = sum(vals[5:13])
             page_size = 4096
             standby_gb = (standby_pages * page_size) / (1024 ** 3)
             free_gb = ((zero_pages + free_pages) * page_size) / (1024 ** 3)
@@ -652,7 +656,7 @@ def get_ram_breakdown() -> dict:
         free_gb = mem.free / (1024 ** 3) if hasattr(mem, "free") else 0
         standby_gb = max(available_gb - free_gb, 0)
 
-    active_gb = total_gb - available_gb
+    active_gb = max(total_gb - (free_gb + standby_gb), 0)
 
     return {
         "total_gb": round(total_gb, 2),
