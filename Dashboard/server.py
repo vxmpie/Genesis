@@ -1935,26 +1935,39 @@ def _sample_cpu_sync():
     global _latest_cpu_total, _latest_cpu_per_core, _latest_cpu_freq_ghz, _cpu_raw_history, _cpu_per_core_history
     try:
         raw_per_core = psutil.cpu_percent(interval=None, percpu=True)
-        raw_total = psutil.cpu_percent(interval=None)
+        if raw_per_core:
+            raw_total = float(sum(raw_per_core) / len(raw_per_core))
+        else:
+            raw_total = float(psutil.cpu_percent(interval=None))
+
         freq = psutil.cpu_freq()
         ghz = round(freq.current / 1000, 2) if freq else 2.5
 
-        _cpu_raw_history.append(float(raw_total))
-        if len(_cpu_raw_history) > 3:
+        _cpu_raw_history.append(raw_total)
+        if len(_cpu_raw_history) > 4:
             _cpu_raw_history.pop(0)
 
         _cpu_per_core_history.append([float(x) for x in raw_per_core])
-        if len(_cpu_per_core_history) > 3:
+        if len(_cpu_per_core_history) > 4:
             _cpu_per_core_history.pop(0)
 
-        # 3-Tap Weighted Low-Pass Filter (50% current, 30% t-1, 20% t-2) for Task Manager grade stability
-        if len(_cpu_raw_history) == 3:
-            smooth_total = round(_cpu_raw_history[2] * 0.50 + _cpu_raw_history[1] * 0.30 + _cpu_raw_history[0] * 0.20, 1)
+        # 4-Tap Weighted Low-Pass Filter (40% current, 30% t-1, 20% t-2, 10% t-3) for stable Task Manager parity
+        n_hist = len(_cpu_raw_history)
+        if n_hist >= 4:
+            weights = [0.10, 0.20, 0.30, 0.40]
+            smooth_total = round(sum(w * v for w, v in zip(weights, _cpu_raw_history[-4:])), 1)
             smooth_per_core = [
-                round(_cpu_per_core_history[2][i] * 0.50 + _cpu_per_core_history[1][i] * 0.30 + _cpu_per_core_history[0][i] * 0.20, 1)
+                round(sum(weights[j] * _cpu_per_core_history[-4:][j][i] for j in range(4)), 1)
                 for i in range(len(raw_per_core))
             ]
-        elif len(_cpu_raw_history) == 2:
+        elif n_hist == 3:
+            weights = [0.20, 0.30, 0.50]
+            smooth_total = round(sum(w * v for w, v in zip(weights, _cpu_raw_history[-3:])), 1)
+            smooth_per_core = [
+                round(sum(weights[j] * _cpu_per_core_history[-3:][j][i] for j in range(3)), 1)
+                for i in range(len(raw_per_core))
+            ]
+        elif n_hist == 2:
             smooth_total = round(_cpu_raw_history[1] * 0.60 + _cpu_raw_history[0] * 0.40, 1)
             smooth_per_core = [
                 round(_cpu_per_core_history[1][i] * 0.60 + _cpu_per_core_history[0][i] * 0.40, 1)
@@ -3212,7 +3225,7 @@ async def websocket_endpoint(ws: WebSocket):
             "auth_required": is_auth_enabled(),
             "authenticated": is_authed,
             "config": CONFIG,
-            "history": event_history[-50:],
+            "history": list(reversed(event_history[-50:])),
             "hardening": _last_drift_result,
             "defender": _defender_status,
             "vm_disk": _vm_disk_cache,

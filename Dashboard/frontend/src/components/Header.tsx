@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPalette, onOpenAuth }) => 
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="font-extrabold text-sm sm:text-base tracking-wider text-white bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text">
-                GENESIS
+                Genesis
               </h1>
             </div>
             <p className="hidden sm:block text-[11px] text-slate-400 font-medium tracking-tight">
