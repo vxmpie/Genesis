@@ -17,3 +17,11 @@
 - **Type Safety**: ใช้ Strict TypeScript โดยหลีกเลี่ยงการใช้ `any` หรือ Type Casting ที่ไม่จำเป็น
 - **Testing & Linting**: รัน `npx oxlint` และ `npm run build` ตรวจสอบความถูกต้องทุกครั้งก่อนส่งมอบงาน
 - **Performance**: ระวังเรื่อง LCP, Chunk Splitting และการ Re-render ของ Canvas / Components ที่ไม่จำเป็น
+
+---
+
+## 3. Server Execution & Administrator Privilege Requirement
+- **Elevated Privileges Required**: ตัวโปรเจกต์ `Genesis Dashboard` (`server.py`) มีการเรียกใช้ Low-Level Windows NT Native APIs (เช่น `NtSetSystemInformation` สำหรับ Purge Standby List, `NtSetTimerResolution` 0.5ms, `ProcessPowerThrottling` Anti-EcoQoS, `SetProcessAffinityMask`, และ Windows Defender / Service APIs) ซึ่งต้องทำงานภายใต้ **Administrator Privilege (Elevated Process)** เท่านั้น
+- **Server Startup / Restart Protocol**: 
+  - เมื่อต้องการสตาร์ทหรือรีสตาร์ทเซิร์ฟเวอร์ ให้รันผ่านสิทธิ์ Administrator เสมอ (เช่น ผ่าน `Dashboard\start.bat` แบบ Run as Administrator หรือ Task Scheduler ที่ตั้งค่า Highest Privileges)
+  - ห้ามพยายามรัน `python server.py` แบบ Non-Elevated Background Process ธรรมดา เพราะสิทธิ์จะไม่เพียงพอในการควบคุม Kernel Memory และ Process ของ Emulator/ระบบ
