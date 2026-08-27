@@ -13,6 +13,9 @@ import type {
   DeepCleanPreviewItem,
   ToastMessage,
   MuMuDevice,
+  TimerResolutionInfo,
+  CoreAffinityInfo,
+  ShaderCacheInfo,
 } from '../types/dashboard';
 
 interface DashboardState {
@@ -31,6 +34,9 @@ interface DashboardState {
   hardening: HardeningStatus | null;
   defender: DefenderStatus | null;
   observatory: NetworkObservatory | null;
+  timerResolution: TimerResolutionInfo | null;
+  pcoreAffinity: CoreAffinityInfo | null;
+  shaderCache: ShaderCacheInfo | null;
   eventHistory: EventLogEntry[];
   chartHistory: {
     ram: number[];
@@ -62,6 +68,9 @@ interface DashboardState {
   setIsDeepCleaning: (v: boolean) => void;
   setIsScanningClean: (v: boolean) => void;
   updateAutoBoost: (partial: Partial<NonNullable<DashboardState['autoBoost']>>) => void;
+  setTimerResolution: (t: TimerResolutionInfo) => void;
+  setPcoreAffinity: (a: CoreAffinityInfo) => void;
+  setShaderCache: (s: ShaderCacheInfo) => void;
 
   setAuthModalOpen: (open: boolean) => void;
   setCmdPaletteOpen: (open: boolean) => void;
@@ -93,6 +102,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   hardening: null,
   defender: null,
   observatory: null,
+  timerResolution: null,
+  pcoreAffinity: null,
+  shaderCache: null,
   eventHistory: [],
   chartHistory: {
     ram: [],
@@ -129,6 +141,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set((s) => ({
       autoBoost: s.autoBoost ? { ...s.autoBoost, ...partial } : (partial as any),
     })),
+  setTimerResolution: (timerResolution) => set({ timerResolution }),
+  setPcoreAffinity: (pcoreAffinity) => set({ pcoreAffinity }),
+  setShaderCache: (shaderCache) => set({ shaderCache }),
 
   setAuthModalOpen: (authModalOpen) => set({ authModalOpen }),
   setCmdPaletteOpen: (cmdPaletteOpen) => set({ cmdPaletteOpen }),
@@ -174,6 +189,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         hardening: data.hardening ?? s.hardening,
         defender: data.defender ?? s.defender,
         observatory: data.observatory ?? s.observatory,
+        timerResolution: data.timer_resolution ?? s.timerResolution,
+        pcoreAffinity: data.pcore_affinity ?? s.pcoreAffinity,
+        shaderCache: data.shader_cache ?? s.shaderCache,
         summary: data.summary ?? s.summary,
         eventHistory: data.history ?? s.eventHistory,
         chartHistory: chartHist,
@@ -253,6 +271,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         summary: data.summary || s.summary,
         autoBoost: data.auto_boost || s.autoBoost,
         observatory: data.observatory || s.observatory,
+        timerResolution: data.timer_resolution ?? s.timerResolution,
+        pcoreAffinity: data.pcore_affinity ?? s.pcoreAffinity,
+        shaderCache: data.shader_cache ?? s.shaderCache,
         chartHistory: newChart,
       };
     }),

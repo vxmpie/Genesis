@@ -88,6 +88,36 @@ export function useWebSocket() {
           addToast('system', `Trimmed RAM for ${data.data.name || 'MuMu'} (Freed ${data.data.freed_mb} MB)`);
         }
         break;
+      case 'timer_resolution_result':
+        if (data.data) {
+          useDashboardStore.getState().setTimerResolution(data.data);
+          addToast('system', `Kernel Timer: ${data.data.resolution_ms} ms (${data.data.active ? '0.5ms Low-Latency Active' : 'Default'})`);
+        }
+        break;
+      case 'pcore_affinity_result':
+        if (data.data) {
+          useDashboardStore.getState().setPcoreAffinity(data.data);
+          addToast('system', `CPU Affinity: ${data.data.mode}`);
+        }
+        break;
+      case 'shader_cache_result':
+        if (data.data) {
+          useDashboardStore.getState().setShaderCache(data.data);
+          addToast('system', `GPU Shader Cache Flushed: ${data.data.cleaned_files || 0} files (${data.data.cleaned_mb || 0} MB)`);
+        }
+        break;
+      case 'shader_cache_status':
+        if (data.data) {
+          useDashboardStore.getState().setShaderCache(data.data);
+        }
+        break;
+      case 'governor_result':
+        if (data.data?.success) {
+          addToast('system', `Instance #${data.data.instance} Action: ${data.data.action} Succeeded`);
+        } else {
+          addToast('error', `Governor Error: ${data.data?.error || 'Failed'}`);
+        }
+        break;
     }
   }, [addEvent, addToast, setAuthenticated, setDeepCleanPreview, setIsDeepCleaning, setIsScanningClean, updateInitPayload, updateMetricsPayload]);
 

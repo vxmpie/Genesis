@@ -205,3 +205,24 @@ export interface ToastMessage {
   type: 'boost' | 'warning' | 'crash' | 'system' | 'info' | 'error';
   message: string;
 }
+
+export interface TimerResolutionInfo {
+  active: boolean;
+  resolution_ms: number;
+  min_ms?: number;
+  max_ms?: number;
+}
+
+export interface CoreAffinityInfo {
+  enabled: boolean;
+  mode: string;
+  total_cores: number;
+  p_cores_count: number;
+}
+
+export interface ShaderCacheInfo {
+  total_files: number;
+  total_size_mb: number;
+  cleaned_files?: number;
+  cleaned_mb?: number;
+}
