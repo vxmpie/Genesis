@@ -46,13 +46,16 @@ export const EventLogCard: React.FC = () => {
             No events recorded yet.
           </div>
         ) : (
-          eventHistory.map((entry, idx) => (
-            <div key={idx} className="flex items-start gap-2 text-slate-300 hover:bg-white/[0.04] hover:text-white p-1 rounded transition-all duration-150">
-              <span className="text-[10px] text-slate-500 shrink-0 font-mono pt-0.5">{entry.time}</span>
-              {getEventIcon(entry.type)}
-              <span className="text-xs break-all leading-tight">{entry.message}</span>
-            </div>
-          ))
+          eventHistory.map((entry, idx) => {
+            const timeDisplay = entry.time?.includes(' ') ? entry.time.split(' ')[1] : (entry.time || '');
+            return (
+              <div key={`${entry.time}-${idx}`} className="flex items-start gap-2 text-slate-300 hover:bg-white/[0.04] hover:text-white p-1 rounded transition-all duration-150">
+                <span className="text-[10px] text-slate-500 shrink-0 font-mono pt-0.5">{timeDisplay}</span>
+                {getEventIcon(entry.type)}
+                <span className="text-xs break-all leading-tight">{entry.message}</span>
+              </div>
+            );
+          })
         )}
       </div>
     </div>

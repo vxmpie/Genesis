@@ -652,7 +652,7 @@ def get_ram_breakdown() -> dict:
     except Exception:
         pass
 
-    if standby_gb == 0.0:
+    if standby_gb == 0.0 or standby_gb > total_gb:
         free_gb = mem.free / (1024 ** 3) if hasattr(mem, "free") else 0
         standby_gb = max(available_gb - free_gb, 0)
 
@@ -2209,6 +2209,9 @@ def get_system_metrics() -> dict:
             "available_gb": round(mem.available / (1024 ** 3), 1),
             "percent": mem.percent,
             "breakdown": get_ram_breakdown(),
+            "active_gb": get_ram_breakdown().get("active_gb", 0),
+            "standby_gb": get_ram_breakdown().get("standby_gb", 0),
+            "free_gb": get_ram_breakdown().get("free_gb", 0),
             "pagefile": {
                 "used_gb": round(swap.used / (1024 ** 3), 1),
                 "total_gb": round(swap.total / (1024 ** 3), 1),

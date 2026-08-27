@@ -165,9 +165,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   addEvent: (entry) =>
-    set((s) => ({
-      eventHistory: [entry, ...s.eventHistory.slice(0, 150)],
-    })),
+    set((s) => {
+      const filtered = s.eventHistory.filter((e) => e.time !== entry.time || e.message !== entry.message);
+      return {
+        eventHistory: [entry, ...filtered].slice(0, 150),
+      };
+    }),
 
   clearEvents: () => set({ eventHistory: [] }),
 
@@ -183,6 +186,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           timestamps: [now],
         };
       }
+
+      // Sort incoming history strictly descending (newest at index 0, oldest at bottom)
+      const rawEvents = Array.isArray(data.history) ? data.history : s.eventHistory;
+      const sortedEvents = [...rawEvents].sort((a: any, b: any) => {
+        if (a.epoch && b.epoch) return b.epoch - a.epoch;
+        return String(b.time || '').localeCompare(String(a.time || ''));
+      });
+
       return {
         authRequired: data.auth_required ?? s.authRequired,
         authenticated: s.authenticated || (data.authenticated ?? false),
@@ -193,7 +204,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         pcoreAffinity: data.pcore_affinity ?? s.pcoreAffinity,
         shaderCache: data.shader_cache ?? s.shaderCache,
         summary: data.summary ?? s.summary,
-        eventHistory: data.history ?? s.eventHistory,
+        eventHistory: sortedEvents.slice(0, 150),
         chartHistory: chartHist,
       };
     }),
