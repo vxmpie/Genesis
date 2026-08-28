@@ -9,6 +9,7 @@ local modulePaths = {
     "functions/reset.lua",
     "functions/wash.lua",
     "functions/grading.lua",
+    "functions/teleport.lua",
     "ui.lua"
 }
 
@@ -45,10 +46,11 @@ end
 local ResetModule = loadedModules["functions/reset.lua"]
 local WashModule = loadedModules["functions/wash.lua"]
 local GradingModule = loadedModules["functions/grading.lua"]
+local TeleportModule = loadedModules["functions/teleport.lua"]
 local UI = loadedModules["ui.lua"]
 
 if UI and UI.Create then
-    UI.Create(Config, ResetModule, WashModule, GradingModule)
+    UI.Create(Config, ResetModule, WashModule, GradingModule, TeleportModule)
 end
 
 if Config and Config.Get("AutoWash", false) and WashModule and WashModule.StartAutoWashLoop then

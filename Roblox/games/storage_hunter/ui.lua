@@ -21,7 +21,8 @@ local THEME = {
     Success = Color3.fromRGB(45, 200, 105),
     Danger = Color3.fromRGB(240, 60, 70),
     ToggleOff = Color3.fromRGB(40, 40, 52),
-    ToggleOn = Color3.fromRGB(255, 60, 75)
+    ToggleOn = Color3.fromRGB(255, 60, 75),
+    BtnSecondary = Color3.fromRGB(28, 28, 38)
 }
 
 local function purgeAllGenesisGuis()
@@ -55,7 +56,7 @@ local function getGuiParent()
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 
-function UI.Create(Config, ResetModule, WashModule, GradingModule)
+function UI.Create(Config, ResetModule, WashModule, GradingModule, TeleportModule)
     if _G.GenesisUnload then
         pcall(_G.GenesisUnload)
     end
@@ -168,8 +169,8 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 540, 0, 390)
-    MainFrame.Position = UDim2.new(0.5, -270, 0.5, -195)
+    MainFrame.Size = UDim2.new(0, 560, 0, 420)
+    MainFrame.Position = UDim2.new(0.5, -280, 0.5, -210)
     MainFrame.BackgroundColor3 = THEME.Background
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = true
@@ -377,7 +378,8 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
     local washPage = createTab("wash", "Auto Wash", 1)
     local gradePage = createTab("grade", "Grade Safes", 2)
     local resetPage = createTab("reset", "Anti-Stuck", 3)
-    local settingsPage = createTab("settings", "Settings", 4)
+    local telePage = createTab("teleport", "Teleports", 4)
+    local settingsPage = createTab("settings", "Settings", 5)
 
     local function createCard(parentPage, title)
         local card = Instance.new("Frame")
@@ -470,10 +472,10 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
             end)
         end
 
-        function CardObj:AddButton(text, callback)
+        function CardObj:AddButton(text, callback, isSecondary)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1, 0, 0, 28)
-            btn.BackgroundColor3 = THEME.Primary
+            btn.BackgroundColor3 = isSecondary and THEME.BtnSecondary or THEME.Primary
             btn.Font = Enum.Font.GothamBold
             btn.Text = text
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -484,12 +486,53 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
             btnCorner.CornerRadius = UDim.new(0, 5)
             btnCorner.Parent = btn
 
+            if isSecondary then
+                local bStroke = Instance.new("UIStroke")
+                bStroke.Color = THEME.CardBorder
+                bStroke.Thickness = 1
+                bStroke.Parent = btn
+            end
+
             btn.MouseButton1Click:Connect(callback)
+            return btn
+        end
+
+        function CardObj:AddGrid2(items)
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 28)
+            row.BackgroundTransparency = 1
+            row.Parent = card
+
+            for i, item in ipairs(items) do
+                local btn = Instance.new("TextButton")
+                btn.Size = UDim2.new(0.485, 0, 1, 0)
+                btn.Position = (i == 1) and UDim2.new(0, 0, 0, 0) or UDim2.new(0.515, 0, 0, 0)
+                btn.BackgroundColor3 = item.IsPrimary and THEME.Primary or THEME.BtnSecondary
+                btn.Font = Enum.Font.GothamBold
+                btn.Text = item.Text
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                btn.TextSize = 10
+                btn.Parent = row
+
+                local btnCorner = Instance.new("UICorner")
+                btnCorner.CornerRadius = UDim.new(0, 5)
+                btnCorner.Parent = btn
+
+                if not item.IsPrimary then
+                    local bStroke = Instance.new("UIStroke")
+                    bStroke.Color = THEME.CardBorder
+                    bStroke.Thickness = 1
+                    bStroke.Parent = btn
+                end
+
+                btn.MouseButton1Click:Connect(item.Callback)
+            end
         end
 
         return CardObj
     end
 
+    -- ================= AUTO WASH PAGE =================
     local washCard = createCard(washPage, "Auto Wash Master Control")
     washCard:AddToggle("Auto Wash Loop", Config.Get("AutoWash", false), function(val)
         Config.Set("AutoWash", val)
@@ -519,6 +562,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         end)
     end
 
+    -- ================= GRADE SAFES PAGE =================
     local gradeCard = createCard(gradePage, "Safe Grading Master Control")
     gradeCard:AddToggle("Auto Grade Safes Loop", Config.Get("AutoGrade", false), function(val)
         Config.Set("AutoGrade", val)
@@ -560,6 +604,7 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         end)
     end
 
+    -- ================= ANTI-STUCK PAGE =================
     local trackerCard = createCard(resetPage, "Anti-Stuck Character Reset Tracker")
     
     local StatusLabel = Instance.new("TextLabel")
@@ -634,6 +679,310 @@ function UI.Create(Config, ResetModule, WashModule, GradingModule)
         Config.Save()
     end)
 
+    -- ================= TELEPORTS PAGE =================
+    if TeleportModule then
+        -- Fast Travel Shortcuts
+        local fastCard = createCard(telePage, "Fast Travel Shortcuts")
+        fastCard:AddGrid2({
+            { Text = "My Shop / Plot", IsPrimary = true, Callback = function() TeleportModule.TeleportToPlot(State) end },
+            { Text = "My Spawned Vehicle", IsPrimary = true, Callback = function() TeleportModule.TeleportToVehicle(State) end }
+        })
+        fastCard:AddGrid2({
+            { Text = "Item Cleaning (Wash)", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("item_cleaning", State) end },
+            { Text = "Safe Grading Store", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("grading_store", State) end }
+        })
+        fastCard:AddGrid2({
+            { Text = "Locksmith (Picklock)", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("locksmith", State) end },
+            { Text = "Quick Sell (Pawn)", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("quick_sell", State) end }
+        })
+
+        -- Storage Areas & Lots (9 Areas from dump)
+        local areasCard = createCard(telePage, "Storage Lots & Areas (Dump Database)")
+        areasCard:AddGrid2({
+            { Text = "Junk Yard", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("junk_yard", State) end },
+            { Text = "Back Alley", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("back_alley", State) end }
+        })
+        areasCard:AddGrid2({
+            { Text = "Farmyard", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("farmyard", State) end },
+            { Text = "Shipyard", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("shipyard", State) end }
+        })
+        areasCard:AddGrid2({
+            { Text = "Shopping Mall", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("shopping_mall", State) end },
+            { Text = "Lucky Beach", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("lucky_beach", State) end }
+        })
+        areasCard:AddGrid2({
+            { Text = "Power Plant", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("power_plant", State) end },
+            { Text = "Alien Invasion", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("alien_invasion", State) end }
+        })
+        areasCard:AddButton("Business Bay (High-End)", function()
+            TeleportModule.TeleportToPOI("business_bay", State)
+        end, true)
+
+        -- Shops & Facilities (13 Shops from dump)
+        local shopsCard = createCard(telePage, "Shops & Public Facilities")
+        shopsCard:AddGrid2({
+            { Text = "Car Shop", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("car_shop", State) end },
+            { Text = "Car Customisation", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("car_customisation", State) end }
+        })
+        shopsCard:AddGrid2({
+            { Text = "Trailer Store", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("trailer_store", State) end },
+            { Text = "Museum", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("museum", State) end }
+        })
+        shopsCard:AddGrid2({
+            { Text = "Energy Drink Shop", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("energy_drink", State) end },
+            { Text = "Repair Shop (Wrench)", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("repair_shop", State) end }
+        })
+        shopsCard:AddGrid2({
+            { Text = "Authenticator", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("authenticator", State) end },
+            { Text = "Club (VIP Lounge)", IsPrimary = false, Callback = function() TeleportModule.TeleportToPOI("club", State) end }
+        })
+        shopsCard:AddButton("Lake (Fishing Spot)", function()
+            TeleportModule.TeleportToPOI("lake", State)
+        end, true)
+
+        -- Custom Waypoints Manager
+        local wpCard = createCard(telePage, "Custom Waypoints Manager")
+        
+        local wpInputRow = Instance.new("Frame")
+        wpInputRow.Size = UDim2.new(1, 0, 0, 28)
+        wpInputRow.BackgroundTransparency = 1
+        wpInputRow.Parent = wpCard.Card
+
+        local wpBox = Instance.new("TextBox")
+        wpBox.Size = UDim2.new(0.6, -4, 1, 0)
+        wpBox.BackgroundColor3 = THEME.Background
+        wpBox.TextColor3 = THEME.TextPrimary
+        wpBox.PlaceholderText = "Enter Waypoint Name..."
+        wpBox.PlaceholderColor3 = THEME.TextSecondary
+        wpBox.Font = Enum.Font.GothamMedium
+        wpBox.TextSize = 10
+        wpBox.ClearTextOnFocus = false
+        wpBox.Parent = wpInputRow
+
+        local wpbCorner = Instance.new("UICorner")
+        wpbCorner.CornerRadius = UDim.new(0, 4)
+        wpbCorner.Parent = wpBox
+
+        local wpbStroke = Instance.new("UIStroke")
+        wpbStroke.Color = THEME.CardBorder
+        wpbStroke.Thickness = 1
+        wpbStroke.Parent = wpBox
+
+        local saveWpBtn = Instance.new("TextButton")
+        saveWpBtn.Size = UDim2.new(0.4, 0, 1, 0)
+        saveWpBtn.Position = UDim2.new(0.6, 4, 0, 0)
+        saveWpBtn.BackgroundColor3 = THEME.Primary
+        saveWpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        saveWpBtn.Font = Enum.Font.GothamBold
+        saveWpBtn.Text = "Save Pos"
+        saveWpBtn.TextSize = 10
+        saveWpBtn.Parent = wpInputRow
+
+        local swCorner = Instance.new("UICorner")
+        swCorner.CornerRadius = UDim.new(0, 4)
+        swCorner.Parent = saveWpBtn
+
+        local wpListContainer = Instance.new("Frame")
+        wpListContainer.Size = UDim2.new(1, 0, 0, 0)
+        wpListContainer.AutomaticSize = Enum.AutomaticSize.Y
+        wpListContainer.BackgroundTransparency = 1
+        wpListContainer.Parent = wpCard.Card
+
+        local wpListLayout = Instance.new("UIListLayout")
+        wpListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        wpListLayout.Padding = UDim.new(0, 4)
+        wpListLayout.Parent = wpListContainer
+
+        local function refreshWaypointsUI()
+            for _, child in ipairs(wpListContainer:GetChildren()) do
+                if not child:IsA("UIListLayout") then
+                    child:Destroy()
+                end
+            end
+
+            local waypoints = State.Waypoints or {}
+            local count = 0
+            for name, data in pairs(waypoints) do
+                count = count + 1
+                local itemRow = Instance.new("Frame")
+                itemRow.Size = UDim2.new(1, 0, 0, 24)
+                itemRow.BackgroundColor3 = THEME.BtnSecondary
+                itemRow.Parent = wpListContainer
+
+                local rowCorner = Instance.new("UICorner")
+                rowCorner.CornerRadius = UDim.new(0, 4)
+                rowCorner.Parent = itemRow
+
+                local nameLbl = Instance.new("TextLabel")
+                nameLbl.Size = UDim2.new(0.55, 0, 1, 0)
+                nameLbl.Position = UDim2.new(0, 8, 0, 0)
+                nameLbl.BackgroundTransparency = 1
+                nameLbl.Text = name .. " (" .. string.format("%.0f, %.0f", data.X, data.Z) .. ")"
+                nameLbl.TextColor3 = THEME.TextPrimary
+                nameLbl.Font = Enum.Font.GothamMedium
+                nameLbl.TextSize = 10
+                nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                nameLbl.Parent = itemRow
+
+                local tpBtn = Instance.new("TextButton")
+                tpBtn.Size = UDim2.new(0, 40, 0, 18)
+                tpBtn.Position = UDim2.new(1, -68, 0.5, -9)
+                tpBtn.BackgroundColor3 = THEME.Primary
+                tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                tpBtn.Text = "TP"
+                tpBtn.Font = Enum.Font.GothamBold
+                tpBtn.TextSize = 9
+                tpBtn.Parent = itemRow
+
+                local tpCorner = Instance.new("UICorner")
+                tpCorner.CornerRadius = UDim.new(0, 3)
+                tpCorner.Parent = tpBtn
+
+                local wpNameCopy = name
+                tpBtn.MouseButton1Click:Connect(function()
+                    TeleportModule.TeleportToWaypoint(wpNameCopy, State)
+                end)
+
+                local delBtn = Instance.new("TextButton")
+                delBtn.Size = UDim2.new(0, 22, 0, 18)
+                delBtn.Position = UDim2.new(1, -25, 0.5, -9)
+                delBtn.BackgroundColor3 = Color3.fromRGB(45, 25, 30)
+                delBtn.TextColor3 = THEME.Danger
+                delBtn.Text = "X"
+                delBtn.Font = Enum.Font.GothamBold
+                delBtn.TextSize = 9
+                delBtn.Parent = itemRow
+
+                local delCorner = Instance.new("UICorner")
+                delCorner.CornerRadius = UDim.new(0, 3)
+                delCorner.Parent = delBtn
+
+                delBtn.MouseButton1Click:Connect(function()
+                    TeleportModule.DeleteWaypoint(wpNameCopy, State)
+                    Config.Save()
+                    refreshWaypointsUI()
+                end)
+            end
+
+            if count == 0 then
+                local emptyLbl = Instance.new("TextLabel")
+                emptyLbl.Size = UDim2.new(1, 0, 0, 20)
+                emptyLbl.BackgroundTransparency = 1
+                emptyLbl.Text = "No custom waypoints saved yet."
+                emptyLbl.TextColor3 = THEME.TextSecondary
+                emptyLbl.Font = Enum.Font.Gotham
+                emptyLbl.TextSize = 10
+                emptyLbl.Parent = wpListContainer
+            end
+        end
+
+        saveWpBtn.MouseButton1Click:Connect(function()
+            local wpName = wpBox.Text
+            if wpName and string.len(string.gsub(wpName, "%s+", "")) > 0 then
+                TeleportModule.SaveWaypoint(wpName, State)
+                Config.Save()
+                wpBox.Text = ""
+                refreshWaypointsUI()
+            end
+        end)
+
+        refreshWaypointsUI()
+
+        -- Player Teleporter
+        local playerCard = createCard(telePage, "Server Player Teleporter")
+        
+        local playerListContainer = Instance.new("Frame")
+        playerListContainer.Size = UDim2.new(1, 0, 0, 0)
+        playerListContainer.AutomaticSize = Enum.AutomaticSize.Y
+        playerListContainer.BackgroundTransparency = 1
+        playerListContainer.Parent = playerCard.Card
+
+        local plLayout = Instance.new("UIListLayout")
+        plLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        plLayout.Padding = UDim.new(0, 4)
+        plLayout.Parent = playerListContainer
+
+        local function refreshPlayersUI()
+            for _, child in ipairs(playerListContainer:GetChildren()) do
+                if not child:IsA("UIListLayout") then
+                    child:Destroy()
+                end
+            end
+
+            local players = Players:GetPlayers()
+            local added = 0
+            for _, plr in ipairs(players) do
+                if plr ~= LocalPlayer then
+                    added = added + 1
+                    local row = Instance.new("Frame")
+                    row.Size = UDim2.new(1, 0, 0, 24)
+                    row.BackgroundColor3 = THEME.BtnSecondary
+                    row.Parent = playerListContainer
+
+                    local rowCorner = Instance.new("UICorner")
+                    rowCorner.CornerRadius = UDim.new(0, 4)
+                    rowCorner.Parent = row
+
+                    local pLbl = Instance.new("TextLabel")
+                    pLbl.Size = UDim2.new(0.65, 0, 1, 0)
+                    pLbl.Position = UDim2.new(0, 8, 0, 0)
+                    pLbl.BackgroundTransparency = 1
+                    pLbl.Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+                    pLbl.TextColor3 = THEME.TextPrimary
+                    pLbl.Font = Enum.Font.GothamMedium
+                    pLbl.TextSize = 10
+                    pLbl.TextXAlignment = Enum.TextXAlignment.Left
+                    pLbl.Parent = row
+
+                    local pTpBtn = Instance.new("TextButton")
+                    pTpBtn.Size = UDim2.new(0, 48, 0, 18)
+                    pTpBtn.Position = UDim2.new(1, -54, 0.5, -9)
+                    pTpBtn.BackgroundColor3 = THEME.Primary
+                    pTpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    pTpBtn.Text = "TP"
+                    pTpBtn.Font = Enum.Font.GothamBold
+                    pTpBtn.TextSize = 9
+                    pTpBtn.Parent = row
+
+                    local ptpCorner = Instance.new("UICorner")
+                    ptpCorner.CornerRadius = UDim.new(0, 3)
+                    ptpCorner.Parent = pTpBtn
+
+                    local targetPlrCopy = plr
+                    pTpBtn.MouseButton1Click:Connect(function()
+                        TeleportModule.TeleportToPlayer(targetPlrCopy, State)
+                    end)
+                end
+            end
+
+            if added == 0 then
+                local soloLbl = Instance.new("TextLabel")
+                soloLbl.Size = UDim2.new(1, 0, 0, 20)
+                soloLbl.BackgroundTransparency = 1
+                soloLbl.Text = "No other players currently in this server."
+                soloLbl.TextColor3 = THEME.TextSecondary
+                soloLbl.Font = Enum.Font.Gotham
+                soloLbl.TextSize = 10
+                soloLbl.Parent = playerListContainer
+            end
+        end
+
+        playerCard:AddButton("Refresh Player List", function()
+            refreshPlayersUI()
+        end, true)
+
+        refreshPlayersUI()
+
+        -- Teleport Settings
+        local tpSettingsCard = createCard(telePage, "Teleport Engine Settings")
+        tpSettingsCard:AddToggle("Safe Smooth Glide (Tween Mode)", State.TeleportMode == "Tween", function(val)
+            State.TeleportMode = val and "Tween" or "Instant"
+            Config.Set("TeleportMode", State.TeleportMode)
+            Config.Save()
+        end)
+    end
+
+    -- ================= SETTINGS PAGE =================
     local settingsCard = createCard(settingsPage, "Configuration & Core")
     settingsCard:AddButton("Save Settings to JSON", function()
         Config.Save()

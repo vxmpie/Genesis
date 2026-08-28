@@ -28,7 +28,10 @@ local DEFAULT_STATE = {
         ["Code Safe"] = true,
         ["Diamond Safe"] = true,
         ["Diamond Vault"] = true
-    }
+    },
+    TeleportMode = "Instant",
+    TeleportSafeOffset = 3.5,
+    Waypoints = {}
 }
 
 Config.State = HttpService:JSONDecode(HttpService:JSONEncode(DEFAULT_STATE))
