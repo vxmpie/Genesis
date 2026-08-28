@@ -625,6 +625,20 @@ def purge_standby_list() -> bool:
         return False
 
 
+def should_purge_standby_gate(free_gb: float, standby_gb: float, available_gb: float) -> bool:
+    """Evaluate whether a Standby List purge is warranted based on config thresholds.
+
+    Returns True when the Standby cache has grown beyond
+    ``standby_purge_min_standby_gb`` AND Available RAM has dropped below
+    ``standby_purge_min_available_gb``.  Both conditions must be met to
+    avoid unnecessary kernel calls when memory pressure is low.
+    """
+    cfg = CONFIG.get("maintenance", {})
+    min_standby = cfg.get("standby_purge_min_standby_gb", 4.0)
+    min_available = cfg.get("standby_purge_min_available_gb", 4.0)
+    return standby_gb >= min_standby and available_gb < min_available
+
+
 def get_ram_breakdown() -> dict:
     """Return RAM breakdown: Active (In Use), Standby, Free, Total using Windows Native API."""
     mem = psutil.virtual_memory()
@@ -815,6 +829,16 @@ def scan_and_flush_shader_cache(dry_run: bool = False) -> dict:
 # ===========================================================================
 # MODULE 11: MuMu Per-Instance Governor Engine
 # ===========================================================================
+def _run_cmd(cmd: list[str], timeout: int = 10) -> subprocess.CompletedProcess:
+    """Run a shell command with graceful error handling and timeout."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="timeout")
+    except Exception as e:
+        return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr=str(e))
+
+
 def governor_instance_action(instance_idx: int, action: str) -> dict:
     adb_path = _find_mumu_adb()
     if not adb_path:
