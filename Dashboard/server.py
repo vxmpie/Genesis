@@ -242,7 +242,12 @@ def verify_session_token(token: str | None) -> bool:
     if not token:
         return False
     expiry = _valid_sessions.get(token)
-    if not expiry or time.time() > expiry:
+    if expiry is None:
+        return False
+    # 0 or negative indicates permanent session (never expires)
+    if expiry <= 0:
+        return True
+    if time.time() > expiry:
         if token in _valid_sessions:
             del _valid_sessions[token]
             _save_sessions(_valid_sessions)
@@ -252,8 +257,11 @@ def verify_session_token(token: str | None) -> bool:
 
 def create_session_token() -> str:
     token = secrets.token_hex(24)
-    timeout_hours = CONFIG.get("auth", {}).get("session_timeout_hours", 24)
-    _valid_sessions[token] = time.time() + (timeout_hours * 3600)
+    timeout_hours = CONFIG.get("auth", {}).get("session_timeout_hours", 0)
+    if timeout_hours <= 0:
+        _valid_sessions[token] = 0  # Permanent session — never expires
+    else:
+        _valid_sessions[token] = time.time() + (timeout_hours * 3600)
     _save_sessions(_valid_sessions)
     return token
 
@@ -2342,11 +2350,12 @@ _cached_mumu_health = {
 _process_sampler_lock = threading.Lock()
 _process_sampler_task = None
 _prev_mumu_count = None
+_last_mumu_crash_time = 0.0
 
 
 def _sample_all_processes_sync():
     """High-efficiency single-pass Windows process sampler (MuMu + Top Procs)."""
-    global _cached_top_processes, _cached_mumu_instances, _cached_mumu_health, _prev_mumu_count
+    global _cached_top_processes, _cached_mumu_instances, _cached_mumu_health, _prev_mumu_count, _last_mumu_crash_time
 
     try:
         disable_ecoqos_for_mumu()
@@ -2417,18 +2426,22 @@ def _sample_all_processes_sync():
 
     if _prev_mumu_count is not None and current_device_count < _prev_mumu_count:
         lost = _prev_mumu_count - current_device_count
-        msg = f"MuMu Instance crash detected — {lost} instance(s) disappeared"
-        add_event("crash", msg)
-        if CONFIG.get("alerts", {}).get("notify_on_mumu_crash", True):
-            send_discord_alert(
-                "🚨 MuMu Instance Crash Detected",
-                f"**{lost}** instance(s) terminated unexpectedly.\nActive devices: **{current_device_count}** (was {_prev_mumu_count})",
-                color=0xFF3366,
-                fields=[
-                    {"name": "Remaining Instances", "value": f"{current_device_count} running", "inline": True},
-                    {"name": "Impact", "value": f"-{lost} bot(s) offline", "inline": True},
-                ]
-            )
+        now_ts = time.time()
+        # Cooldown Debounce: Prevent duplicate repetitive alerts when multiple instances close in quick succession (< 45s)
+        if (now_ts - _last_mumu_crash_time) >= 45.0:
+            _last_mumu_crash_time = now_ts
+            msg = f"MuMu Instance crash detected — {lost} instance(s) disappeared"
+            add_event("crash", msg)
+            if CONFIG.get("alerts", {}).get("notify_on_mumu_crash", True):
+                send_discord_alert(
+                    "🚨 MuMu Instance Crash Detected",
+                    f"**{lost}** instance(s) terminated unexpectedly.\nActive devices: **{current_device_count}** (was {_prev_mumu_count})",
+                    color=0xFF3366,
+                    fields=[
+                        {"name": "Remaining Instances", "value": f"{current_device_count} running", "inline": True},
+                        {"name": "Impact", "value": f"-{lost} bot(s) offline", "inline": True},
+                    ]
+                )
     _prev_mumu_count = current_device_count
 
     with _process_sampler_lock:
