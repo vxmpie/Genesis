@@ -2370,6 +2370,21 @@ def _sample_all_processes_sync():
     mumu_instances = []
     device_idx = 0
 
+    # Phase 1: Kick off CPU sampling for MuMu processes (non-blocking)
+    mumu_proc_objects: dict[int, psutil.Process] = {}
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            name = (proc.info["name"] or "").lower()
+            if name in mumu_names or "mumunxdevice" in name or "mumunxmain" in name:
+                p = psutil.Process(proc.info["pid"])
+                p.cpu_percent(interval=None)  # Seed the measurement (returns 0.0 on first call)
+                mumu_proc_objects[proc.info["pid"]] = p
+        except Exception:
+            continue
+
+    # Brief pause to allow CPU measurement delta to accumulate
+    time.sleep(0.15)
+
     for proc in psutil.process_iter(["pid", "name", "memory_info", "create_time"]):
         try:
             name = (proc.info["name"] or "").lower()
@@ -2391,6 +2406,15 @@ def _sample_all_processes_sync():
                 is_bloated = (ram_mb >= 4000.0)
                 is_device = ("device" in name)
 
+                # Phase 2: Retrieve actual CPU percent from seeded process objects
+                cpu_pct = 0.0
+                p_obj = mumu_proc_objects.get(proc.info["pid"])
+                if p_obj:
+                    try:
+                        cpu_pct = round(p_obj.cpu_percent(interval=None), 1)
+                    except Exception:
+                        pass
+
                 target_place_id = None
                 target_game_name = None
                 if is_device:
@@ -2401,7 +2425,7 @@ def _sample_all_processes_sync():
                 mumu_instances.append({
                     "pid": proc.info["pid"],
                     "name": proc.info["name"],
-                    "cpu_percent": 0,
+                    "cpu_percent": cpu_pct,
                     "ram_mb": ram_mb,
                     "uptime": f"{hours}h{minutes:02d}m",
                     "uptime_seconds": int(uptime_sec),
