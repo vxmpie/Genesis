@@ -78,8 +78,13 @@ export function App() {
     }
   };
 
-  const handleSaveGameTarget = (instance: number, placeId: number) => {
-    requireAuthGuard(() => sendCommand('set_mumu_game', { instance, place_id: placeId }));
+  const handleSaveGameTarget = (instance: number, placeId: number, username?: string) => {
+    requireAuthGuard(() => {
+      sendCommand('set_mumu_game', { instance, place_id: placeId });
+      if (username !== undefined) {
+        sendCommand('set_mumu_username', { instance, username });
+      }
+    });
   };
 
   return (

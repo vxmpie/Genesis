@@ -2417,10 +2417,23 @@ def _sample_all_processes_sync():
 
                 target_place_id = None
                 target_game_name = None
+                saved_username = ""
+                live_game = None
+                live_place = None
+                presence_status = "Unknown"
+
                 if is_device:
                     device_idx += 1
+                    saved_username = CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(device_idx), "")
+                    live_pres = _instance_live_presence.get(str(device_idx)) or {}
+                    live_game = live_pres.get("game_name")
+                    live_place = live_pres.get("place_id")
+                    presence_status = live_pres.get("presence_status", "Offline" if saved_username else "Manual")
+
                     target_place_id = get_instance_place_id(device_idx)
                     target_game_name = get_game_name_for_place_id(target_place_id)
+
+                active_game_display = live_game or target_game_name or "Storage Hunters"
 
                 mumu_instances.append({
                     "pid": proc.info["pid"],
@@ -2434,10 +2447,14 @@ def _sample_all_processes_sync():
                     "index": device_idx if is_device else 0,
                     "instance_index": device_idx if is_device else 0,
                     "type": "Emulator" if is_device else "Launcher",
-                    "place_id": target_place_id or 98800969324557,
-                    "target_place_id": target_place_id or 98800969324557,
-                    "target_game": target_game_name or "Storage Hunters",
-                    "target_game_name": target_game_name or "Storage Hunters",
+                    "username": saved_username,
+                    "active_game": active_game_display,
+                    "active_place_id": live_place or target_place_id,
+                    "presence_status": presence_status,
+                    "place_id": live_place or target_place_id or 98800969324557,
+                    "target_place_id": live_place or target_place_id or 98800969324557,
+                    "target_game": active_game_display,
+                    "target_game_name": active_game_display,
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
@@ -2550,7 +2567,151 @@ def get_mumu_adb_devices() -> list[str]:
     return []
 
 
-_instance_auto_learned_place = {}  # index or serial -> place_id
+_instance_auto_learned_place: dict[str, int] = {}  # index or serial -> place_id
+_place_name_cache: dict[int, str] = {
+    98800969324557: "Storage Hunters",
+    9640154: "Storage Hunters",
+    17450551531: "Gym League",
+    17017769292: "Anime Defenders",
+    2753915549: "Blox Fruits",
+}
+_user_id_cache: dict[str, int] = {}
+_instance_live_presence: dict[str, dict] = {}  # instance_idx -> {"username": str, "presence_type": int, "presence_status": str, "place_id": int, "game_name": str, "last_updated": float}
+
+
+def resolve_roblox_game_name_sync(place_id: int) -> str:
+    """Fetch official Roblox game title from Roblox Universe API with local cache."""
+    if not place_id or place_id <= 0:
+        return "Storage Hunters"
+    if place_id in _place_name_cache:
+        return _place_name_cache[place_id]
+
+    # Check presets
+    for p in CONFIG.get("mumu", {}).get("game_presets", []):
+        if p.get("place_id") == place_id:
+            _place_name_cache[place_id] = p.get("name", f"Place {place_id}")
+            return _place_name_cache[place_id]
+
+    try:
+        # Step 1: Place ID -> Universe ID
+        u_url = f"https://apis.roblox.com/universes/v1/places/{place_id}/universe"
+        req = urllib.request.Request(u_url, headers={"User-Agent": "Mozilla/5.0 Genesis/1.0"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            u_data = json.loads(resp.read().decode("utf-8"))
+            universe_id = u_data.get("universeId")
+        if not universe_id:
+            return f"Place {place_id}"
+
+        # Step 2: Universe ID -> Game Title
+        g_url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
+        req2 = urllib.request.Request(g_url, headers={"User-Agent": "Mozilla/5.0 Genesis/1.0"})
+        with urllib.request.urlopen(req2, timeout=3.5) as resp2:
+            g_data = json.loads(resp2.read().decode("utf-8"))
+            items = g_data.get("data", [])
+            if items and items[0].get("name"):
+                raw_name = items[0].get("name", "").strip()
+                _place_name_cache[place_id] = raw_name
+                return raw_name
+    except Exception:
+        pass
+
+    return f"Place {place_id}"
+
+
+def get_roblox_user_id_sync(username: str) -> int | None:
+    if not username:
+        return None
+    uname_lower = username.strip().lower()
+    if uname_lower in _user_id_cache:
+        return _user_id_cache[uname_lower]
+    try:
+        payload = json.dumps({"usernames": [username.strip()], "excludeBannedUsers": True}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://users.roblox.com/v1/usernames/users",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Genesis/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            u_data = json.loads(resp.read().decode("utf-8"))
+            data_list = u_data.get("data", [])
+            if data_list:
+                uid = int(data_list[0].get("id"))
+                _user_id_cache[uname_lower] = uid
+                return uid
+    except Exception:
+        pass
+    return None
+
+
+def get_roblox_user_presence_sync(user_id: int) -> dict | None:
+    if not user_id or user_id <= 0:
+        return None
+    try:
+        payload = json.dumps({"userIds": [user_id]}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://presence.roblox.com/v1/presence/users",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Genesis/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            p_data = json.loads(resp.read().decode("utf-8"))
+            presences = p_data.get("userPresences", [])
+            if presences:
+                p = presences[0]
+                ptype = p.get("userPresenceType", 0)  # 0=Offline, 1=Online, 2=InGame, 3=InStudio
+                status_map = {0: "Offline", 1: "Online", 2: "InGame", 3: "InStudio"}
+                place_id = p.get("placeId") or p.get("rootPlaceId")
+                last_loc = p.get("lastLocation") or ""
+                return {
+                    "presence_type": ptype,
+                    "presence_status": status_map.get(ptype, "Unknown"),
+                    "place_id": int(place_id) if place_id else None,
+                    "game_name": last_loc,
+                    "game_id": p.get("gameId"),
+                }
+    except Exception:
+        pass
+    return None
+
+
+async def roblox_presence_tracker_loop():
+    """Real-time Roblox Game Detector: tracks live user presence and auto-syncs Place ID."""
+    while True:
+        try:
+            instance_users = CONFIG.get("mumu", {}).get("instance_usernames", {})
+            for inst_key, username in list(instance_users.items()):
+                if not username:
+                    continue
+                uid = await asyncio.to_thread(get_roblox_user_id_sync, username)
+                if not uid:
+                    continue
+                pres = await asyncio.to_thread(get_roblox_user_presence_sync, uid)
+                if pres:
+                    pid = pres.get("place_id")
+                    gname = pres.get("game_name")
+                    if pid:
+                        record_instance_active_place(inst_key, pid)
+                        if not gname or gname.lower() in ("experience", "roblox"):
+                            gname = await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+
+                    _instance_live_presence[str(inst_key)] = {
+                        "username": username,
+                        "presence_type": pres.get("presence_type", 0),
+                        "presence_status": pres.get("presence_status", "Offline"),
+                        "place_id": pid,
+                        "game_name": gname or (resolve_roblox_game_name_sync(pid) if pid else "Roblox"),
+                        "last_updated": time.time(),
+                    }
+
+            # Update names for in-game bot heartbeats
+            for serial, hb in list(_bot_heartbeats.items()):
+                pid = hb.get("place_id")
+                if pid and time.time() - hb.get("last_seen", 0) < 60:
+                    hb["game_name"] = resolve_roblox_game_name_sync(pid)
+
+        except Exception:
+            pass
+        await asyncio.sleep(6)
 
 
 def record_instance_active_place(instance_idx: int | str, place_id: int, serial: str = ""):
@@ -2564,10 +2725,20 @@ def record_instance_active_place(instance_idx: int | str, place_id: int, serial:
 
 def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
     """Resolve target Place ID for a specific MuMu instance with auto-learning fallback."""
+    # 1. Priority: Check live active game from presence tracker
+    live = _instance_live_presence.get(str(instance_idx))
+    if live and live.get("place_id"):
+        return int(live["place_id"])
+
+    # 2. Check auto-learned last active Place ID from gameplay
+    if str(instance_idx) in _instance_auto_learned_place:
+        return _instance_auto_learned_place[str(instance_idx)]
+    if serial and serial in _instance_auto_learned_place:
+        return _instance_auto_learned_place[serial]
+
+    # 3. Check explicit manual user setting
     mumu_cfg = CONFIG.get("mumu", {})
     instance_places = mumu_cfg.get("instance_places", {})
-
-    # 1. Check explicit manual user setting
     if str(instance_idx) in instance_places:
         try:
             return int(instance_places[str(instance_idx)])
@@ -2579,13 +2750,7 @@ def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
         except (ValueError, TypeError):
             pass
 
-    # 2. Check auto-learned last active Place ID from gameplay
-    if str(instance_idx) in _instance_auto_learned_place:
-        return _instance_auto_learned_place[str(instance_idx)]
-    if serial and serial in _instance_auto_learned_place:
-        return _instance_auto_learned_place[serial]
-
-    # 3. Fallback to default
+    # 4. Fallback to default
     return int(mumu_cfg.get("default_place_id", 98800969324557))
 
 
@@ -2597,8 +2762,10 @@ def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
         if "instance_places" not in CONFIG["mumu"]:
             CONFIG["mumu"]["instance_places"] = {}
         CONFIG["mumu"]["instance_places"][str(instance_idx)] = int(place_id)
+        _instance_auto_learned_place[str(instance_idx)] = int(place_id)
         save_config(CONFIG)
-        add_event("system", f"🎮 Instance {instance_idx} target Place ID set to {place_id}")
+        gname = get_game_name_for_place_id(place_id)
+        add_event("system", f"🎮 Instance {instance_idx} target game set to {gname} ({place_id})")
         return True
     except Exception as e:
         print(f"[SET INSTANCE GAME ERROR] {e}")
@@ -2607,12 +2774,11 @@ def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
 
 def get_game_name_for_place_id(place_id: int) -> str:
     """Get friendly game title from Place ID."""
-    if place_id in (98800969324557, 9640154):
+    if not place_id or place_id <= 0:
         return "Storage Hunters"
-    for p in CONFIG.get("mumu", {}).get("game_presets", []):
-        if p.get("place_id") == place_id:
-            return p.get("name", f"Place {place_id}")
-    return f"Place {place_id}"
+    if place_id in _place_name_cache:
+        return _place_name_cache[place_id]
+    return resolve_roblox_game_name_sync(place_id)
 
 
 _bot_heartbeats: dict = {}  # serial -> {"last_seen": float, "place_id": int, "status": str, "player": str, "extra": dict}
@@ -3248,13 +3414,14 @@ async def chart_sampler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task, _cpu_sampler_task, _main_event_loop
+    global _auto_boost_task, _maintenance_task, _heartbeat_task, _tunnel_task, _standby_guard_task, _chart_sampler_task, _mumu_reconnect_task, _process_sampler_task, _ping_sampler_task, _cpu_sampler_task, _roblox_presence_task, _main_event_loop
     _main_event_loop = asyncio.get_running_loop()
     _cpu_sampler_task = asyncio.create_task(cpu_sampler_loop())
     _ping_sampler_task = asyncio.create_task(roblox_ping_sampler_loop())
     _process_sampler_task = asyncio.create_task(process_sampler_loop())
     _chart_sampler_task = asyncio.create_task(chart_sampler_loop())
     _mumu_reconnect_task = asyncio.create_task(mumu_game_watchdog_loop())
+    _roblox_presence_task = asyncio.create_task(roblox_presence_tracker_loop())
     _auto_boost_task = asyncio.create_task(auto_boost_loop())
     _standby_guard_task = asyncio.create_task(autonomous_standby_loop())
     _maintenance_task = asyncio.create_task(maintenance_loop())
@@ -3277,6 +3444,8 @@ async def lifespan(app: FastAPI):
         _ping_sampler_task.cancel()
     if _process_sampler_task:
         _process_sampler_task.cancel()
+    if _roblox_presence_task:
+        _roblox_presence_task.cancel()
     if _mumu_reconnect_task:
         _mumu_reconnect_task.cancel()
     if _chart_sampler_task:
@@ -3352,6 +3521,55 @@ async def api_mumu_set_game(request: Request, payload: dict):
         "instance": inst_id,
         "place_id": place_id,
         "game_name": get_game_name_for_place_id(place_id),
+    })
+
+
+@app.post("/api/mumu/set_username")
+async def api_mumu_set_username(request: Request, payload: dict):
+    inst_id = str(payload.get("instance", 1))
+    username = str(payload.get("username", "")).strip()
+    if "mumu" not in CONFIG:
+        CONFIG["mumu"] = {}
+    if "instance_usernames" not in CONFIG["mumu"]:
+        CONFIG["mumu"]["instance_usernames"] = {}
+    CONFIG["mumu"]["instance_usernames"][inst_id] = username
+    save_config(CONFIG)
+    add_event("system", f"👤 Instance #{inst_id} Roblox username set to '{username}'")
+
+    # Trigger immediate presence fetch
+    if username:
+        uid = await asyncio.to_thread(get_roblox_user_id_sync, username)
+        if uid:
+            pres = await asyncio.to_thread(get_roblox_user_presence_sync, uid)
+            if pres:
+                pid = pres.get("place_id")
+                gname = pres.get("game_name")
+                if pid:
+                    record_instance_active_place(inst_id, pid)
+                    if not gname or gname.lower() in ("experience", "roblox"):
+                        gname = await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+                _instance_live_presence[inst_id] = {
+                    "username": username,
+                    "presence_type": pres.get("presence_type", 0),
+                    "presence_status": pres.get("presence_status", "Offline"),
+                    "place_id": pid,
+                    "game_name": gname or (resolve_roblox_game_name_sync(pid) if pid else "Roblox"),
+                    "last_updated": time.time(),
+                }
+    return JSONResponse({
+        "ok": True,
+        "instance": inst_id,
+        "username": username,
+        "presence": _instance_live_presence.get(inst_id, {})
+    })
+
+
+@app.get("/api/roblox/resolve_place")
+async def api_roblox_resolve_place(place_id: int):
+    name = await asyncio.to_thread(resolve_roblox_game_name_sync, place_id)
+    return JSONResponse({
+        "place_id": place_id,
+        "game_name": name
     })
 
 
@@ -3559,7 +3777,8 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         "refresh_hardening", "flush_dns", "observatory_refresh",
         "growth_data", "vm_disk_refresh",
         "toggle_timer_resolution", "toggle_pcore_affinity",
-        "flush_shader_cache", "scan_shader_cache", "governor_action"
+        "flush_shader_cache", "scan_shader_cache", "governor_action",
+        "set_instance_game", "set_mumu_game", "set_instance_username", "set_mumu_username"
     }
 
     if is_auth_enabled() and cmd not in safe_commands and not manager.is_auth(ws):
@@ -3658,7 +3877,7 @@ async def handle_ws_command(ws: WebSocket, data: dict):
         result = check_hardening_drift()
         await ws.send_json({"type": "hardening_status", "data": result})
 
-    elif cmd == "set_instance_game":
+    elif cmd in ("set_instance_game", "set_mumu_game"):
         inst_id = data.get("instance", 1)
         place_id = int(data.get("place_id", 98800969324557))
         ok = set_instance_place_id(inst_id, place_id)
@@ -3668,6 +3887,39 @@ async def handle_ws_command(ws: WebSocket, data: dict):
             "place_id": place_id,
             "game_name": get_game_name_for_place_id(place_id),
             "ok": ok,
+        })
+
+    elif cmd in ("set_instance_username", "set_mumu_username"):
+        inst_id = str(data.get("instance", 1))
+        username = str(data.get("username", "")).strip()
+        if "mumu" not in CONFIG:
+            CONFIG["mumu"] = {}
+        if "instance_usernames" not in CONFIG["mumu"]:
+            CONFIG["mumu"]["instance_usernames"] = {}
+        CONFIG["mumu"]["instance_usernames"][inst_id] = username
+        save_config(CONFIG)
+        add_event("system", f"👤 Instance #{inst_id} Roblox username set to '{username}'")
+        if username:
+            uid = await asyncio.to_thread(get_roblox_user_id_sync, username)
+            if uid:
+                pres = await asyncio.to_thread(get_roblox_user_presence_sync, uid)
+                if pres and pres.get("place_id"):
+                    pid = pres.get("place_id")
+                    record_instance_active_place(inst_id, pid)
+                    gname = pres.get("game_name") or await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+                    _instance_live_presence[inst_id] = {
+                        "username": username,
+                        "presence_type": pres.get("presence_type", 0),
+                        "presence_status": pres.get("presence_status", "Offline"),
+                        "place_id": pid,
+                        "game_name": gname,
+                        "last_updated": time.time(),
+                    }
+        await ws.send_json({
+            "type": "mumu_username_set",
+            "instance": inst_id,
+            "username": username,
+            "presence": _instance_live_presence.get(inst_id, {})
         })
 
     elif cmd == "defender_status":

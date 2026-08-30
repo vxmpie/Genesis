@@ -85,6 +85,10 @@ export interface MuMuDevice {
   target_game_name?: string;
   target_place_id?: number;
   is_bloated?: boolean;
+  username?: string;
+  active_game?: string;
+  active_place_id?: number;
+  presence_status?: 'InGame' | 'Online' | 'Offline' | 'Manual' | 'Unknown';
 }
 
 export interface MuMuHealth {

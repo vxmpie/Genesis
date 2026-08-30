@@ -51,7 +51,7 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory, onGovernorActi
             <tr>
               <th className="py-2 px-3">#</th>
               <th className="py-2 px-3">Type</th>
-              <th className="py-2 px-3">Target Game</th>
+              <th className="py-2 px-3">Active Game / Target</th>
               <th className="py-2 px-3">CPU%</th>
               <th className="py-2 px-3">RAM</th>
               <th className="py-2 px-3">Uptime</th>
@@ -69,7 +69,7 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory, onGovernorActi
               devices.map((dev, idx) => {
                 const index = dev.index ?? dev.instance_index ?? (idx + 1);
                 const isEmulator = (dev.type || '').toLowerCase().includes('emulator') || (dev.name || '').toLowerCase().includes('device');
-                const targetGame = dev.target_game || dev.target_game_name || 'Storage Hunters';
+                const targetGame = dev.active_game || dev.target_game || dev.target_game_name || 'Storage Hunters';
                 const isBusyRestart = activeAction === `${index}_restart_game`;
                 const isBusyTrim = activeAction === `${index}_trim_ram`;
                 const isBusyKill = activeAction === `${index}_kill_game`;
@@ -92,12 +92,30 @@ export const MuMuCard: React.FC<MuMuCardProps> = ({ onTrimMemory, onGovernorActi
                       {isEmulator ? (
                         <button
                           onClick={() => openEditGameModal(dev)}
-                          className="btn-cyber inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-genesis-cyan/10 hover:bg-genesis-cyan/20 border border-genesis-cyan/30 text-genesis-cyan text-[11px] font-bold active:scale-95 transition-all group"
-                          title="Click to change target game / place ID"
+                          className={`btn-cyber inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-bold active:scale-95 transition-all group ${
+                            dev.presence_status === 'InGame'
+                              ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                              : dev.presence_status === 'Online'
+                              ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300'
+                              : 'bg-genesis-cyan/10 hover:bg-genesis-cyan/20 border-genesis-cyan/30 text-genesis-cyan'
+                          }`}
+                          title="Click to change target game / bind Roblox username for live auto-detection"
                         >
-                          <Gamepad2 className="w-3 h-3 group-hover:rotate-12 transition-transform" />
-                          <span>{targetGame}</span>
-                          <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
+                          <Gamepad2 className={`w-3.5 h-3.5 group-hover:rotate-12 transition-transform ${dev.presence_status === 'InGame' ? 'text-emerald-400 animate-pulse' : ''}`} />
+                          <div className="flex flex-col items-start text-left leading-tight">
+                            <div className="flex items-center gap-1">
+                              {dev.presence_status === 'InGame' && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                              )}
+                              <span>{targetGame}</span>
+                            </div>
+                            {dev.username && (
+                              <span className="text-[9px] opacity-75 font-normal">
+                                @{dev.username} {dev.presence_status === 'InGame' ? '• Playing' : `• ${dev.presence_status}`}
+                              </span>
+                            )}
+                          </div>
+                          <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 ml-1" />
                         </button>
                       ) : (
                         <span className="text-slate-500">—</span>
