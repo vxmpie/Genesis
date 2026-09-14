@@ -157,21 +157,32 @@ function AutoEquipModule.GetInventoryUnits()
     local units = {}
     local rawInventory = nil
 
-    pcall(function()
-        local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
-        if dcMod then
-            local dc = require(dcMod)
-            local dcC = rawget(dc, "___C")
-            if dcC and rawget(dcC, "Inventory") then
-                local invNode = rawget(dcC, "Inventory")
-                rawInventory = rawget(invNode, "___C")
+    for attempt = 1, 5 do
+        pcall(function()
+            local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
+            if dcMod then
+                local dc = require(dcMod)
+                local dcC = rawget(dc, "___C")
+                if dcC and rawget(dcC, "Inventory") then
+                    local invNode = rawget(dcC, "Inventory")
+                    rawInventory = rawget(invNode, "___C")
+                end
             end
+        end)
+        if rawInventory and type(rawInventory) == "table" and next(rawInventory) ~= nil then
+            break
         end
-    end)
+        task.wait(0.2)
+    end
 
     if not rawInventory or type(rawInventory) ~= "table" then
         warn("[GENESIS AUTO EQUIP] Warning: Could not locate Inventory data table!")
         return units
+    end
+
+    local rawCount = 0
+    for _ in pairs(rawInventory) do
+        rawCount = rawCount + 1
     end
 
     local unitConfig = AutoEquipModule.GetUnitConfig()
@@ -280,10 +291,13 @@ function AutoEquipModule.GetInventoryUnits()
         end
     end
 
+    if #units == 0 and rawCount > 0 then
+        warn(string.format("[GENESIS AUTO EQUIP] Warning: %d items in rawInventory but 0 parsed! Check name/___X format.", rawCount))
+    end
+
     return units
 end
 
--- --- Odds Calculation Engine ---
 function AutoEquipModule.CalculateUnitOdds(unitObj)
     local meta = unitObj.Meta
     if not meta then return 0, "1 in 1" end
