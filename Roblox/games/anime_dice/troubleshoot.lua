@@ -15,42 +15,14 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V6] CLIENTDATA ERROR & ITEM PROBE")
+log("[GENESIS DIAG V7] LEAF VALUE RESOLUTION PROBE")
 log("==================================================")
 
-local ClientData = nil
-pcall(function()
-    ClientData = require(ReplicatedStorage.Packages.Data.Client)
-end)
 local DataController = nil
 pcall(function()
     DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
 end)
 
-log("[1] ClientData Method Errors:")
-if ClientData then
-    log("  hasLoaded:", tostring(ClientData.hasLoaded))
-    log("  data field type:", type(ClientData.data))
-    
-    local ok1, err1 = pcall(function() return ClientData:get() end)
-    log("  ClientData:get() error:", tostring(err1))
-    
-    local ok2, err2 = pcall(function() return ClientData:get("Inventory") end)
-    log("  ClientData:get('Inventory') error:", tostring(err2))
-    
-    local ok3, err3 = pcall(function() return ClientData.get(ClientData.data, "Inventory") end)
-    log("  ClientData.get(ClientData.data, 'Inventory'):", ok3, tostring(err3))
-
-    if type(ClientData.data) == "table" then
-        log("  Inspecting ClientData.data table:")
-        for k, v in pairs(ClientData.data) do
-            log("    ClientData.data key:", tostring(k), "type:", type(v), "val:", tostring(v))
-        end
-    end
-end
-
-log("--------------------------------------------------")
-log("[2] Inspecting itemNode Raw Keys from DataController:")
 local rawInv = nil
 if DataController then
     local dcC = rawget(DataController, "___C")
@@ -64,34 +36,78 @@ if rawInv then
     local sampleCount = 0
     for guid, itemNode in pairs(rawInv) do
         sampleCount = sampleCount + 1
-        log("Sample GUID (" .. sampleCount .. "):", guid)
-        log("  itemNode type:", type(itemNode), "val:", tostring(itemNode))
-        if type(itemNode) == "table" then
-            for k, v in pairs(itemNode) do
-                log("  [pairs] key:", tostring(k), "type:", type(v), "val:", tostring(v))
-                if type(v) == "table" then
-                    local vC = rawget(v, "___C")
-                    local vK = rawget(v, "___K")
-                    log("    child ___K:", tostring(vK), "___C type:", type(vC), "val:", tostring(vC))
+        log("----------------------------------------")
+        log("Sample #" .. sampleCount .. " GUID: " .. tostring(guid))
+        
+        local itemC = rawget(itemNode, "___C")
+        if type(itemC) == "table" then
+            local nameNode = rawget(itemC, "name")
+            local amountNode = rawget(itemC, "amount")
+            local attrNode = rawget(itemC, "attributes")
+            
+            log("[1] Testing nameNode calls:")
+            if nameNode then
+                -- test __call: nameNode()
+                local callOk, callRes = pcall(function() return nameNode() end)
+                log("  nameNode() -> ok:", callOk, "res:", tostring(callRes), "type:", type(callRes))
+                
+                -- test nameNode:get()
+                local getOk, getRes = pcall(function() return nameNode:get() end)
+                log("  nameNode:get() -> ok:", getOk, "res:", tostring(getRes), "type:", type(getRes))
+                
+                -- test raw pairs inside nameNode
+                for k, v in pairs(nameNode) do
+                    log("  nameNode raw key:", tostring(k), "valType:", type(v), "val:", tostring(v))
+                end
+                
+                -- test nameNode.___C contents
+                local nameC = rawget(nameNode, "___C")
+                log("  nameNode.___C type:", type(nameC), "val:", tostring(nameC))
+                if type(nameC) == "table" then
+                    for k, v in pairs(nameC) do
+                        log("    nameC key:", tostring(k), "valType:", type(v), "val:", tostring(v))
+                        if type(v) == "table" then
+                            local subCallOk, subCallRes = pcall(function() return v() end)
+                            log("      v() -> ok:", subCallOk, "res:", tostring(subCallRes))
+                        end
+                    end
+                end
+                
+                -- test nameNode metatable
+                local mt = getmetatable(nameNode)
+                if mt and type(mt) == "table" then
+                    for mk, mv in pairs(mt) do
+                        log("  nameNode mt key:", tostring(mk), "valType:", type(mv))
+                    end
                 end
             end
             
-            local mt = getmetatable(itemNode)
-            log("  itemNode metatable:", tostring(mt))
-            if mt and type(mt) == "table" then
-                for mk, mv in pairs(mt) do
-                    log("    mt key:", tostring(mk), "type:", type(mv), "val:", tostring(mv))
-                end
+            log("[2] Testing amountNode:")
+            if amountNode then
+                local aCallOk, aCallRes = pcall(function() return amountNode() end)
+                local aGetOk, aGetRes = pcall(function() return amountNode:get() end)
+                log("  amountNode() -> ok:", aCallOk, "res:", tostring(aCallRes))
+                log("  amountNode:get() -> ok:", aGetOk, "res:", tostring(aGetRes))
             end
             
-            local itemC = rawget(itemNode, "___C")
-            log("  itemNode.___C:", tostring(itemC), "type:", type(itemC))
-            if type(itemC) == "table" then
-                for ck, cv in pairs(itemC) do
-                    log("    itemC key:", tostring(ck), "type:", type(cv), "val:", tostring(cv))
+            log("[3] Testing attrNode (attributes):")
+            if attrNode then
+                local attrC = rawget(attrNode, "___C")
+                log("  attrNode.___C type:", type(attrC))
+                if type(attrC) == "table" then
+                    for ak, av in pairs(attrC) do
+                        log("    attr key:", tostring(ak), "valType:", type(av))
+                        if type(av) == "table" then
+                            local aCallOk, aCallRes = pcall(function() return av() end)
+                            local aGetOk, aGetRes = pcall(function() return av:get() end)
+                            log("      attr " .. tostring(ak) .. "() -> ok:", aCallOk, "res:", tostring(aCallRes))
+                            log("      attr " .. tostring(ak) .. ":get() -> ok:", aGetOk, "res:", tostring(aGetRes))
+                        end
+                    end
                 end
             end
         end
+        
         if sampleCount >= 2 then
             break
         end
@@ -99,7 +115,7 @@ if rawInv then
 end
 
 log("==================================================")
-log("[GENESIS DIAG V6] COMPLETED")
+log("[GENESIS DIAG V7] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
@@ -111,7 +127,5 @@ if writefile then
     end)
     if ok then
         print("[GENESIS] Successfully saved log file to: " .. fileName)
-    else
-        print("[GENESIS] Failed to save file via writefile: " .. tostring(err))
     end
 end
