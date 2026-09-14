@@ -6,6 +6,7 @@ local StarterGui = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
 
+-- --- Rarity & Multiplier Tables ---
 local RARITY_RANKS = {
     ["Common"] = 1,
     ["Uncommon"] = 2,
@@ -38,10 +39,12 @@ local MUTATION_CHANCES = {
     ["Silver"] = 10
 }
 
+-- --- Module State ---
 local loopThread = nil
 local isProcessing = false
 local lastScanResults = {}
 
+-- --- Utility Functions ---
 local function sendNotice(title, text)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
@@ -58,29 +61,14 @@ local function safeUnwrap(val, depth)
     if val == nil then return nil end
     if type(val) ~= "table" then return val end
 
-    local ok, res = pcall(function()
-        if type(val.get) == "function" then
-            local g = val:get()
-            if g ~= nil and g ~= val then
-                return safeUnwrap(g, depth + 1)
-            end
-        end
+    local rawX = rawget(val, "___X")
+    if rawX ~= nil and rawX ~= val then
+        return safeUnwrap(rawX, depth + 1)
+    end
 
-        local rawC = rawget(val, "___C")
-        if rawC ~= nil and rawC ~= val then
-            return safeUnwrap(rawC, depth + 1)
-        end
-
-        local rawVal = rawget(val, "Value")
-        if rawVal ~= nil and type(rawVal) ~= "function" and rawVal ~= val then
-            return safeUnwrap(rawVal, depth + 1)
-        end
-
-        return nil
-    end)
-
-    if ok and res ~= nil then
-        return res
+    local rawC = rawget(val, "___C")
+    if rawC ~= nil and rawC ~= val and type(rawC) ~= "table" then
+        return safeUnwrap(rawC, depth + 1)
     end
 
     return val
@@ -145,9 +133,15 @@ function AutoEquipModule.GetSlotsState()
             local rawSlots = dc.___C and dc.___C.Slots and (dc.___C.Slots.___C or dc.___C.Slots)
             if rawSlots and type(rawSlots) == "table" then
                 for sIndex, sData in pairs(rawSlots) do
-                    local unwrappedSlot = safeUnwrap(sData)
-                    if type(unwrappedSlot) == "table" then
-                        local uid = safeUnwrap(rawget(unwrappedSlot, "unitId") or unwrappedSlot.unitId)
+                    local slotData = rawget(sData, "___X") or sData
+                    if type(slotData) == "table" then
+                        local uid = rawget(slotData, "unitId")
+                        if not uid and slotData.___C and type(slotData.___C) == "table" then
+                            local uidNode = slotData.___C.unitId
+                            if uidNode and type(uidNode) == "table" then
+                                uid = rawget(uidNode, "___X")
+                            end
+                        end
                         if uid and type(uid) == "string" and uid ~= "" then
                             slotsMap[tostring(sIndex)] = uid
                         end
@@ -173,23 +167,6 @@ function AutoEquipModule.GetInventoryUnits()
         end
     end)
 
-    if not rawInventory or type(rawInventory) ~= "table" or next(rawInventory) == nil then
-        pcall(function()
-            local clientMod = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Data") and ReplicatedStorage.Packages.Data:FindFirstChild("Client")
-            if clientMod then
-                local clientData = require(clientMod)
-                if clientData then
-                    local inv = clientData:get("Inventory")
-                    if inv then
-                        rawInventory = inv.___C or inv
-                    elseif clientData.data and clientData.data.___C and clientData.data.___C.Inventory then
-                        rawInventory = clientData.data.___C.Inventory.___C or clientData.data.___C.Inventory
-                    end
-                end
-            end
-        end)
-    end
-
     if not rawInventory or type(rawInventory) ~= "table" then
         warn("[GENESIS AUTO EQUIP] Warning: Could not locate Inventory data table!")
         return units
@@ -198,46 +175,85 @@ function AutoEquipModule.GetInventoryUnits()
     local unitConfig = AutoEquipModule.GetUnitConfig()
     local entries = (unitConfig and unitConfig.entries) or {}
 
-    for guid, itemWrapper in pairs(rawInventory) do
-        local item = safeUnwrap(itemWrapper)
-        if type(item) == "table" then
-            local rawName = safeUnwrap(rawget(item, "name") or item.name or rawget(item, "entry") or item.entry or rawget(item, "Name") or item.Name)
-            local rawAttrs = safeUnwrap(rawget(item, "attributes") or item.attributes) or {}
-            local rawAmount = safeUnwrap(rawget(item, "amount") or item.amount) or 1
-            local rawLocked = safeUnwrap(rawget(item, "locked") or item.locked) or false
+    for guid, itemNode in pairs(rawInventory) do
+        local itemData = rawget(itemNode, "___X")
+        local itemC = rawget(itemNode, "___C")
 
-            if type(rawName) == "string" and rawName ~= "" then
-                local meta = entries[rawName]
-                local resolvedVariant = nil
+        local rawName = nil
+        local rawAttrs = nil
+        local rawAmount = 1
+        local rawLocked = false
 
-                if not meta and type(rawAttrs) == "table" and rawAttrs.variant then
-                    local vName = tostring(safeUnwrap(rawAttrs.variant))
-                    local comboName = vName .. " " .. rawName
-                    if entries[comboName] then
-                        meta = entries[comboName]
-                        resolvedVariant = vName
+        if type(itemData) == "table" then
+            rawName = rawget(itemData, "name") or rawget(itemData, "entry")
+            rawAttrs = rawget(itemData, "attributes") or {}
+            rawAmount = rawget(itemData, "amount") or 1
+            rawLocked = rawget(itemData, "locked") or false
+        end
+
+        if not rawName and type(itemC) == "table" then
+            local nameNode = rawget(itemC, "name")
+            if nameNode and type(nameNode) == "table" then
+                rawName = rawget(nameNode, "___X")
+            end
+            local attrNode = rawget(itemC, "attributes")
+            if attrNode and type(attrNode) == "table" then
+                rawAttrs = rawget(attrNode, "___X") or {}
+            end
+            local amountNode = rawget(itemC, "amount")
+            if amountNode and type(amountNode) == "table" then
+                rawAmount = rawget(amountNode, "___X") or 1
+            end
+        end
+
+        if type(rawAttrs) ~= "table" then
+            rawAttrs = {}
+        end
+
+        if type(rawName) == "string" and rawName ~= "" then
+            local meta = entries[rawName]
+            local resolvedVariant = nil
+
+            if not meta and rawAttrs.variant then
+                local vName = tostring(rawAttrs.variant)
+                local comboName = vName .. " " .. rawName
+                if entries[comboName] then
+                    meta = entries[comboName]
+                    resolvedVariant = vName
+                end
+            end
+
+            if not meta then
+                for prefix, _ in pairs(VARIANT_MULTIPLIERS) do
+                    if string.sub(rawName, 1, #prefix + 1) == prefix .. " " then
+                        local baseName = string.sub(rawName, #prefix + 2)
+                        if entries[baseName] then
+                            meta = entries[baseName]
+                            resolvedVariant = prefix
+                            break
+                        end
                     end
                 end
+            end
 
-                if meta then
-                    local level = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.level)) or 1
-                    local mutation = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.mutation)) or nil
-                    local trait = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.trait)) or nil
-                    local variant = resolvedVariant or meta.variant or (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.variant)) or "Normal"
+            if meta then
+                local level = rawAttrs.level or 1
+                local mutation = rawAttrs.mutation or nil
+                local trait = rawAttrs.trait or nil
+                local variant = resolvedVariant or meta.variant or rawAttrs.variant or "Normal"
 
-                    table.insert(units, {
-                        GUID = tostring(guid),
-                        Name = rawName,
-                        Meta = meta,
-                        Attributes = rawAttrs,
-                        Level = tonumber(level) or 1,
-                        Mutation = mutation,
-                        Trait = trait,
-                        Variant = variant,
-                        Amount = tonumber(rawAmount) or 1,
-                        Locked = (rawLocked == true)
-                    })
-                end
+                table.insert(units, {
+                    GUID = tostring(guid),
+                    Name = rawName,
+                    Meta = meta,
+                    Attributes = rawAttrs,
+                    Level = tonumber(level) or 1,
+                    Mutation = mutation,
+                    Trait = trait,
+                    Variant = variant,
+                    Amount = tonumber(rawAmount) or 1,
+                    Locked = (rawLocked == true)
+                })
             end
         end
     end
@@ -245,49 +261,38 @@ function AutoEquipModule.GetInventoryUnits()
     return units
 end
 
+-- --- Odds Calculation Engine ---
 function AutoEquipModule.CalculateUnitOdds(unitObj)
     local meta = unitObj.Meta
     if not meta then return 0, "1 in 1" end
 
-    local rarity = meta.rarity or "Common"
-    local order = tonumber(meta.order) or 1
-    local variant = unitObj.Variant or meta.variant or "Normal"
-    local mutation = unitObj.Mutation
-    local attrs = unitObj.Attributes or {}
-
-    local exactChance = 0
-
-    if type(meta.chance) == "function" then
-        local ok, res = pcall(meta.chance, attrs)
-        if not ok or type(res) ~= "number" then
-            ok, res = pcall(meta.chance)
-        end
-        if ok and type(res) == "number" and res > 0 then
-            exactChance = res
-        end
-    elseif type(meta.chance) == "number" and meta.chance > 0 then
-        exactChance = meta.chance
+    local baseOdds = 1
+    if meta.chance and type(meta.chance) == "number" and meta.chance > 0 then
+        baseOdds = math.floor(1 / meta.chance)
+    elseif meta.odds and type(meta.odds) == "number" then
+        baseOdds = meta.odds
+    elseif meta.rarity then
+        local rank = RARITY_RANKS[meta.rarity] or 1
+        baseOdds = math.floor(10 ^ rank)
     end
 
-    if exactChance > 0 and exactChance < 1 then
-        exactChance = 1 / exactChance
+    local finalOdds = baseOdds
+
+    local variantMult = VARIANT_MULTIPLIERS[unitObj.Variant] or 1
+    finalOdds = finalOdds * variantMult
+
+    if unitObj.Mutation and MUTATION_CHANCES[unitObj.Mutation] then
+        finalOdds = finalOdds * MUTATION_CHANCES[unitObj.Mutation]
     end
 
-    if exactChance > 0 then
-        if mutation and MUTATION_CHANCES[mutation] and not string.find(string.lower(unitObj.Name), string.lower(mutation)) then
-            exactChance = exactChance * MUTATION_CHANCES[mutation]
-        end
-    else
-        local vMult = VARIANT_MULTIPLIERS[variant] or 1
-        local mMult = (mutation and MUTATION_CHANCES[mutation]) or 1
-        local base = math.pow(10, (order / 5.75)) * 1.5
-        exactChance = base * vMult * mMult
-    end
+    local lvlBonus = (unitObj.Level or 1) * 0.05
+    finalOdds = finalOdds * (1 + lvlBonus)
 
-    local formatted = AutoEquipModule.FormatOdds(exactChance)
-    return exactChance, formatted
+    local formatted = AutoEquipModule.FormatOdds(finalOdds)
+    return finalOdds, formatted
 end
 
+-- --- Slot & Remote Actions ---
 function AutoEquipModule.UnequipSlot(slotId)
     local slotNum = tonumber(slotId)
     local slotStr = tostring(slotId)
@@ -296,16 +301,26 @@ function AutoEquipModule.UnequipSlot(slotId)
     if ucMod then
         local ok, uc = pcall(require, ucMod)
         if ok and uc and uc.Unequip then
-            pcall(function() uc:Unequip(slotStr) end)
-            if slotNum then pcall(function() uc:Unequip(slotNum) end) end
+            local success = pcall(function() return uc:Unequip(slotStr) end)
+            if success then return true end
+            if slotNum then
+                local success2 = pcall(function() return uc:Unequip(slotNum) end)
+                if success2 then return true end
+            end
         end
     end
 
     local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Unequip")
     if rf and rf:IsA("RemoteFunction") then
-        pcall(function() rf:InvokeServer(slotStr) end)
-        if slotNum then pcall(function() rf:InvokeServer(slotNum) end) end
+        local success = pcall(function() return rf:InvokeServer(slotStr) end)
+        if success then return true end
+        if slotNum then
+            local success2 = pcall(function() return rf:InvokeServer(slotNum) end)
+            if success2 then return true end
+        end
     end
+
+    return false
 end
 
 function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
@@ -370,6 +385,7 @@ function AutoEquipModule.GetLastScanResults()
     return lastScanResults
 end
 
+-- --- Main Auto Equip Logic ---
 function AutoEquipModule.ProcessAutoEquip(State)
     if isProcessing then return end
     isProcessing = true
@@ -382,7 +398,7 @@ function AutoEquipModule.ProcessAutoEquip(State)
 
         local units = AutoEquipModule.GetInventoryUnits()
         if #units == 0 then
-            warn("[GENESIS AUTO EQUIP] 0 units found in inventory! Check if inventory is empty or locked.")
+            warn("[GENESIS AUTO EQUIP] 0 units found in inventory! Check if inventory is empty.")
             sendNotice("Auto Equip", "Scanned bag: 0 units found!")
             return
         end
@@ -474,6 +490,7 @@ function AutoEquipModule.ProcessAutoEquip(State)
     isProcessing = false
 end
 
+-- --- Loop Controller ---
 function AutoEquipModule.StartLoop(State)
     if loopThread then
         pcall(task.cancel, loopThread)
