@@ -161,8 +161,8 @@ function UI.Create(Config, AutoEquipModule)
 
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 540, 0, 400)
-    MainFrame.Position = UDim2.new(0.5, -270, 0.5, -200)
+    MainFrame.Size = UDim2.new(0, 560, 0, 420)
+    MainFrame.Position = UDim2.new(0.5, -280, 0.5, -210)
     MainFrame.BackgroundColor3 = THEME.Background
     MainFrame.BorderSizePixel = 0
     MainFrame.Visible = true
@@ -536,6 +536,21 @@ function UI.Create(Config, AutoEquipModule)
             end)
         end
 
+        function CardObj:AddInfoLabel(text)
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1, 0, 0, 0)
+            lbl.AutomaticSize = Enum.AutomaticSize.Y
+            lbl.BackgroundTransparency = 1
+            lbl.Font = Enum.Font.GothamMedium
+            lbl.Text = text
+            lbl.TextColor3 = THEME.TextSecondary
+            lbl.TextSize = 10
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextWrapped = true
+            lbl.Parent = card
+            return lbl
+        end
+
         return CardObj
     end
 
@@ -554,8 +569,6 @@ function UI.Create(Config, AutoEquipModule)
 
     masterCard:AddSelector("Equip Priority Mode", {
         "RarestFirst",
-        "VariantFirst",
-        "OrderRank",
         "NativeBest"
     }, State.EquipMode or "RarestFirst", function(val)
         State.EquipMode = val
@@ -563,20 +576,65 @@ function UI.Create(Config, AutoEquipModule)
         Config.Save()
     end)
 
-    masterCard:AddToggle("Prioritize Huge & Titanic Variants", State.PrioritizeVariants, function(val)
-        State.PrioritizeVariants = val
-        Config.Set("PrioritizeVariants", val)
-        Config.Save()
+    local actionsCard = createCard(equipPage, "Instant Actions")
+    local statusInfoLabel = nil
+
+    actionsCard:AddButton("Instant Auto Equip (Scan Bag & Fill Slots 1..N)", function()
+        AutoEquipModule.ProcessAutoEquip(State)
+        local results = AutoEquipModule.GetLastScanResults()
+        if statusInfoLabel and #results > 0 then
+            local lines = { string.format("Found %d units in bag. Top placed:", #results) }
+            for i = 1, math.min(6, #results) do
+                local u = results[i]
+                table.insert(lines, string.format("Slot %d: %s [%s] (%s)", i, u.Name, u.Rarity, u.FormattedOdds))
+            end
+            statusInfoLabel.Text = table.concat(lines, "\n")
+        end
     end)
 
-    local actionsCard = createCard(equipPage, "Instant Actions")
-    actionsCard:AddButton("Instant Auto Equip (1-Shot According to Tiers)", function()
-        AutoEquipModule.ProcessAutoEquip(State)
-    end)
+    actionsCard:AddButton("Scan Backpack Only (Inspect Odds & Tiers)", function()
+        local units = AutoEquipModule.GetInventoryUnits()
+        if #units == 0 then
+            StarterGui:SetCore("SendNotification", {
+                Title = "GENESIS SCAN",
+                Text = "0 units detected in backpack!",
+                Duration = 3
+            })
+            if statusInfoLabel then statusInfoLabel.Text = "No units detected in bag." end
+            return
+        end
+
+        local ranked = {}
+        for _, u in ipairs(units) do
+            local oNum, oFmt = AutoEquipModule.CalculateUnitOdds(u)
+            u.Odds = oNum
+            u.FormattedOdds = oFmt
+            u.Rarity = (u.Meta and u.Meta.rarity) or "Common"
+            table.insert(ranked, u)
+        end
+        table.sort(ranked, function(a, b) return a.Odds > b.Odds end)
+
+        local lines = { string.format("Scanned %d total units! Top 7 Rarest:", #ranked) }
+        for i = 1, math.min(7, #ranked) do
+            local u = ranked[i]
+            table.insert(lines, string.format("#%d %s [%s] - %s", i, u.Name, u.Rarity, u.FormattedOdds))
+        end
+        if statusInfoLabel then
+            statusInfoLabel.Text = table.concat(lines, "\n")
+        end
+        StarterGui:SetCore("SendNotification", {
+            Title = "GENESIS SCAN",
+            Text = string.format("Found %d units. Top: %s (%s)", #ranked, ranked[1].Name, ranked[1].FormattedOdds),
+            Duration = 4
+        })
+    end, true)
 
     actionsCard:AddButton("Native Equip Best (Game Server Call)", function()
         AutoEquipModule.NativeEquipBest()
     end, true)
+
+    local previewCard = createCard(equipPage, "Backpack Scan & Slot Placements")
+    statusInfoLabel = previewCard:AddInfoLabel("Press 'Instant Auto Equip' or 'Scan Backpack' to preview ranked units.")
 
     local delayCard = createCard(equipPage, "Timing Configuration")
     local dRow = Instance.new("Frame")
