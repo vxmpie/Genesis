@@ -15,7 +15,7 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V5] LOGGING TO FILE PROBE")
+log("[GENESIS DIAG V6] CLIENTDATA ERROR & ITEM PROBE")
 log("==================================================")
 
 local ClientData = nil
@@ -27,41 +27,30 @@ pcall(function()
     DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
 end)
 
-log("[1] ClientData loaded:", ClientData ~= nil)
+log("[1] ClientData Method Errors:")
 if ClientData then
-    for k, v in pairs(ClientData) do
-        log("  ClientData key:", k, "type:", type(v))
-    end
+    log("  hasLoaded:", tostring(ClientData.hasLoaded))
+    log("  data field type:", type(ClientData.data))
     
-    local ok, res = pcall(function() return ClientData:get() end)
-    log("  ClientData:get() -> ok:", ok, "type:", type(res))
-    if ok and type(res) == "table" then
-        for k, _ in pairs(res) do
-            log("    root key:", k)
-        end
-    end
+    local ok1, err1 = pcall(function() return ClientData:get() end)
+    log("  ClientData:get() error:", tostring(err1))
     
-    local okInv, resInv = pcall(function() return ClientData:get("Inventory") end)
-    log("  ClientData:get('Inventory') -> ok:", okInv, "type:", type(resInv))
-    if okInv and type(resInv) == "table" then
-        local count = 0
-        for guid, item in pairs(resInv) do
-            count = count + 1
-            if count <= 5 then
-                log("    [Inv Item] guid:", guid, "type:", type(item))
-                if type(item) == "table" then
-                    for ik, iv in pairs(item) do
-                        log("      item key:", ik, "valType:", type(iv), "val:", tostring(iv))
-                    end
-                end
-            end
+    local ok2, err2 = pcall(function() return ClientData:get("Inventory") end)
+    log("  ClientData:get('Inventory') error:", tostring(err2))
+    
+    local ok3, err3 = pcall(function() return ClientData.get(ClientData.data, "Inventory") end)
+    log("  ClientData.get(ClientData.data, 'Inventory'):", ok3, tostring(err3))
+
+    if type(ClientData.data) == "table" then
+        log("  Inspecting ClientData.data table:")
+        for k, v in pairs(ClientData.data) do
+            log("    ClientData.data key:", tostring(k), "type:", type(v), "val:", tostring(v))
         end
-        log("    Total Inv Items via ClientData:get('Inventory'):", count)
     end
 end
 
 log("--------------------------------------------------")
-log("[2] Inspecting Data.Value Internal Structure")
+log("[2] Inspecting itemNode Raw Keys from DataController:")
 local rawInv = nil
 if DataController then
     local dcC = rawget(DataController, "___C")
@@ -76,31 +65,31 @@ if rawInv then
     for guid, itemNode in pairs(rawInv) do
         sampleCount = sampleCount + 1
         log("Sample GUID (" .. sampleCount .. "):", guid)
-        local nameNode = rawget(itemNode, "name")
-        log("  nameNode:", tostring(nameNode), "type:", type(nameNode))
-        if type(nameNode) == "table" then
-            for k, v in pairs(nameNode) do
-                log("    nameNode raw key:", k, "val:", tostring(v), "type:", type(v))
-            end
-            local cNode = rawget(nameNode, "___C")
-            log("    nameNode.___C:", tostring(cNode), "type:", type(cNode))
-            if type(cNode) == "table" then
-                for k, v in pairs(cNode) do
-                    log("      cNode key:", k, "val:", tostring(v), "type:", type(v))
-                    if type(v) == "table" then
-                        for subK, subV in pairs(v) do
-                            log("        subKey:", subK, "val:", tostring(subV), "type:", type(subV))
-                        end
-                    end
+        log("  itemNode type:", type(itemNode), "val:", tostring(itemNode))
+        if type(itemNode) == "table" then
+            for k, v in pairs(itemNode) do
+                log("  [pairs] key:", tostring(k), "type:", type(v), "val:", tostring(v))
+                if type(v) == "table" then
+                    local vC = rawget(v, "___C")
+                    local vK = rawget(v, "___K")
+                    log("    child ___K:", tostring(vK), "___C type:", type(vC), "val:", tostring(vC))
                 end
             end
-        end
-        
-        if type(nameNode) == "table" and type(nameNode.get) == "function" and debug and debug.getupvalues then
-            local u = debug.getupvalues(nameNode.get)
-            log("    nameNode.get upvalues count:", #u)
-            for i, uv in ipairs(u) do
-                log("      upval #" .. i .. ":", tostring(uv), "type:", type(uv))
+            
+            local mt = getmetatable(itemNode)
+            log("  itemNode metatable:", tostring(mt))
+            if mt and type(mt) == "table" then
+                for mk, mv in pairs(mt) do
+                    log("    mt key:", tostring(mk), "type:", type(mv), "val:", tostring(mv))
+                end
+            end
+            
+            local itemC = rawget(itemNode, "___C")
+            log("  itemNode.___C:", tostring(itemC), "type:", type(itemC))
+            if type(itemC) == "table" then
+                for ck, cv in pairs(itemC) do
+                    log("    itemC key:", tostring(ck), "type:", type(cv), "val:", tostring(cv))
+                end
             end
         end
         if sampleCount >= 2 then
@@ -110,7 +99,7 @@ if rawInv then
 end
 
 log("==================================================")
-log("[GENESIS DIAG V5] COMPLETED")
+log("[GENESIS DIAG V6] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
@@ -125,6 +114,4 @@ if writefile then
     else
         print("[GENESIS] Failed to save file via writefile: " .. tostring(err))
     end
-else
-    print("[GENESIS] writefile is not supported in this executor environment")
 end
