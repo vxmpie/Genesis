@@ -55,25 +55,6 @@ local function sendNotice(title, text)
     end)
 end
 
-local function safeUnwrap(val, depth)
-    depth = depth or 0
-    if depth > 10 then return val end
-    if val == nil then return nil end
-    if type(val) ~= "table" then return val end
-
-    local rawX = rawget(val, "___X")
-    if rawX ~= nil and rawX ~= val then
-        return safeUnwrap(rawX, depth + 1)
-    end
-
-    local rawC = rawget(val, "___C")
-    if rawC ~= nil and rawC ~= val and type(rawC) ~= "table" then
-        return safeUnwrap(rawC, depth + 1)
-    end
-
-    return val
-end
-
 function AutoEquipModule.FormatOdds(num)
     if not num or num <= 0 then return "1 in 1" end
     if num >= 1e15 then
@@ -107,13 +88,17 @@ function AutoEquipModule.GetUnlockedSlotsCount()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local rawSlots = dc.___C and dc.___C.Slots and (dc.___C.Slots.___C or dc.___C.Slots)
-            if rawSlots then
-                local c = 0
-                for _ in pairs(rawSlots) do
-                    c = c + 1
+            local dcC = rawget(dc, "___C") or dc.___C
+            if dcC and (rawget(dcC, "Slots") or dcC.Slots) then
+                local slotsNode = rawget(dcC, "Slots") or dcC.Slots
+                local rawSlots = rawget(slotsNode, "___C") or slotsNode.___C or slotsNode
+                if rawSlots and type(rawSlots) == "table" then
+                    local c = 0
+                    for _ in pairs(rawSlots) do
+                        c = c + 1
+                    end
+                    return c
                 end
-                return c
             end
         end
         return nil
@@ -130,18 +115,27 @@ function AutoEquipModule.GetSlotsState()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local rawSlots = dc.___C and dc.___C.Slots and (dc.___C.Slots.___C or dc.___C.Slots)
-            if rawSlots and type(rawSlots) == "table" then
-                for sIndex, sData in pairs(rawSlots) do
-                    local slotData = rawget(sData, "___X") or sData
-                    if type(slotData) == "table" then
-                        local uid = rawget(slotData, "unitId")
-                        if not uid and slotData.___C and type(slotData.___C) == "table" then
-                            local uidNode = slotData.___C.unitId
+            local dcC = rawget(dc, "___C") or dc.___C
+            if dcC and (rawget(dcC, "Slots") or dcC.Slots) then
+                local slotsNode = rawget(dcC, "Slots") or dcC.Slots
+                local rawSlots = rawget(slotsNode, "___C") or slotsNode.___C or slotsNode
+                if rawSlots and type(rawSlots) == "table" then
+                    for sIndex, sData in pairs(rawSlots) do
+                        local sC = rawget(sData, "___C") or sData
+                        local sX = rawget(sData, "___X")
+                        local uid = nil
+
+                        if sC and type(sC) == "table" then
+                            local uidNode = rawget(sC, "unitId")
                             if uidNode and type(uidNode) == "table" then
                                 uid = rawget(uidNode, "___X")
                             end
                         end
+
+                        if not uid and sX and type(sX) == "table" then
+                            uid = rawget(sX, "unitId")
+                        end
+
                         if uid and type(uid) == "string" and uid ~= "" then
                             slotsMap[tostring(sIndex)] = uid
                         end
@@ -161,8 +155,10 @@ function AutoEquipModule.GetInventoryUnits()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            if dc and dc.___C and dc.___C.Inventory then
-                rawInventory = dc.___C.Inventory.___C or dc.___C.Inventory
+            local dcC = rawget(dc, "___C") or dc.___C
+            if dcC and (rawget(dcC, "Inventory") or dcC.Inventory) then
+                local invNode = rawget(dcC, "Inventory") or dcC.Inventory
+                rawInventory = rawget(invNode, "___C") or invNode.___C or invNode
             end
         end
     end)
@@ -176,22 +172,15 @@ function AutoEquipModule.GetInventoryUnits()
     local entries = (unitConfig and unitConfig.entries) or {}
 
     for guid, itemNode in pairs(rawInventory) do
-        local itemData = rawget(itemNode, "___X")
-        local itemC = rawget(itemNode, "___C")
+        local itemC = rawget(itemNode, "___C") or itemNode
+        local itemX = rawget(itemNode, "___X")
 
         local rawName = nil
         local rawAttrs = nil
         local rawAmount = 1
         local rawLocked = false
 
-        if type(itemData) == "table" then
-            rawName = rawget(itemData, "name") or rawget(itemData, "entry")
-            rawAttrs = rawget(itemData, "attributes") or {}
-            rawAmount = rawget(itemData, "amount") or 1
-            rawLocked = rawget(itemData, "locked") or false
-        end
-
-        if not rawName and type(itemC) == "table" then
+        if itemC and type(itemC) == "table" then
             local nameNode = rawget(itemC, "name")
             if nameNode and type(nameNode) == "table" then
                 rawName = rawget(nameNode, "___X")
@@ -204,6 +193,17 @@ function AutoEquipModule.GetInventoryUnits()
             if amountNode and type(amountNode) == "table" then
                 rawAmount = rawget(amountNode, "___X") or 1
             end
+            local lockNode = rawget(itemC, "locked")
+            if lockNode and type(lockNode) == "table" then
+                rawLocked = rawget(lockNode, "___X") or false
+            end
+        end
+
+        if not rawName and itemX and type(itemX) == "table" then
+            rawName = rawget(itemX, "name") or rawget(itemX, "entry")
+            rawAttrs = rawAttrs or rawget(itemX, "attributes") or {}
+            rawAmount = rawAmount or rawget(itemX, "amount") or 1
+            rawLocked = rawLocked or rawget(itemX, "locked") or false
         end
 
         if type(rawAttrs) ~= "table" then
@@ -236,25 +236,31 @@ function AutoEquipModule.GetInventoryUnits()
                 end
             end
 
-            if meta then
-                local level = rawAttrs.level or 1
-                local mutation = rawAttrs.mutation or nil
-                local trait = rawAttrs.trait or nil
-                local variant = resolvedVariant or meta.variant or rawAttrs.variant or "Normal"
-
-                table.insert(units, {
-                    GUID = tostring(guid),
-                    Name = rawName,
-                    Meta = meta,
-                    Attributes = rawAttrs,
-                    Level = tonumber(level) or 1,
-                    Mutation = mutation,
-                    Trait = trait,
-                    Variant = variant,
-                    Amount = tonumber(rawAmount) or 1,
-                    Locked = (rawLocked == true)
-                })
+            if not meta then
+                meta = {
+                    rarity = "Common",
+                    chance = 1,
+                    variant = "Normal"
+                }
             end
+
+            local level = rawAttrs.level or 1
+            local mutation = rawAttrs.mutation or nil
+            local trait = rawAttrs.trait or nil
+            local variant = resolvedVariant or meta.variant or rawAttrs.variant or "Normal"
+
+            table.insert(units, {
+                GUID = tostring(guid),
+                Name = rawName,
+                Meta = meta,
+                Attributes = rawAttrs,
+                Level = tonumber(level) or 1,
+                Mutation = mutation,
+                Trait = trait,
+                Variant = variant,
+                Amount = tonumber(rawAmount) or 1,
+                Locked = (rawLocked == true)
+            })
         end
     end
 
