@@ -5,58 +5,95 @@ local StarterGui = game:GetService("StarterGui")
 local DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
 
 print("==================================================")
-print("[GENESIS DIAG] DEEP VALUE INNER DUMP")
+print("[GENESIS DIAG V3] RAWGET METATABLE BYPASS PROBE")
 print("==================================================")
 
-local inv = DataController.___C.Inventory.___C or DataController.___C.Inventory
-local sampleGuid, sampleItem = nil, nil
-for g, it in pairs(inv) do
-    sampleGuid, sampleItem = g, it
-    break
+local rawInv = nil
+local dcC = rawget(DataController, "___C")
+if dcC then
+    local invObj = rawget(dcC, "Inventory")
+    if invObj then
+        rawInv = rawget(invObj, "___C") or invObj
+    end
 end
 
-local function dumpTable(tbl, name, maxDepth, currentDepth)
-    currentDepth = currentDepth or 0
-    if currentDepth > maxDepth then return end
-    local indent = string.rep("  ", currentDepth)
+local sampleGuid = nil
+local sampleItem = nil
+if rawInv and type(rawInv) == "table" then
+    for g, it in pairs(rawInv) do
+        sampleGuid = g
+        sampleItem = it
+        break
+    end
+end
 
-    if type(tbl) ~= "table" then
-        print(string.format("%s%s = (%s) %s", indent, name, type(tbl), tostring(tbl)))
+print("Sample GUID: " .. tostring(sampleGuid))
+
+local function inspectRaw(obj, label, depth)
+    depth = depth or 0
+    local indent = string.rep("  ", depth)
+    if depth > 4 then
         return
     end
 
-    print(string.format("%s%s (table):", indent, name))
-    for k, v in pairs(tbl) do
+    if obj == nil then
+        print(indent .. label .. " = nil")
+        return
+    end
+
+    if type(obj) ~= "table" then
+        print(indent .. label .. " = (" .. type(obj) .. ") " .. tostring(obj))
+        return
+    end
+
+    print(indent .. label .. " (table " .. tostring(obj) .. "):")
+    for k, v in pairs(obj) do
         local kStr = tostring(k)
         if kStr ~= "___P" and kStr ~= "___X" and kStr ~= "_P" and kStr ~= "_X" then
             if type(v) == "table" then
-                if currentDepth < maxDepth then
-                    dumpTable(v, kStr, maxDepth, currentDepth + 1)
-                else
-                    print(string.format("%s  %s = (table) %s", indent, kStr, tostring(v)))
-                end
+                inspectRaw(v, kStr, depth + 1)
             else
-                print(string.format("%s  %s = (%s) %s", indent, kStr, type(v), tostring(v)))
+                print(indent .. "  " .. kStr .. " = (" .. type(v) .. ") " .. tostring(v))
             end
         end
     end
 end
 
-if sampleItem then
-    print("--- [1] sampleItem.name Deep Dump ---")
-    dumpTable(sampleItem.name, "nameObj", 4)
+if sampleItem and type(sampleItem) == "table" then
+    local nameField = rawget(sampleItem, "name") or sampleItem.name
+    print("--- [1] sampleItem.name RAW DUMP ---")
+    inspectRaw(nameField, "nameField", 0)
 
-    print("--- [2] sampleItem.attributes Deep Dump ---")
-    dumpTable(sampleItem.attributes, "attrObj", 4)
+    local attrField = rawget(sampleItem, "attributes") or sampleItem.attributes
+    print("--- [2] sampleItem.attributes RAW DUMP ---")
+    inspectRaw(attrField, "attrField", 0)
 end
 
-print("--- [3] Slots[1].unitId Deep Dump ---")
-local rawSlots = DataController.___C.Slots.___C or DataController.___C.Slots
-for slotId, slotVal in pairs(rawSlots) do
-    if type(slotVal) == "table" and slotVal.unitId then
-        dumpTable(slotVal.unitId, "slot1_unitId", 4)
+local rawSlots = nil
+if dcC then
+    local slotsObj = rawget(dcC, "Slots")
+    if slotsObj then
+        rawSlots = rawget(slotsObj, "___C") or slotsObj
+    end
+end
+
+if rawSlots and type(rawSlots) == "table" then
+    for slotId, slotVal in pairs(rawSlots) do
+        print("--- [3] Slots[" .. tostring(slotId) .. "].unitId RAW DUMP ---")
+        local uidField = nil
+        if type(slotVal) == "table" then
+            uidField = rawget(slotVal, "unitId") or slotVal.unitId
+        end
+        inspectRaw(uidField, "unitIdField", 0)
         break
     end
 end
 
 print("==================================================")
+pcall(function()
+    StarterGui:SetCore("SendNotification", {
+        Title = "GENESIS DIAG V3",
+        Text = "V3 Raw Probe Complete! Check F9.",
+        Duration = 5
+    })
+end)
