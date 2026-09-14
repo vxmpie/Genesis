@@ -15,7 +15,7 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V7] LEAF VALUE RESOLUTION PROBE")
+log("[GENESIS DIAG V8] UPVALUE & ROOT STORE INSPECTION")
 log("==================================================")
 
 local DataController = nil
@@ -33,89 +33,86 @@ if DataController then
 end
 
 if rawInv then
-    local sampleCount = 0
     for guid, itemNode in pairs(rawInv) do
-        sampleCount = sampleCount + 1
-        log("----------------------------------------")
-        log("Sample #" .. sampleCount .. " GUID: " .. tostring(guid))
-        
+        log("Sample GUID: " .. tostring(guid))
         local itemC = rawget(itemNode, "___C")
         if type(itemC) == "table" then
             local nameNode = rawget(itemC, "name")
-            local amountNode = rawget(itemC, "amount")
-            local attrNode = rawget(itemC, "attributes")
-            
-            log("[1] Testing nameNode calls:")
             if nameNode then
-                -- test __call: nameNode()
-                local callOk, callRes = pcall(function() return nameNode() end)
-                log("  nameNode() -> ok:", callOk, "res:", tostring(callRes), "type:", type(callRes))
-                
-                -- test nameNode:get()
-                local getOk, getRes = pcall(function() return nameNode:get() end)
-                log("  nameNode:get() -> ok:", getOk, "res:", tostring(getRes), "type:", type(getRes))
-                
-                -- test raw pairs inside nameNode
-                for k, v in pairs(nameNode) do
-                    log("  nameNode raw key:", tostring(k), "valType:", type(v), "val:", tostring(v))
-                end
-                
-                -- test nameNode.___C contents
-                local nameC = rawget(nameNode, "___C")
-                log("  nameNode.___C type:", type(nameC), "val:", tostring(nameC))
-                if type(nameC) == "table" then
-                    for k, v in pairs(nameC) do
-                        log("    nameC key:", tostring(k), "valType:", type(v), "val:", tostring(v))
-                        if type(v) == "table" then
-                            local subCallOk, subCallRes = pcall(function() return v() end)
-                            log("      v() -> ok:", subCallOk, "res:", tostring(subCallRes))
+                -- [1] Inspect ___X (Root Store / State container)
+                local xNode = rawget(nameNode, "___X")
+                log("[1] nameNode.___X type:", type(xNode), "val:", tostring(xNode))
+                if type(xNode) == "table" then
+                    for xk, xv in pairs(xNode) do
+                        log("  ___X key:", tostring(xk), "valType:", type(xv), "val:", tostring(xv))
+                        if type(xv) == "table" then
+                            local count = 0
+                            for subK, subV in pairs(xv) do
+                                count = count + 1
+                                if count <= 10 then
+                                    log("    subKey:", tostring(subK), "valType:", type(subV), "val:", tostring(subV))
+                                end
+                            end
+                            log("    total sub-items in ___X." .. tostring(xk) .. ":", count)
                         end
                     end
                 end
                 
-                -- test nameNode metatable
+                -- [2] Inspect Metatable functions upvalues
                 local mt = getmetatable(nameNode)
-                if mt and type(mt) == "table" then
-                    for mk, mv in pairs(mt) do
-                        log("  nameNode mt key:", tostring(mk), "valType:", type(mv))
+                if mt and type(mt) == "table" and debug and debug.getupvalues then
+                    if type(mt.__call) == "function" then
+                        log("[2] Inspecting mt.__call upvalues:")
+                        local upvals = debug.getupvalues(mt.__call)
+                        for i, uv in ipairs(upvals) do
+                            log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
+                            if type(uv) == "table" then
+                                for uk, uv2 in pairs(uv) do
+                                    log("    table key:", tostring(uk), "valType:", type(uv2), "val:", tostring(uv2))
+                                end
+                            end
+                        end
                     end
-                end
-            end
-            
-            log("[2] Testing amountNode:")
-            if amountNode then
-                local aCallOk, aCallRes = pcall(function() return amountNode() end)
-                local aGetOk, aGetRes = pcall(function() return amountNode:get() end)
-                log("  amountNode() -> ok:", aCallOk, "res:", tostring(aCallRes))
-                log("  amountNode:get() -> ok:", aGetOk, "res:", tostring(aGetRes))
-            end
-            
-            log("[3] Testing attrNode (attributes):")
-            if attrNode then
-                local attrC = rawget(attrNode, "___C")
-                log("  attrNode.___C type:", type(attrC))
-                if type(attrC) == "table" then
-                    for ak, av in pairs(attrC) do
-                        log("    attr key:", tostring(ak), "valType:", type(av))
-                        if type(av) == "table" then
-                            local aCallOk, aCallRes = pcall(function() return av() end)
-                            local aGetOk, aGetRes = pcall(function() return av:get() end)
-                            log("      attr " .. tostring(ak) .. "() -> ok:", aCallOk, "res:", tostring(aCallRes))
-                            log("      attr " .. tostring(ak) .. ":get() -> ok:", aGetOk, "res:", tostring(aGetRes))
+                    if type(mt.__index) == "function" then
+                        log("[3] Inspecting mt.__index upvalues:")
+                        local upvals = debug.getupvalues(mt.__index)
+                        for i, uv in ipairs(upvals) do
+                            log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
                         end
                     end
                 end
+                
+                -- [3] Inspect get() upvalues if get exists
+                local getFunc = nameNode.get
+                if type(getFunc) == "function" and debug and debug.getupvalues then
+                    log("[4] Inspecting nameNode.get upvalues:")
+                    local upvals = debug.getupvalues(getFunc)
+                    for i, uv in ipairs(upvals) do
+                        log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
+                    end
+                end
             end
         end
-        
-        if sampleCount >= 2 then
-            break
-        end
+        break
+    end
+end
+
+-- [4] Check UnitController or other game controllers for Active/Equipped/Inventory list
+log("----------------------------------------")
+log("[5] Checking UnitController / UnitService:")
+local UnitController = nil
+pcall(function()
+    UnitController = require(ReplicatedStorage.Framework.Features.Unit.UnitController)
+end)
+if UnitController then
+    log("UnitController keys:")
+    for k, v in pairs(UnitController) do
+        log("  UC key:", tostring(k), "type:", type(v))
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V7] COMPLETED")
+log("[GENESIS DIAG V8] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
