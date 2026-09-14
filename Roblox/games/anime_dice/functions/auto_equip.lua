@@ -88,10 +88,10 @@ function AutoEquipModule.GetUnlockedSlotsCount()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local dcC = rawget(dc, "___C") or dc.___C
-            if dcC and (rawget(dcC, "Slots") or dcC.Slots) then
-                local slotsNode = rawget(dcC, "Slots") or dcC.Slots
-                local rawSlots = rawget(slotsNode, "___C") or slotsNode.___C or slotsNode
+            local dcC = rawget(dc, "___C")
+            if dcC and rawget(dcC, "Slots") then
+                local slotsNode = rawget(dcC, "Slots")
+                local rawSlots = rawget(slotsNode, "___C")
                 if rawSlots and type(rawSlots) == "table" then
                     local c = 0
                     for _ in pairs(rawSlots) do
@@ -115,25 +115,31 @@ function AutoEquipModule.GetSlotsState()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local dcC = rawget(dc, "___C") or dc.___C
-            if dcC and (rawget(dcC, "Slots") or dcC.Slots) then
-                local slotsNode = rawget(dcC, "Slots") or dcC.Slots
-                local rawSlots = rawget(slotsNode, "___C") or slotsNode.___C or slotsNode
+            local dcC = rawget(dc, "___C")
+            if dcC and rawget(dcC, "Slots") then
+                local slotsNode = rawget(dcC, "Slots")
+                local rawSlots = rawget(slotsNode, "___C")
                 if rawSlots and type(rawSlots) == "table" then
                     for sIndex, sData in pairs(rawSlots) do
-                        local sC = rawget(sData, "___C") or sData
-                        local sX = rawget(sData, "___X")
                         local uid = nil
-
+                        local sC = rawget(sData, "___C")
                         if sC and type(sC) == "table" then
                             local uidNode = rawget(sC, "unitId")
                             if uidNode and type(uidNode) == "table" then
-                                uid = rawget(uidNode, "___X")
+                                local uidX = rawget(uidNode, "___X")
+                                if type(uidX) == "table" then
+                                    uid = rawget(uidX, "unitId")
+                                elseif type(uidX) == "string" then
+                                    uid = uidX
+                                end
                             end
                         end
 
-                        if not uid and sX and type(sX) == "table" then
-                            uid = rawget(sX, "unitId")
+                        if not uid then
+                            local sX = rawget(sData, "___X")
+                            if type(sX) == "table" then
+                                uid = rawget(sX, "unitId")
+                            end
                         end
 
                         if uid and type(uid) == "string" and uid ~= "" then
@@ -155,10 +161,10 @@ function AutoEquipModule.GetInventoryUnits()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local dcC = rawget(dc, "___C") or dc.___C
-            if dcC and (rawget(dcC, "Inventory") or dcC.Inventory) then
-                local invNode = rawget(dcC, "Inventory") or dcC.Inventory
-                rawInventory = rawget(invNode, "___C") or invNode.___C or invNode
+            local dcC = rawget(dc, "___C")
+            if dcC and rawget(dcC, "Inventory") then
+                local invNode = rawget(dcC, "Inventory")
+                rawInventory = rawget(invNode, "___C")
             end
         end
     end)
@@ -172,38 +178,48 @@ function AutoEquipModule.GetInventoryUnits()
     local entries = (unitConfig and unitConfig.entries) or {}
 
     for guid, itemNode in pairs(rawInventory) do
-        local itemC = rawget(itemNode, "___C") or itemNode
-        local itemX = rawget(itemNode, "___X")
-
         local rawName = nil
-        local rawAttrs = nil
+        local rawAttrs = {}
         local rawAmount = 1
         local rawLocked = false
 
-        if itemC and type(itemC) == "table" then
+        -- [1] Method A: Inspect itemNode.___C.name.___X (Confirmed working via Probe V8)
+        local itemC = rawget(itemNode, "___C")
+        if type(itemC) == "table" then
             local nameNode = rawget(itemC, "name")
-            if nameNode and type(nameNode) == "table" then
-                rawName = rawget(nameNode, "___X")
+            if type(nameNode) == "table" then
+                local xData = rawget(nameNode, "___X")
+                if type(xData) == "table" then
+                    rawName = rawget(xData, "name")
+                    rawAttrs = rawget(xData, "attributes") or rawAttrs
+                    rawAmount = rawget(xData, "amount") or rawAmount
+                    rawLocked = rawget(xData, "locked") or rawLocked
+                elseif type(xData) == "string" then
+                    rawName = xData
+                end
             end
-            local attrNode = rawget(itemC, "attributes")
-            if attrNode and type(attrNode) == "table" then
-                rawAttrs = rawget(attrNode, "___X") or {}
-            end
-            local amountNode = rawget(itemC, "amount")
-            if amountNode and type(amountNode) == "table" then
-                rawAmount = rawget(amountNode, "___X") or 1
-            end
-            local lockNode = rawget(itemC, "locked")
-            if lockNode and type(lockNode) == "table" then
-                rawLocked = rawget(lockNode, "___X") or false
+
+            -- If attributes node has separate ___X
+            if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
+                local attrNode = rawget(itemC, "attributes")
+                if type(attrNode) == "table" then
+                    local attrX = rawget(attrNode, "___X")
+                    if type(attrX) == "table" then
+                        rawAttrs = rawget(attrX, "attributes") or attrX
+                    end
+                end
             end
         end
 
-        if not rawName and itemX and type(itemX) == "table" then
-            rawName = rawget(itemX, "name") or rawget(itemX, "entry")
-            rawAttrs = rawAttrs or rawget(itemX, "attributes") or {}
-            rawAmount = rawAmount or rawget(itemX, "amount") or 1
-            rawLocked = rawLocked or rawget(itemX, "locked") or false
+        -- [2] Method B: Fallback directly to itemNode.___X
+        if not rawName then
+            local itemX = rawget(itemNode, "___X")
+            if type(itemX) == "table" then
+                rawName = rawget(itemX, "name") or rawget(itemX, "entry")
+                rawAttrs = rawget(itemX, "attributes") or rawAttrs
+                rawAmount = rawget(itemX, "amount") or rawAmount
+                rawLocked = rawget(itemX, "locked") or rawLocked
+            end
         end
 
         if type(rawAttrs) ~= "table" then
