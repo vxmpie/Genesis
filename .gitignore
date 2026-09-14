@@ -77,3 +77,17 @@ Thumbs.db
 [Dd]esktop.ini
 .DS_Store
 AGENTS.md
+
+# AI Agent & Assistant Files
+GEMINI.md
+GEMINI.yaml
+.gemini/
+.geminirules
+CLAUDE.md
+.claude/
+AGENTS.md
+.agents/
+.cursorrules
+.cursor/
+.windsurfrules
+.antigravity/

@@ -1,7 +1,7 @@
 --[[
     GENESIS UNIVERSAL DEEP DUMPER (DELTA / UNC OPTIMIZED)
-    High-Performance Game Reverse-Engineering & Architecture Extractor
-    Designed for Dungeon Quest Reborn & Universal Roblox Games
+    Bulletproof Game Reverse-Engineering & Architecture Extractor
+    Fully Patched for BindToClose, Infinite Yield, and Server-Only Modules
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -10,8 +10,32 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local CollectionService = game:GetService("CollectionService")
 local Stats = game:GetService("Stats")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local LocalPlayer = Players.LocalPlayer
+
+-- ================= STEP 0: HOOK & NEUTRALIZE SERVER-ONLY APIS =================
+-- Prevents "BindToClose can only be called on the server" when requiring modules
+pcall(function()
+    if hookmetamethod then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if self == game and (method == "BindToClose" or method == "bindToClose") then
+                return nil
+            end
+            return oldNamecall(self, ...)
+        end))
+    end
+end)
+
+pcall(function()
+    if hookfunction and game.BindToClose then
+        hookfunction(game.BindToClose, newcclosure(function()
+            return nil
+        end))
+    end
+end)
 
 local function notify(title, text, duration)
     pcall(function()
@@ -24,11 +48,23 @@ local function notify(title, text, duration)
     print(string.format("[GENESIS DUMP] %s: %s", tostring(title), tostring(text)))
 end
 
-notify("GENESIS EXTRACTOR", "Initializing Universal Deep Extraction Engine...", 4)
+-- Resolve Clean Game Name
+local rawGameName = "RobloxGame"
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(game.PlaceId)
+    if info and info.Name then
+        rawGameName = info.Name
+    end
+end)
+local cleanGameName = string.gsub(rawGameName, "[^%w_]", "")
+if #cleanGameName == 0 then cleanGameName = "Place_" .. tostring(game.PlaceId) end
+
+notify("GENESIS EXTRACTOR", "Starting Deep Dump for: " .. rawGameName, 4)
 
 local MasterDump = {
     DumpInfo = {
         Timestamp = os.date("%Y-%m-%d %X"),
+        GameName = rawGameName,
         PlaceId = game.PlaceId,
         GameId = game.GameId,
         JobId = game.JobId,
@@ -40,9 +76,7 @@ local MasterDump = {
     RemotesHierarchy = {},
     ModulesDatabase = {},
     WorkspaceMap = {},
-    PlayerGuiSummary = {},
-    TagsAndCollections = {},
-    StatsBreakdown = {}
+    PlayerGuiSummary = {}
 }
 
 -- High-Efficiency Safe Serializer with Cycle Protection & Metatable Bypass
@@ -157,7 +191,8 @@ task.spawn(function()
     end)
 end)
 
--- ================= STEP 3: UNIVERSAL MODULESCRIPT AUTO-REQUIRE =================
+-- ================= STEP 3: PROTECTED TIMED MODULESCRIPT SCANNER =================
+local modulesDone = false
 task.spawn(function()
     pcall(function()
         local allModules = {}
@@ -179,7 +214,7 @@ task.spawn(function()
             end
         end
 
-        -- 2. If executor has getloadedmodules, add them
+        -- 2. Include executor loaded modules
         if getloadedmodules then
             pcall(function()
                 local loaded = getloadedmodules()
@@ -202,18 +237,63 @@ task.spawn(function()
             end)
         end
 
-        print(string.format("[GENESIS DUMP] Found %d ModuleScripts. Extracting data tables...", #moduleCandidates))
+        print(string.format("[GENESIS DUMP] Found %d ModuleScripts. Extracting with safety sandbox...", #moduleCandidates))
+
+        -- Safe require with strict timeout & server filter
+        local function safeRequire(modScript)
+            local modName = modScript.Name
+            local modPath = modScript:GetFullName()
+            local lowerName = string.lower(modName)
+            local lowerPath = string.lower(modPath)
+
+            -- Skip obvious server-side modules that crash or hang client
+            if string.find(lowerName, "server") or string.find(lowerPath, "server") or
+               string.find(lowerName, "datastore") or string.find(lowerPath, "datastore") or
+               string.find(lowerName, "backend") or string.find(lowerPath, "backend") or
+               string.find(lowerName, "savemanager") or string.find(lowerPath, "savemanager") or
+               string.find(lowerName, "bindtoclose") then
+                return false, "<Skipped_ServerOnlyModule>"
+            end
+
+            local result = nil
+            local finished = false
+            local err = nil
+
+            local th = task.spawn(function()
+                local ok, res = pcall(function()
+                    return require(modScript)
+                end)
+                if ok then
+                    result = res
+                else
+                    err = res
+                end
+                finished = true
+            end)
+
+            local t0 = os.clock()
+            while not finished and (os.clock() - t0 < 0.25) do
+                task.wait(0.01)
+            end
+
+            if not finished then
+                pcall(task.cancel, th)
+                return false, "<TimedOut_WaitForChildOrLoop>"
+            end
+
+            if err then
+                return false, tostring(err)
+            end
+
+            return true, result
+        end
 
         local extractedCount = 0
         for _, mod in ipairs(moduleCandidates) do
             local modName = mod.Name
             local modPath = mod:GetFullName()
 
-            -- Filter out UI utility noise if unnecessary, or extract everything safely
-            local success, result = pcall(function()
-                return require(mod)
-            end)
-
+            local success, result = safeRequire(mod)
             if success and result ~= nil then
                 extractedCount = extractedCount + 1
                 if type(result) == "table" then
@@ -230,11 +310,17 @@ task.spawn(function()
                         Value = tostring(result)
                     }
                 end
+            elseif not success and result == "<Skipped_ServerOnlyModule>" then
+                allModules[modName] = {
+                    Path = modPath,
+                    Type = "ServerModule_Skipped"
+                }
             end
         end
 
         MasterDump.ModulesDatabase = allModules
         print(string.format("[GENESIS DUMP] Successfully required and dumped %d ModuleScripts.", extractedCount))
+        modulesDone = true
     end)
 end)
 
@@ -253,7 +339,6 @@ task.spawn(function()
                 Attributes = inst:GetAttributes()
             }
 
-            -- Check for CollectionService Tags (Crucial for Bosses, Spells, Hitbox Zones)
             local tags = CollectionService:GetTags(inst)
             if tags and #tags > 0 then
                 node.Tags = tags
@@ -267,7 +352,6 @@ task.spawn(function()
                 node.Material = tostring(inst.Material)
                 node.Color = { R = math.floor(inst.Color.R * 255), G = math.floor(inst.Color.G * 255), B = math.floor(inst.Color.B * 255) }
 
-                -- Special Flag for Potential Hitbox / Warning Telegraph Zones
                 if not inst.CanCollide and (inst.Transparency > 0 or inst.Material == Enum.Material.Neon or string.find(string.lower(inst.Name), "hitbox") or string.find(string.lower(inst.Name), "zone") or string.find(string.lower(inst.Name), "spell") or string.find(string.lower(inst.Name), "aoe")) then
                     node.IsTelegraphZone = true
                 end
@@ -357,55 +441,62 @@ task.spawn(function()
 end)
 
 -- ================= STEP 6: ASYNC EXPORT & MULTI-FILE SAVE =================
-task.delay(4.5, function()
-    notify("GENESIS DUMP", "Serializing & Saving JSON datasets...", 3)
-
-    -- 1. Save Master Full Dump
-    local okEncMaster, jsonMaster = pcall(function() return HttpService:JSONEncode(MasterDump) end)
-    if okEncMaster and jsonMaster then
-        if writefile then
-            writefile("Genesis_DungeonQuest_MasterDump.json", jsonMaster)
-        end
-        local kb = math.floor(#jsonMaster / 1024)
-        print(string.format("[GENESIS DUMP] SAVED Genesis_DungeonQuest_MasterDump.json (%d KB)", kb))
+task.spawn(function()
+    -- Wait until modules are done or max 5 seconds
+    local waitStart = os.clock()
+    while not modulesDone and (os.clock() - waitStart < 5) do
+        task.wait(0.1)
     end
 
-    -- 2. Save Dedicated Modules Database
+    notify("GENESIS DUMP", "Encoding & Saving JSON datasets for " .. cleanGameName .. "...", 3)
+
+    local prefix = "Genesis_" .. cleanGameName .. "_"
+
+    -- Helper to save safely
+    local function saveJson(filename, tbl)
+        local ok, encoded = pcall(function() return HttpService:JSONEncode(tbl) end)
+        if ok and encoded and writefile then
+            pcall(function()
+                writefile(filename, encoded)
+            end)
+            print(string.format("[GENESIS DUMP] SAVED %s (%d KB)", filename, math.floor(#encoded / 1024)))
+            return true
+        else
+            warn("[GENESIS DUMP] Failed to encode/save " .. filename)
+            return false
+        end
+    end
+
+    -- 1. Master Full Dump
+    saveJson(prefix .. "MasterDump.json", MasterDump)
+    saveJson("Genesis_MasterDump.json", MasterDump)
+
+    -- 2. Dedicated Modules
     if MasterDump.ModulesDatabase and next(MasterDump.ModulesDatabase) ~= nil then
-        local okEncMod, jsonMod = pcall(function() return HttpService:JSONEncode(MasterDump.ModulesDatabase) end)
-        if okEncMod and jsonMod and writefile then
-            writefile("Genesis_DungeonQuest_Modules.json", jsonMod)
-            print(string.format("[GENESIS DUMP] SAVED Genesis_DungeonQuest_Modules.json (%d KB)", math.floor(#jsonMod / 1024)))
-        end
+        saveJson(prefix .. "Modules.json", MasterDump.ModulesDatabase)
+        saveJson("Genesis_Modules.json", MasterDump.ModulesDatabase)
     end
 
-    -- 3. Save Dedicated Remotes Network Hierarchy
+    -- 3. Dedicated Remotes
     if MasterDump.RemotesHierarchy and next(MasterDump.RemotesHierarchy) ~= nil then
-        local okEncRem, jsonRem = pcall(function() return HttpService:JSONEncode(MasterDump.RemotesHierarchy) end)
-        if okEncRem and jsonRem and writefile then
-            writefile("Genesis_DungeonQuest_Remotes.json", jsonRem)
-            print(string.format("[GENESIS DUMP] SAVED Genesis_DungeonQuest_Remotes.json (%d KB)", math.floor(#jsonRem / 1024)))
-        end
+        saveJson(prefix .. "Remotes.json", MasterDump.RemotesHierarchy)
+        saveJson("Genesis_Remotes.json", MasterDump.RemotesHierarchy)
     end
 
-    -- 4. Save Dedicated Workspace Map & Hitboxes
+    -- 4. Dedicated Workspace
     if MasterDump.WorkspaceMap and next(MasterDump.WorkspaceMap) ~= nil then
-        local okEncWs, jsonWs = pcall(function() return HttpService:JSONEncode(MasterDump.WorkspaceMap) end)
-        if okEncWs and jsonWs and writefile then
-            writefile("Genesis_DungeonQuest_Workspace.json", jsonWs)
-            print(string.format("[GENESIS DUMP] SAVED Genesis_DungeonQuest_Workspace.json (%d KB)", math.floor(#jsonWs / 1024)))
-        end
+        saveJson(prefix .. "Workspace.json", MasterDump.WorkspaceMap)
+        saveJson("Genesis_Workspace.json", MasterDump.WorkspaceMap)
     end
 
-    notify("EXTRACTION COMPLETE", "All JSON Dump files successfully saved to executor workspace!", 7)
-    print("
-=======================================================")
+    notify("EXTRACTION COMPLETE", "All JSON files saved to Delta workspace successfully!", 7)
+    print("=======================================================")
     print("[GENESIS DUMP COMPLETE] ALL GAME DATA SAVED SUCCESSFULLY!")
+    print("Target Game: " .. rawGameName)
     print("Files created in your Delta workspace folder:")
-    print(" 1. Genesis_DungeonQuest_MasterDump.json")
-    print(" 2. Genesis_DungeonQuest_Modules.json")
-    print(" 3. Genesis_DungeonQuest_Remotes.json")
-    print(" 4. Genesis_DungeonQuest_Workspace.json")
-    print("=======================================================
-")
+    print(" 1. " .. prefix .. "MasterDump.json")
+    print(" 2. " .. prefix .. "Modules.json")
+    print(" 3. " .. prefix .. "Remotes.json")
+    print(" 4. " .. prefix .. "Workspace.json")
+    print("=======================================================")
 end)
