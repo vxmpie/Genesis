@@ -1,92 +1,62 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
-local LocalPlayer = Players.LocalPlayer
-
-local function notify(title, text)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = title or "DIAG",
-            Text = tostring(text or ""),
-            Duration = 5
-        })
-    end)
-end
-
-print("==================================================")
-print("[GENESIS DIAG] ANIME DICE VALUE EXTRACTION PROBE")
-print("==================================================")
 
 local DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
-local DataClient = require(ReplicatedStorage.Packages.Data.Client)
-local UnitConfig = require(ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitConfig)
-local UnitController = require(ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController)
 
-local sampleItem = nil
-if DataController and DataController.___C and DataController.___C.Inventory then
-    local inv = DataController.___C.Inventory.___C or DataController.___C.Inventory
-    for guid, it in pairs(inv) do
-        sampleItem = it
-        print("Sample GUID:", guid)
+print("==================================================")
+print("[GENESIS DIAG] DEEP VALUE INNER DUMP")
+print("==================================================")
+
+local inv = DataController.___C.Inventory.___C or DataController.___C.Inventory
+local sampleGuid, sampleItem = nil, nil
+for g, it in pairs(inv) do
+    sampleGuid, sampleItem = g, it
+    break
+end
+
+local function dumpTable(tbl, name, maxDepth, currentDepth)
+    currentDepth = currentDepth or 0
+    if currentDepth > maxDepth then return end
+    local indent = string.rep("  ", currentDepth)
+
+    if type(tbl) ~= "table" then
+        print(string.format("%s%s = (%s) %s", indent, name, type(tbl), tostring(tbl)))
+        return
+    end
+
+    print(string.format("%s%s (table):", indent, name))
+    for k, v in pairs(tbl) do
+        local kStr = tostring(k)
+        if kStr ~= "___P" and kStr ~= "___X" and kStr ~= "_P" and kStr ~= "_X" then
+            if type(v) == "table" then
+                if currentDepth < maxDepth then
+                    dumpTable(v, kStr, maxDepth, currentDepth + 1)
+                else
+                    print(string.format("%s  %s = (table) %s", indent, kStr, tostring(v)))
+                end
+            else
+                print(string.format("%s  %s = (%s) %s", indent, kStr, type(v), tostring(v)))
+            end
+        end
+    end
+end
+
+if sampleItem then
+    print("--- [1] sampleItem.name Deep Dump ---")
+    dumpTable(sampleItem.name, "nameObj", 4)
+
+    print("--- [2] sampleItem.attributes Deep Dump ---")
+    dumpTable(sampleItem.attributes, "attrObj", 4)
+end
+
+print("--- [3] Slots[1].unitId Deep Dump ---")
+local rawSlots = DataController.___C.Slots.___C or DataController.___C.Slots
+for slotId, slotVal in pairs(rawSlots) do
+    if type(slotVal) == "table" and slotVal.unitId then
+        dumpTable(slotVal.unitId, "slot1_unitId", 4)
         break
     end
 end
 
-if sampleItem and type(sampleItem) == "table" then
-    print("[1] Inspecting sampleItem.name:")
-    local nameVal = sampleItem.name
-    print("  type(nameVal):", type(nameVal))
-    if type(nameVal) == "table" then
-        for k, v in pairs(nameVal) do
-            print("    nameVal key:", tostring(k), "type:", type(v), "val:", tostring(v))
-        end
-        local ok, gRes = pcall(function() return nameVal:get() end)
-        print("    nameVal:get() -> ok:", ok, "res:", tostring(gRes))
-        if nameVal.___C ~= nil then
-            print("    nameVal.___C -> type:", type(nameVal.___C), "val:", tostring(nameVal.___C))
-        end
-    end
-
-    print("[2] Inspecting sampleItem.attributes:")
-    local attrVal = sampleItem.attributes
-    print("  type(attrVal):", type(attrVal))
-    if type(attrVal) == "table" then
-        for k, v in pairs(attrVal) do
-            print("    attrVal key:", tostring(k), "type:", type(v), "val:", tostring(v))
-        end
-        local ok, gRes = pcall(function() return attrVal:get() end)
-        print("    attrVal:get() -> ok:", ok, "res:", tostring(gRes))
-        if attrVal.___C ~= nil then
-            print("    attrVal.___C -> type:", type(attrVal.___C))
-            if type(attrVal.___C) == "table" then
-                for ak, av in pairs(attrVal.___C) do
-                    print("      attr.___C key:", tostring(ak), "valType:", type(av), "val:", tostring(av))
-                end
-            end
-        end
-    end
-end
-
--- Inspect Slots unitId
-print("[3] Inspecting Slots:")
-local rawSlots = DataController.___C.Slots.___C or DataController.___C.Slots
-for slotId, slotVal in pairs(rawSlots) do
-    print("  Slot", tostring(slotId))
-    if type(slotVal) == "table" then
-        local uidVal = slotVal.unitId
-        print("    unitId type:", type(uidVal))
-        if type(uidVal) == "table" then
-            for k, v in pairs(uidVal) do
-                print("      uidVal key:", tostring(k), "valType:", type(v), "val:", tostring(v))
-            end
-            local ok, gRes = pcall(function() return uidVal:get() end)
-            print("      uidVal:get() -> ok:", ok, "res:", tostring(gRes))
-            if uidVal.___C ~= nil then
-                print("      uidVal.___C -> type:", type(uidVal.___C), "val:", tostring(uidVal.___C))
-            end
-        end
-    end
-    break
-end
-
-notify("GENESIS DIAG", "Extraction probe finished! Check F9.")
+print("==================================================")
