@@ -52,25 +52,35 @@ local function sendNotice(title, text)
     end)
 end
 
-local function unwrap(val, depth)
+local function safeUnwrap(val, depth)
     depth = depth or 0
-    if depth > 8 then return val end
+    if depth > 10 then return val end
     if val == nil then return nil end
     if type(val) ~= "table" then return val end
 
-    if val.___C ~= nil then
-        return unwrap(val.___C, depth + 1)
-    end
-
-    if type(val.get) == "function" then
-        local ok, res = pcall(function() return val:get() end)
-        if ok and res ~= nil and res ~= val then
-            return unwrap(res, depth + 1)
+    local ok, res = pcall(function()
+        if type(val.get) == "function" then
+            local g = val:get()
+            if g ~= nil and g ~= val then
+                return safeUnwrap(g, depth + 1)
+            end
         end
-    end
 
-    if val.Value ~= nil and type(val.Value) ~= "function" then
-        return unwrap(val.Value, depth + 1)
+        local rawC = rawget(val, "___C")
+        if rawC ~= nil and rawC ~= val then
+            return safeUnwrap(rawC, depth + 1)
+        end
+
+        local rawVal = rawget(val, "Value")
+        if rawVal ~= nil and type(rawVal) ~= "function" and rawVal ~= val then
+            return safeUnwrap(rawVal, depth + 1)
+        end
+
+        return nil
+    end)
+
+    if ok and res ~= nil then
+        return res
     end
 
     return val
@@ -109,7 +119,7 @@ function AutoEquipModule.GetUnlockedSlotsCount()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local rawSlots = dc.___C and dc.___C.Slots and dc.___C.Slots.___C
+            local rawSlots = dc.___C and dc.___C.Slots and (dc.___C.Slots.___C or dc.___C.Slots)
             if rawSlots then
                 local c = 0
                 for _ in pairs(rawSlots) do
@@ -135,9 +145,9 @@ function AutoEquipModule.GetSlotsState()
             local rawSlots = dc.___C and dc.___C.Slots and (dc.___C.Slots.___C or dc.___C.Slots)
             if rawSlots and type(rawSlots) == "table" then
                 for sIndex, sData in pairs(rawSlots) do
-                    local unwrappedSlot = unwrap(sData)
+                    local unwrappedSlot = safeUnwrap(sData)
                     if type(unwrappedSlot) == "table" then
-                        local uid = unwrap(unwrappedSlot.unitId or (sData.unitId and sData.unitId.___C))
+                        local uid = safeUnwrap(rawget(unwrappedSlot, "unitId") or unwrappedSlot.unitId)
                         if uid and type(uid) == "string" and uid ~= "" then
                             slotsMap[tostring(sIndex)] = uid
                         end
@@ -189,19 +199,19 @@ function AutoEquipModule.GetInventoryUnits()
     local entries = (unitConfig and unitConfig.entries) or {}
 
     for guid, itemWrapper in pairs(rawInventory) do
-        local item = unwrap(itemWrapper)
+        local item = safeUnwrap(itemWrapper)
         if type(item) == "table" then
-            local rawName = unwrap(item.name or item.entry or item.Name or (itemWrapper.name and itemWrapper.name.___C))
-            local rawAttrs = unwrap(item.attributes or (itemWrapper.attributes and itemWrapper.attributes.___C)) or {}
-            local rawAmount = unwrap(item.amount or (itemWrapper.amount and itemWrapper.amount.___C)) or 1
-            local rawLocked = unwrap(item.locked or (itemWrapper.locked and itemWrapper.locked.___C)) or false
+            local rawName = safeUnwrap(rawget(item, "name") or item.name or rawget(item, "entry") or item.entry or rawget(item, "Name") or item.Name)
+            local rawAttrs = safeUnwrap(rawget(item, "attributes") or item.attributes) or {}
+            local rawAmount = safeUnwrap(rawget(item, "amount") or item.amount) or 1
+            local rawLocked = safeUnwrap(rawget(item, "locked") or item.locked) or false
 
             if type(rawName) == "string" and rawName ~= "" then
                 local meta = entries[rawName]
                 local resolvedVariant = nil
 
                 if not meta and type(rawAttrs) == "table" and rawAttrs.variant then
-                    local vName = tostring(rawAttrs.variant)
+                    local vName = tostring(safeUnwrap(rawAttrs.variant))
                     local comboName = vName .. " " .. rawName
                     if entries[comboName] then
                         meta = entries[comboName]
@@ -210,10 +220,10 @@ function AutoEquipModule.GetInventoryUnits()
                 end
 
                 if meta then
-                    local level = (type(rawAttrs) == "table" and unwrap(rawAttrs.level)) or 1
-                    local mutation = (type(rawAttrs) == "table" and unwrap(rawAttrs.mutation)) or nil
-                    local trait = (type(rawAttrs) == "table" and unwrap(rawAttrs.trait)) or nil
-                    local variant = resolvedVariant or meta.variant or (type(rawAttrs) == "table" and unwrap(rawAttrs.variant)) or "Normal"
+                    local level = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.level)) or 1
+                    local mutation = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.mutation)) or nil
+                    local trait = (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.trait)) or nil
+                    local variant = resolvedVariant or meta.variant or (type(rawAttrs) == "table" and safeUnwrap(rawAttrs.variant)) or "Normal"
 
                     table.insert(units, {
                         GUID = tostring(guid),
@@ -306,19 +316,19 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
     if ucMod then
         local ok1, uc = pcall(require, ucMod)
         if ok1 and uc and uc.Equip then
-            local s1 = pcall(function() uc:Equip(slotStr, unitGuid) end)
+            local s1 = pcall(function() return uc:Equip(slotStr, unitGuid) end)
             if s1 then return true end
             if slotNum then
-                local s2 = pcall(function() uc:Equip(slotNum, unitGuid) end)
+                local s2 = pcall(function() return uc:Equip(slotNum, unitGuid) end)
                 if s2 then return true end
             end
-            local s3 = pcall(function() uc:Equip(unitGuid, slotStr) end)
+            local s3 = pcall(function() return uc:Equip(unitGuid, slotStr) end)
             if s3 then return true end
             if slotNum then
-                local s4 = pcall(function() uc:Equip(unitGuid, slotNum) end)
+                local s4 = pcall(function() return uc:Equip(unitGuid, slotNum) end)
                 if s4 then return true end
             end
-            local s5 = pcall(function() uc:Equip(unitGuid) end)
+            local s5 = pcall(function() return uc:Equip(unitGuid) end)
             if s5 then return true end
         end
     end
