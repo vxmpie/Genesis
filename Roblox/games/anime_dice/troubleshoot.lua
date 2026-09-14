@@ -15,9 +15,43 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V8] UPVALUE & ROOT STORE INSPECTION")
+log("[GENESIS DIAG V9] UNITCONFIG & EXOTIC UNIT INSPECTION")
 log("==================================================")
 
+-- [1] Inspect UnitConfig
+local unitConfigMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit:FindFirstChild("UnitConfig")
+log("UnitConfig Module exists:", unitConfigMod ~= nil)
+if unitConfigMod then
+    local ok, uc = pcall(require, unitConfigMod)
+    log("UnitConfig require ok:", ok, "type:", type(uc))
+    if ok and type(uc) == "table" then
+        log("UnitConfig top keys:")
+        for k, v in pairs(uc) do
+            log("  UC key:", tostring(k), "type:", type(v))
+        end
+        local entries = uc.entries or uc
+        log("Checking entries inside UnitConfig. Total entries count or keys...")
+        local count = 0
+        local matched = {}
+        for name, data in pairs(entries) do
+            count = count + 1
+            local strName = tostring(name)
+            local lowerName = string.lower(strName)
+            if string.find(lowerName, "okarin") or string.find(lowerName, "gon") or string.find(lowerName, "killer") or string.find(lowerName, "vegata") or string.find(lowerName, "levy") or string.find(lowerName, "hasoka") then
+                local r = (type(data) == "table" and (data.rarity or data.Rarity)) or "nil"
+                local ch = (type(data) == "table" and (data.chance or data.Chance or data.odds or data.Odds)) or "nil"
+                table.insert(matched, string.format("Matched entry: '%s' -> Rarity: %s | Chance: %s", strName, tostring(r), tostring(ch)))
+            end
+        end
+        log("Total entries in UnitConfig:", count)
+        log("Matched relevant units in UnitConfig:")
+        for _, m in ipairs(matched) do
+            log("  " .. m)
+        end
+    end
+end
+
+-- [2] Inspect Player's Inventory items matching Okarin, Gon, Killer
 local DataController = nil
 pcall(function()
     DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
@@ -33,96 +67,54 @@ if DataController then
 end
 
 if rawInv then
+    log("----------------------------------------")
+    log("Scanning player rawInventory for Okarin, Gon, Killer...")
+    local foundCount = 0
     for guid, itemNode in pairs(rawInv) do
-        log("Sample GUID: " .. tostring(guid))
+        local rawName = nil
+        local rawAttrs = {}
         local itemC = rawget(itemNode, "___C")
         if type(itemC) == "table" then
             local nameNode = rawget(itemC, "name")
-            if nameNode then
-                -- [1] Inspect ___X (Root Store / State container)
-                local xNode = rawget(nameNode, "___X")
-                log("[1] nameNode.___X type:", type(xNode), "val:", tostring(xNode))
-                if type(xNode) == "table" then
-                    for xk, xv in pairs(xNode) do
-                        log("  ___X key:", tostring(xk), "valType:", type(xv), "val:", tostring(xv))
-                        if type(xv) == "table" then
-                            local count = 0
-                            for subK, subV in pairs(xv) do
-                                count = count + 1
-                                if count <= 10 then
-                                    log("    subKey:", tostring(subK), "valType:", type(subV), "val:", tostring(subV))
-                                end
-                            end
-                            log("    total sub-items in ___X." .. tostring(xk) .. ":", count)
-                        end
-                    end
-                end
-                
-                -- [2] Inspect Metatable functions upvalues
-                local mt = getmetatable(nameNode)
-                if mt and type(mt) == "table" and debug and debug.getupvalues then
-                    if type(mt.__call) == "function" then
-                        log("[2] Inspecting mt.__call upvalues:")
-                        local upvals = debug.getupvalues(mt.__call)
-                        for i, uv in ipairs(upvals) do
-                            log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
-                            if type(uv) == "table" then
-                                for uk, uv2 in pairs(uv) do
-                                    log("    table key:", tostring(uk), "valType:", type(uv2), "val:", tostring(uv2))
-                                end
-                            end
-                        end
-                    end
-                    if type(mt.__index) == "function" then
-                        log("[3] Inspecting mt.__index upvalues:")
-                        local upvals = debug.getupvalues(mt.__index)
-                        for i, uv in ipairs(upvals) do
-                            log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
-                        end
-                    end
-                end
-                
-                -- [3] Inspect get() upvalues if get exists
-                local getFunc = nameNode.get
-                if type(getFunc) == "function" and debug and debug.getupvalues then
-                    log("[4] Inspecting nameNode.get upvalues:")
-                    local upvals = debug.getupvalues(getFunc)
-                    for i, uv in ipairs(upvals) do
-                        log("  upval #" .. i .. ":", tostring(uv), "type:", type(uv))
-                    end
+            if type(nameNode) == "table" then
+                local xData = rawget(nameNode, "___X")
+                if type(xData) == "table" then
+                    rawName = rawget(xData, "name")
+                    rawAttrs = rawget(xData, "attributes") or rawAttrs
+                elseif type(xData) == "string" then
+                    rawName = xData
                 end
             end
         end
-        break
-    end
-end
+        if not rawName then
+            local itemX = rawget(itemNode, "___X")
+            if type(itemX) == "table" then
+                rawName = rawget(itemX, "name")
+                rawAttrs = rawget(itemX, "attributes") or rawAttrs
+            end
+        end
 
--- [4] Check UnitController or other game controllers for Active/Equipped/Inventory list
-log("----------------------------------------")
-log("[5] Checking UnitController / UnitService:")
-local UnitController = nil
-pcall(function()
-    UnitController = require(ReplicatedStorage.Framework.Features.Unit.UnitController)
-end)
-if UnitController then
-    log("UnitController keys:")
-    for k, v in pairs(UnitController) do
-        log("  UC key:", tostring(k), "type:", type(v))
+        if rawName then
+            local lName = string.lower(tostring(rawName))
+            if string.find(lName, "okarin") or string.find(lName, "gon") or string.find(lName, "killer") then
+                foundCount = foundCount + 1
+                local attrStr = HttpService:JSONEncode(rawAttrs or {})
+                log(string.format("Found Bag Unit #%d [GUID %s]: name='%s', attrs=%s", foundCount, tostring(guid), tostring(rawName), attrStr))
+            end
+        end
     end
+    log("Total target units found in bag:", foundCount)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V8] COMPLETED")
+log("[GENESIS DIAG V9] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_" .. tostring(os.time()) .. ".txt"
-
+local fileName = "Genesis_AnimeDice_Diag_V9.txt"
 if writefile then
-    local ok, err = pcall(function()
+    pcall(function()
         writefile(fileName, fullOutput)
     end)
-    if ok then
-        print("[GENESIS] Successfully saved log file to: " .. fileName)
-    end
+    print("[GENESIS] Log saved to: " .. fileName)
 end
