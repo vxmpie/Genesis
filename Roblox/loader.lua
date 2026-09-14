@@ -35,6 +35,8 @@ local BASE = "https://raw.githubusercontent.com/vxmpie/Genesis/main/Roblox/games
 local games = {
     [9640154] = "storage_hunter/main.lua",
     [98800969324557] = "storage_hunter/main.lua",
+    [113290951185459] = "anime_dice/main.lua",
+    [10708913337] = "anime_dice/main.lua",
 }
 
 local file = games[game.PlaceId] or games[game.GameId] or games[game.CreatorId]
