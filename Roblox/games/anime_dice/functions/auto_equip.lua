@@ -255,14 +255,25 @@ function AutoEquipModule.GetInventoryUnits()
                     meta = entries[rawName]
                 end
 
+                local variantStr = resolvedVariant or rawAttrs.variant or "Normal"
+                local mutationStr = rawAttrs.mutation or "Normal"
+                local displayName = rawName
+                if variantStr ~= "Normal" and not string.find(displayName, variantStr) then
+                    displayName = variantStr .. " " .. displayName
+                end
+                if mutationStr ~= "Normal" and not string.find(displayName, mutationStr) then
+                    displayName = mutationStr .. " " .. displayName
+                end
+
                 if meta then
                     table.insert(units, {
                         GUID = tostring(guid),
-                        Name = rawName,
+                        Name = displayName,
+                        BaseName = rawName,
                         Meta = meta,
                         Attributes = rawAttrs,
-                        Variant = resolvedVariant or rawAttrs.variant or "Normal",
-                        Mutation = rawAttrs.mutation or "Normal",
+                        Variant = variantStr,
+                        Mutation = mutationStr,
                         Level = tonumber(rawAttrs.level) or 1,
                         Locked = (rawLocked == true),
                         Amount = tonumber(rawAmount) or 1,
@@ -278,11 +289,12 @@ function AutoEquipModule.GetInventoryUnits()
                     end
                     table.insert(units, {
                         GUID = tostring(guid),
-                        Name = rawName,
+                        Name = displayName,
+                        BaseName = rawName,
                         Meta = { rarity = fallbackRarity, chance = 1 },
                         Attributes = rawAttrs,
-                        Variant = rawAttrs.variant or "Normal",
-                        Mutation = rawAttrs.mutation or "Normal",
+                        Variant = variantStr,
+                        Mutation = mutationStr,
                         Level = tonumber(rawAttrs.level) or 1,
                         Locked = (rawLocked == true),
                         Amount = tonumber(rawAmount) or 1,
@@ -313,6 +325,13 @@ function AutoEquipModule.CalculateUnitOdds(unit)
     end
 
     local finalOdds = baseOdds
+
+    -- Apply Mutation Multipliers (e.g. Silver = x10, Gold = x100, Rainbow = x1,000,000)
+    local mutation = unit.Mutation or (unit.Attributes and unit.Attributes.mutation)
+    if mutation and MUTATION_CHANCES[mutation] then
+        finalOdds = finalOdds * MUTATION_CHANCES[mutation]
+    end
+
     local formatted = AutoEquipModule.FormatOdds(finalOdds)
     return finalOdds, formatted
 end
