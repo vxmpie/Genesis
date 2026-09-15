@@ -15,13 +15,13 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V20] PLACE & PICKUP CYCLE PROBE")
+log("[GENESIS DIAG V21] PROMPT POSITION & DISTANCE PROBE")
 log("==================================================")
 
 local lp = Players.LocalPlayer
-local pg = lp:FindFirstChild("PlayerGui")
+local char = lp.Character or lp.CharacterAdded:Wait()
+local hrp = char:FindFirstChild("HumanoidRootPart")
 
--- [1] Find My Plot
 local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
 local myPlot = nil
 if pcMod then
@@ -31,58 +31,52 @@ if pcMod then
     end
 end
 
--- [2] Check Slot 1 prompt state right now
-if myPlot then
+if myPlot and hrp then
     local slotsFolder = myPlot:FindFirstChild("Slots")
-    local slot1 = slotsFolder and slotsFolder:FindFirstChild("1")
-    local prompt1 = slot1 and slot1:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt1 then
-        log(string.format("Slot 1 Prompt Current: Action='%s' Key='%s' Enabled=%s", prompt1.ActionText, tostring(prompt1.KeyboardKeyCode), tostring(prompt1.Enabled)))
-        
-        -- If prompt is 'Place', test fireproximityprompt to see if it places held unit!
-        if prompt1.ActionText == "Place" and fireproximityprompt then
-            log("Prompt is 'Place'! Firing fireproximityprompt to place held unit...")
-            fireproximityprompt(prompt1)
-            task.wait(0.5)
-            log(string.format("Slot 1 Prompt after Place fire: Action='%s' Enabled=%s", prompt1.ActionText, tostring(prompt1.Enabled)))
+    if slotsFolder then
+        for i = 1, 5 do
+            local sModel = slotsFolder:FindFirstChild(tostring(i))
+            if sModel then
+                local prompt = sModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then
+                    local pPart = prompt.Parent:IsA("BasePart") and prompt.Parent or prompt.Parent.Parent
+                    local pPos = (pPart and pPart:IsA("BasePart")) and pPart.Position or Vector3.zero
+                    local dist = (hrp.Position - pPos).Magnitude
+                    log(string.format("Slot [%d]: Action='%s' Enabled=%s MaxDist=%.1f CurrentDist=%.1f RequiresLineOfSight=%s",
+                        i, prompt.ActionText, tostring(prompt.Enabled), prompt.MaxActivationDistance, dist, tostring(prompt.RequiresLineOfSight)))
+                end
+            end
         end
     end
 end
 
--- [3] Check PutBack button action
-local putBack = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
-if putBack then
-    log("PutBack Button Visible:", tostring(putBack.Visible))
-end
-
--- [4] Inspect Backpack EntryTemplate click behavior
+-- Inspect Backpack EntryTemplate attributes and click connections
+local pg = lp:FindFirstChild("PlayerGui")
 local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
 if bpMenu then
     local scroller = bpMenu:FindFirstChild("ScrollingFrame", true)
     if scroller then
-        local entries = {}
-        for _, c in ipairs(scroller:GetChildren()) do
-            if c:IsA("ImageButton") or c:IsA("TextButton") then
-                table.insert(entries, c)
+        local firstEntry = scroller:FindFirstChildWhichIsA("ImageButton")
+        if firstEntry then
+            log("First Entry in Backpack:", firstEntry.Name)
+            for ak, av in pairs(firstEntry:GetAttributes()) do
+                log(string.format("  Entry Attr: %s = %s", ak, tostring(av)))
             end
-        end
-        log(string.format("Backpack scroller has %d entries", #entries))
-        if #entries > 0 then
-            local firstEntry = entries[1]
-            local topLbl = firstEntry:FindFirstChild("TopLabel", true)
-            local botLbl = firstEntry:FindFirstChild("BottomLabel", true)
-            log(string.format("First Entry: Name='%s' Top='%s' Bot='%s' Class='%s'", 
-                firstEntry.Name, topLbl and topLbl.Text or "n/a", botLbl and botLbl.Text or "n/a", firstEntry.ClassName))
+            if getconnections then
+                local actConns = getconnections(firstEntry.Activated)
+                local clickConns = getconnections(firstEntry.MouseButton1Click)
+                log("  Activated conns:", #actConns, "MouseButton1Click conns:", #clickConns)
+            end
         end
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V20] COMPLETED")
+log("[GENESIS DIAG V21] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V20.txt"
+local fileName = "Genesis_AnimeDice_Diag_V21.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
