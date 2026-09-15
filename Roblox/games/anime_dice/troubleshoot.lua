@@ -28,7 +28,11 @@ local putBackObj = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("
 if putBackObj then
     log("PutBack Object found:", putBackObj:GetFullName())
     for _, desc in ipairs(putBackObj:GetDescendants()) do
-        log(string.format("  child: %s (%s) visible=%s", desc.Name, desc.ClassName, tostring(rawget(desc, "Visible"))))
+        local vis = "n/a"
+        if desc:IsA("GuiObject") then
+            vis = tostring(desc.Visible)
+        end
+        log(string.format("  child: %s (%s) visible=%s", desc.Name, desc.ClassName, vis))
     end
 else
     log("PutBack Object not found in HUD!")
@@ -40,14 +44,13 @@ log("[2] Inspecting Backpack Menu:")
 local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
 if bpMenu then
     log("Backpack Menu found:", bpMenu:GetFullName())
-    -- Look for Equip / Hold / Place buttons
     local foundBtns = 0
     for _, desc in ipairs(bpMenu:GetDescendants()) do
         if desc:IsA("TextButton") or desc:IsA("ImageButton") then
             foundBtns = foundBtns + 1
             if foundBtns <= 15 then
                 local txt = desc:IsA("TextButton") and desc.Text or desc.Name
-                log(string.format("  btn #%d: Name='%s' | Text='%s' | Path=%s", foundBtns, desc.Name, txt, desc.Name))
+                log(string.format("  btn #%d: Name='%s' | Text='%s'", foundBtns, desc.Name, txt))
             end
         end
     end
@@ -56,35 +59,35 @@ end
 
 -- [3] Find player's specific Plot in Workspace.Plots.Claimed
 log("----------------------------------------")
-log("[3] Inspecting Claimed Plots:")
+log("[3] Inspecting Claimed Plots & Podiums:")
 local claimed = Workspace:FindFirstChild("Plots") and Workspace.Plots:FindFirstChild("Claimed")
 if claimed then
     log("Claimed plots count:", #claimed:GetChildren())
     for _, plot in ipairs(claimed:GetChildren()) do
-        local owner = plot:FindFirstChild("Owner") or plot:GetAttribute("Owner") or plot:FindFirstChild("Player")
-        local ownerName = "nil"
-        if owner then
-            ownerName = tostring(owner:IsA("ValueBase") and owner.Value or owner)
+        local isMyPlot = false
+        local owner = plot:FindFirstChild("Owner") or plot:FindFirstChild("Player")
+        if owner and owner:IsA("ValueBase") and tostring(owner.Value) == lp.Name then
+            isMyPlot = true
+        elseif tostring(plot:GetAttribute("Owner")) == lp.Name or tostring(plot:GetAttribute("OwnerId")) == tostring(lp.UserId) then
+            isMyPlot = true
+        elseif string.find(plot.Name, lp.Name) then
+            isMyPlot = true
         end
-        log(string.format("  Plot: %s | Owner: %s", plot.Name, ownerName))
+
+        log(string.format("  Plot: %s | isMyPlot: %s", plot.Name, tostring(isMyPlot)))
         
-        -- Check if this plot belongs to us or inspect its children (Podiums/Slots)
-        local slotsFolder = plot:FindFirstChild("Slots") or plot:FindFirstChild("Podiums") or plot
-        local podiumCount = 0
-        for _, ch in ipairs(slotsFolder:GetChildren()) do
-            if string.find(ch.Name, "Slot") or string.find(ch.Name, "Podium") or tonumber(ch.Name) then
-                podiumCount = podiumCount + 1
-                if podiumCount <= 5 then
-                    log(string.format("    Slot/Podium: %s (%s)", ch.Name, ch.ClassName))
-                    for _, sub in ipairs(ch:GetDescendants()) do
-                        if sub:IsA("ProximityPrompt") then
-                            log(string.format("      ProximityPrompt in %s: Action='%s', Object='%s', HoldDuration=%.2f", ch.Name, sub.ActionText, sub.ObjectText, sub.HoldDuration))
-                        end
-                    end
-                end
+        -- Inspect Podiums/Slots in plot
+        local count = 0
+        for _, desc in ipairs(plot:GetDescendants()) do
+            if desc:IsA("ProximityPrompt") then
+                count = count + 1
+                local parentPart = desc.Parent
+                local partName = parentPart and parentPart.Name or "nil"
+                local modelName = parentPart and parentPart.Parent and parentPart.Parent.Name or "nil"
+                log(string.format("    Prompt #%d: Action='%s' Object='%s' in Model='%s' Part='%s'", count, desc.ActionText, desc.ObjectText, modelName, partName))
             end
         end
-        log("    Total podiums/slots in this plot:", podiumCount)
+        log(string.format("    Total ProximityPrompts in Plot '%s': %d", plot.Name, count))
     end
 end
 
