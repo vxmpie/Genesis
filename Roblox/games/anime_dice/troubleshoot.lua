@@ -16,87 +16,108 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V14] UI INTERACTION & PLOT PROBE")
+log("[GENESIS DIAG V15] PLOT OWNER, PODIUM & PUTBACK PROBE")
 log("==================================================")
 
 local lp = Players.LocalPlayer
 local pg = lp:FindFirstChild("PlayerGui")
 
--- [1] Inspect PutBack Frame in HUD
-log("[1] Inspecting PutBack UI:")
-local putBackObj = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
-if putBackObj then
-    log("PutBack Object found:", putBackObj:GetFullName())
-    for _, desc in ipairs(putBackObj:GetDescendants()) do
-        local vis = "n/a"
-        if desc:IsA("GuiObject") then
-            vis = tostring(desc.Visible)
-        end
-        log(string.format("  child: %s (%s) visible=%s", desc.Name, desc.ClassName, vis))
-    end
-else
-    log("PutBack Object not found in HUD!")
-end
-
--- [2] Inspect Backpack UI in Menus
-log("----------------------------------------")
-log("[2] Inspecting Backpack Menu:")
-local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
-if bpMenu then
-    log("Backpack Menu found:", bpMenu:GetFullName())
-    local foundBtns = 0
-    for _, desc in ipairs(bpMenu:GetDescendants()) do
-        if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-            foundBtns = foundBtns + 1
-            if foundBtns <= 15 then
-                local txt = desc:IsA("TextButton") and desc.Text or desc.Name
-                log(string.format("  btn #%d: Name='%s' | Text='%s'", foundBtns, desc.Name, txt))
-            end
-        end
-    end
-    log("Total buttons in Backpack Menu:", foundBtns)
-end
-
--- [3] Find player's specific Plot in Workspace.Plots.Claimed
-log("----------------------------------------")
-log("[3] Inspecting Claimed Plots & Podiums:")
+-- [1] Inspect Claimed Plot Attributes & Children
+log("[1] Inspecting Plot Properties & Attributes:")
 local claimed = Workspace:FindFirstChild("Plots") and Workspace.Plots:FindFirstChild("Claimed")
 if claimed then
-    log("Claimed plots count:", #claimed:GetChildren())
     for _, plot in ipairs(claimed:GetChildren()) do
-        local isMyPlot = false
-        local owner = plot:FindFirstChild("Owner") or plot:FindFirstChild("Player")
-        if owner and owner:IsA("ValueBase") and tostring(owner.Value) == lp.Name then
-            isMyPlot = true
-        elseif tostring(plot:GetAttribute("Owner")) == lp.Name or tostring(plot:GetAttribute("OwnerId")) == tostring(lp.UserId) then
-            isMyPlot = true
-        elseif string.find(plot.Name, lp.Name) then
-            isMyPlot = true
+        log("Plot Name:", plot.Name, "ClassName:", plot.ClassName)
+        local attrs = plot:GetAttributes()
+        for k, v in pairs(attrs) do
+            log(string.format("  Attr: %s = %s (%s)", tostring(k), tostring(v), typeof(v)))
         end
-
-        log(string.format("  Plot: %s | isMyPlot: %s", plot.Name, tostring(isMyPlot)))
-        
-        -- Inspect Podiums/Slots in plot
-        local count = 0
-        for _, desc in ipairs(plot:GetDescendants()) do
-            if desc:IsA("ProximityPrompt") then
-                count = count + 1
-                local parentPart = desc.Parent
-                local partName = parentPart and parentPart.Name or "nil"
-                local modelName = parentPart and parentPart.Parent and parentPart.Parent.Name or "nil"
-                log(string.format("    Prompt #%d: Action='%s' Object='%s' in Model='%s' Part='%s'", count, desc.ActionText, desc.ObjectText, modelName, partName))
+        for _, ch in ipairs(plot:GetChildren()) do
+            if not ch:IsA("Model") or ch.Name ~= "Spawn" then
+                log("  Direct child:", ch.Name, "ClassName:", ch.ClassName)
             end
         end
-        log(string.format("    Total ProximityPrompts in Plot '%s': %d", plot.Name, count))
+    end
+end
+
+-- [2] Inspect PlotController or PlotService
+log("----------------------------------------")
+log("[2] Inspecting Framework Plot Controllers:")
+local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features:FindFirstChild("Plot")
+if pcMod then
+    for _, desc in ipairs(pcMod:GetDescendants()) do
+        if desc:IsA("ModuleScript") then
+            log("  Plot Module:", desc.Name, desc:GetFullName())
+            local ok, m = pcall(require, desc)
+            if ok and type(m) == "table" then
+                local keys = {}
+                for k, v in pairs(m) do
+                    table.insert(keys, tostring(k) .. ":" .. typeof(v))
+                end
+                log("    keys:", table.concat(keys, ", "))
+            end
+        end
+    end
+end
+
+-- [3] Inspect PutBack connections / click handlers
+log("----------------------------------------")
+log("[3] Inspecting PutBack UI Object:")
+local putBackObj = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+if putBackObj then
+    log("PutBack Object ClassName:", putBackObj.ClassName)
+    for _, d in ipairs(putBackObj:GetDescendants()) do
+        if d:IsA("GuiButton") or d:IsA("TextButton") or d:IsA("ImageButton") then
+            log("  Clickable in PutBack:", d.Name, d.ClassName, "Visible:", d.Visible)
+        end
+    end
+end
+
+-- [4] Inspect ProximityPrompt properties on Podiums
+log("----------------------------------------")
+log("[4] Inspecting Podiums ProximityPrompts:")
+if claimed then
+    for _, plot in ipairs(claimed:GetChildren()) do
+        local pCount = 0
+        for _, desc in ipairs(plot:GetDescendants()) do
+            if desc:IsA("ProximityPrompt") and pCount < 5 then
+                pCount = pCount + 1
+                log(string.format("  Prompt #%d: Action='%s' Object='%s' Key='%s' HoldDuration=%.2f Enabled=%s", 
+                    pCount, desc.ActionText, desc.ObjectText, tostring(desc.KeyboardKeyCode), desc.HoldDuration, tostring(desc.Enabled)))
+                log("    Parent:", desc.Parent:GetFullName())
+                -- Check if parent model has slot number or attributes
+                local mParent = desc.Parent.Parent
+                if mParent then
+                    log("    Model Parent:", mParent.Name)
+                    for ak, av in pairs(mParent:GetAttributes()) do
+                        log("      Model Attr:", ak, "=", tostring(av))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- [5] Inspect Backpack EntryTemplate button click
+log("----------------------------------------")
+log("[5] Inspecting Backpack EntryTemplate:")
+local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+if bpMenu then
+    local entry = bpMenu:FindFirstChild("EntryTemplate", true)
+    if entry then
+        log("  Found EntryTemplate:", entry:GetFullName(), "ClassName:", entry.ClassName)
+        for _, c in ipairs(entry:GetChildren()) do
+            log("    child:", c.Name, c.ClassName)
+        end
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V14] COMPLETED")
+log("[GENESIS DIAG V15] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V14.txt"
+local fileName = "Genesis_AnimeDice_Diag_V15.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
