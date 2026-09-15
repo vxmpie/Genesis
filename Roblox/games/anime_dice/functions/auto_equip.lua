@@ -110,7 +110,6 @@ function AutoEquipModule.GetUnlockedSlotsCount()
                     local num = tonumber(sObj.Name)
                     if num then
                         local prompt = sObj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        -- Unlocked podiums have Action='Pick Up' or Action='Place'
                         if prompt and (prompt.ActionText == "Pick Up" or prompt.ActionText == "Place") then
                             if num > count then
                                 count = num
@@ -176,128 +175,120 @@ function AutoEquipModule.GetInventoryUnits()
     local units = {}
     local rawInventory = nil
 
-    for _ = 1, 5 do
-        pcall(function()
-            local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
-            if dcMod then
-                local dc = require(dcMod)
-                local dcC = rawget(dc, "___C")
-                if dcC and rawget(dcC, "Inventory") then
-                    local invNode = rawget(dcC, "Inventory")
-                    rawInventory = rawget(invNode, "___C")
-                end
+    -- [1] Always fetch the latest live table directly from DataController
+    pcall(function()
+        local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
+        if dcMod then
+            local dc = require(dcMod)
+            local dcC = rawget(dc, "___C")
+            if dcC and rawget(dcC, "Inventory") then
+                local invNode = rawget(dcC, "Inventory")
+                rawInventory = rawget(invNode, "___C")
             end
-        end)
-        if rawInventory and type(rawInventory) == "table" and next(rawInventory) ~= nil then
-            break
         end
-        task.wait(0.2)
-    end
-
-    if not rawInventory or type(rawInventory) ~= "table" then
-        warn("[GENESIS AUTO EQUIP] Warning: Could not locate Inventory data table!")
-        return units
-    end
+    end)
 
     local unitConfig = AutoEquipModule.GetUnitConfig()
     local entries = (unitConfig and unitConfig.entries) or {}
 
-    for guid, itemNode in pairs(rawInventory) do
-        local rawName = nil
-        local rawAttrs = {}
-        local rawAmount = 1
-        local rawLocked = false
+    if rawInventory and type(rawInventory) == "table" then
+        for guid, itemNode in pairs(rawInventory) do
+            local rawName = nil
+            local rawAttrs = {}
+            local rawAmount = 1
+            local rawLocked = false
 
-        local itemC = rawget(itemNode, "___C")
-        if type(itemC) == "table" then
-            local nameNode = rawget(itemC, "name")
-            if type(nameNode) == "table" then
-                local xData = rawget(nameNode, "___X")
-                if type(xData) == "table" then
-                    rawName = rawget(xData, "name")
-                    rawAttrs = rawget(xData, "attributes") or rawAttrs
-                    rawAmount = rawget(xData, "amount") or rawAmount
-                    rawLocked = rawget(xData, "locked") or rawLocked
-                elseif type(xData) == "string" then
-                    rawName = xData
+            local itemC = rawget(itemNode, "___C")
+            if type(itemC) == "table" then
+                local nameNode = rawget(itemC, "name")
+                if type(nameNode) == "table" then
+                    local xData = rawget(nameNode, "___X")
+                    if type(xData) == "table" then
+                        rawName = rawget(xData, "name")
+                        rawAttrs = rawget(xData, "attributes") or rawAttrs
+                        rawAmount = rawget(xData, "amount") or rawAmount
+                        rawLocked = rawget(xData, "locked") or rawLocked
+                    elseif type(xData) == "string" then
+                        rawName = xData
+                    end
                 end
-            end
 
-            if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
-                local attrNode = rawget(itemC, "attributes")
-                if type(attrNode) == "table" then
-                    local attrX = rawget(attrNode, "___X")
-                    if type(attrX) == "table" then
-                        rawAttrs = rawget(attrX, "attributes") or attrX
+                if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
+                    local attrNode = rawget(itemC, "attributes")
+                    if type(attrNode) == "table" then
+                        local attrX = rawget(attrNode, "___X")
+                        if type(attrX) == "table" then
+                            rawAttrs = rawget(attrX, "attributes") or attrX
+                        end
                     end
                 end
             end
-        end
 
-        if not rawName then
-            local itemX = rawget(itemNode, "___X")
-            if type(itemX) == "table" then
-                rawName = rawget(itemX, "name") or rawget(itemX, "entry")
-                rawAttrs = rawget(itemX, "attributes") or rawAttrs
-                rawAmount = rawget(itemX, "amount") or rawAmount
-                rawLocked = rawget(itemX, "locked") or rawLocked
-            end
-        end
-
-        if type(rawAttrs) ~= "table" then
-            rawAttrs = {}
-        end
-
-        if type(rawName) == "string" and rawName ~= "" then
-            local meta = nil
-            local resolvedVariant = nil
-
-            if rawAttrs.variant and tostring(rawAttrs.variant) ~= "" then
-                local vName = tostring(rawAttrs.variant)
-                local comboName = vName .. " " .. rawName
-                if entries[comboName] then
-                    meta = entries[comboName]
-                    resolvedVariant = vName
+            if not rawName then
+                local itemX = rawget(itemNode, "___X")
+                if type(itemX) == "table" then
+                    rawName = rawget(itemX, "name") or rawget(itemX, "entry")
+                    rawAttrs = rawget(itemX, "attributes") or rawAttrs
+                    rawAmount = rawget(itemX, "amount") or rawAmount
+                    rawLocked = rawget(itemX, "locked") or rawLocked
                 end
             end
 
-            if not meta then
-                meta = entries[rawName]
+            if type(rawAttrs) ~= "table" then
+                rawAttrs = {}
             end
 
-            if meta then
-                table.insert(units, {
-                    GUID = tostring(guid),
-                    Name = rawName,
-                    Meta = meta,
-                    Attributes = rawAttrs,
-                    Variant = resolvedVariant or rawAttrs.variant or "Normal",
-                    Mutation = rawAttrs.mutation or "Normal",
-                    Level = tonumber(rawAttrs.level) or 1,
-                    Locked = (rawLocked == true),
-                    Amount = tonumber(rawAmount) or 1,
-                    Rarity = meta.rarity or "Common"
-                })
-            else
-                local fallbackRarity = "Common"
-                for rName, _ in pairs(RARITY_RANKS) do
-                    if string.find(rawName, rName) then
-                        fallbackRarity = rName
-                        break
+            if type(rawName) == "string" and rawName ~= "" then
+                local meta = nil
+                local resolvedVariant = nil
+
+                if rawAttrs.variant and tostring(rawAttrs.variant) ~= "" then
+                    local vName = tostring(rawAttrs.variant)
+                    local comboName = vName .. " " .. rawName
+                    if entries[comboName] then
+                        meta = entries[comboName]
+                        resolvedVariant = vName
                     end
                 end
-                table.insert(units, {
-                    GUID = tostring(guid),
-                    Name = rawName,
-                    Meta = { rarity = fallbackRarity, chance = 1 },
-                    Attributes = rawAttrs,
-                    Variant = rawAttrs.variant or "Normal",
-                    Mutation = rawAttrs.mutation or "Normal",
-                    Level = tonumber(rawAttrs.level) or 1,
-                    Locked = (rawLocked == true),
-                    Amount = tonumber(rawAmount) or 1,
-                    Rarity = fallbackRarity
-                })
+
+                if not meta then
+                    meta = entries[rawName]
+                end
+
+                if meta then
+                    table.insert(units, {
+                        GUID = tostring(guid),
+                        Name = rawName,
+                        Meta = meta,
+                        Attributes = rawAttrs,
+                        Variant = resolvedVariant or rawAttrs.variant or "Normal",
+                        Mutation = rawAttrs.mutation or "Normal",
+                        Level = tonumber(rawAttrs.level) or 1,
+                        Locked = (rawLocked == true),
+                        Amount = tonumber(rawAmount) or 1,
+                        Rarity = meta.rarity or "Common"
+                    })
+                else
+                    local fallbackRarity = "Common"
+                    for rName, _ in pairs(RARITY_RANKS) do
+                        if string.find(rawName, rName) then
+                            fallbackRarity = rName
+                            break
+                        end
+                    end
+                    table.insert(units, {
+                        GUID = tostring(guid),
+                        Name = rawName,
+                        Meta = { rarity = fallbackRarity, chance = 1 },
+                        Attributes = rawAttrs,
+                        Variant = rawAttrs.variant or "Normal",
+                        Mutation = rawAttrs.mutation or "Normal",
+                        Level = tonumber(rawAttrs.level) or 1,
+                        Locked = (rawLocked == true),
+                        Amount = tonumber(rawAmount) or 1,
+                        Rarity = fallbackRarity
+                    })
+                end
             end
         end
     end
@@ -508,7 +499,7 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
         holdUnitFromBackpack(unitGuid)
         task.wait(0.3)
 
-        -- Place held unit onto podium (whether it was empty or previously occupied)
+        -- Place held unit onto podium
         if prompt.ActionText == "Place" then
             if not prompt.Enabled then
                 prompt.Enabled = true
@@ -609,16 +600,13 @@ function AutoEquipModule.ProcessAutoEquip(State)
             local targetSlotStr = tostring(i)
             local currentUnitInSlot = currentSlots[targetSlotStr]
 
-            -- Check if slot is empty or has a different unit placed
             local prompt = getSlotPrompt(i)
             local slotNeedsPlacement = false
 
             if prompt then
                 if prompt.ActionText == "Place" then
-                    -- Slot is empty! Must place unit!
                     slotNeedsPlacement = true
                 elseif prompt.ActionText == "Pick Up" and currentUnitInSlot ~= targetUnit.GUID then
-                    -- Slot has wrong unit! Must overwrite!
                     slotNeedsPlacement = true
                 end
             else
