@@ -180,10 +180,15 @@ function AutoEquipModule.GetInventoryUnits()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local dcC = rawget(dc, "___C")
-            if dcC and rawget(dcC, "Inventory") then
-                local invNode = rawget(dcC, "Inventory")
-                rawInventory = rawget(invNode, "___C")
+            if dc.___X and type(dc.___X.Inventory) == "table" then
+                rawInventory = dc.___X.Inventory
+            end
+            if not rawInventory then
+                local dcC = rawget(dc, "___C")
+                if dcC and rawget(dcC, "Inventory") then
+                    local invNode = rawget(dcC, "Inventory")
+                    rawInventory = rawget(invNode, "___C")
+                end
             end
         end
     end)
@@ -446,7 +451,8 @@ end
 -- --- Backpack Unit Selection & Placing ---
 local function holdUnitFromBackpack(targetGuid)
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+    local root = pg and pg:FindFirstChild("Root")
+    local bpMenu = root and root:FindFirstChild("Menus") and root.Menus:FindFirstChild("Backpack")
     local scroller = bpMenu and bpMenu:FindFirstChild("ScrollingFrame", true)
 
     if scroller and firesignal and getconnections then
@@ -456,10 +462,17 @@ local function holdUnitFromBackpack(targetGuid)
                 for _, conn in ipairs(conns) do
                     if conn.Function and debug and debug.getupvalues then
                         local ups = debug.getupvalues(conn.Function)
+                        -- Up #4 is the exact unit GUID string
+                        if ups[4] and tostring(ups[4]) == tostring(targetGuid) then
+                            firesignal(btn.Activated)
+                            task.wait(0.2)
+                            return true
+                        end
+                        -- General fallback check across all upvalues
                         for _, uval in ipairs(ups) do
                             if tostring(uval) == tostring(targetGuid) then
                                 firesignal(btn.Activated)
-                                task.wait(0.15)
+                                task.wait(0.2)
                                 return true
                             end
                         end
@@ -474,7 +487,7 @@ local function holdUnitFromBackpack(targetGuid)
         local firstBtn = scroller:FindFirstChildWhichIsA("ImageButton")
         if firstBtn then
             firesignal(firstBtn.Activated)
-            task.wait(0.15)
+            task.wait(0.2)
             return true
         end
     end
