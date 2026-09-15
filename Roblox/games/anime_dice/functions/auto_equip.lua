@@ -180,10 +180,9 @@ function AutoEquipModule.GetInventoryUnits()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            if dc.___X and type(dc.___X.Inventory) == "table" then
+            if dc.___X and type(dc.___X.Inventory) == "table" and next(dc.___X.Inventory) ~= nil then
                 rawInventory = dc.___X.Inventory
-            end
-            if not rawInventory then
+            else
                 local dcC = rawget(dc, "___C")
                 if dcC and rawget(dcC, "Inventory") then
                     local invNode = rawget(dcC, "Inventory")
@@ -203,39 +202,53 @@ function AutoEquipModule.GetInventoryUnits()
             local rawAmount = 1
             local rawLocked = false
 
-            local itemC = rawget(itemNode, "___C")
-            if type(itemC) == "table" then
-                local nameNode = rawget(itemC, "name")
-                if type(nameNode) == "table" then
-                    local xData = rawget(nameNode, "___X")
-                    if type(xData) == "table" then
-                        rawName = rawget(xData, "name")
-                        rawAttrs = rawget(xData, "attributes") or rawAttrs
-                        rawAmount = rawget(xData, "amount") or rawAmount
-                        rawLocked = rawget(xData, "locked") or rawLocked
-                    elseif type(xData) == "string" then
-                        rawName = xData
-                    end
+            if type(itemNode) == "table" then
+                -- [A] Direct unproxied fields (as in dc.___X.Inventory: itemNode.name, itemNode.attributes)
+                if itemNode.name and type(itemNode.name) == "string" then
+                    rawName = itemNode.name
+                    rawAttrs = itemNode.attributes or rawAttrs
+                    rawAmount = itemNode.amount or rawAmount
+                    rawLocked = (itemNode.locked == true)
                 end
 
-                if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
-                    local attrNode = rawget(itemC, "attributes")
-                    if type(attrNode) == "table" then
-                        local attrX = rawget(attrNode, "___X")
-                        if type(attrX) == "table" then
-                            rawAttrs = rawget(attrX, "attributes") or attrX
+                -- [B] Proxy node unwrapping (as in dc.___C.Inventory.___C)
+                if not rawName then
+                    local itemC = rawget(itemNode, "___C")
+                    if type(itemC) == "table" then
+                        local nameNode = rawget(itemC, "name")
+                        if type(nameNode) == "table" then
+                            local xData = rawget(nameNode, "___X")
+                            if type(xData) == "table" then
+                                rawName = rawget(xData, "name")
+                                rawAttrs = rawget(xData, "attributes") or rawAttrs
+                                rawAmount = rawget(xData, "amount") or rawAmount
+                                rawLocked = rawget(xData, "locked") or rawLocked
+                            elseif type(xData) == "string" then
+                                rawName = xData
+                            end
+                        end
+
+                        if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
+                            local attrNode = rawget(itemC, "attributes")
+                            if type(attrNode) == "table" then
+                                local attrX = rawget(attrNode, "___X")
+                                if type(attrX) == "table" then
+                                    rawAttrs = rawget(attrX, "attributes") or attrX
+                                end
+                            end
                         end
                     end
                 end
-            end
 
-            if not rawName then
-                local itemX = rawget(itemNode, "___X")
-                if type(itemX) == "table" then
-                    rawName = rawget(itemX, "name") or rawget(itemX, "entry")
-                    rawAttrs = rawget(itemX, "attributes") or rawAttrs
-                    rawAmount = rawget(itemX, "amount") or rawAmount
-                    rawLocked = rawget(itemX, "locked") or rawLocked
+                -- [C] item.___X fallback
+                if not rawName then
+                    local itemX = rawget(itemNode, "___X")
+                    if type(itemX) == "table" then
+                        rawName = rawget(itemX, "name") or rawget(itemX, "entry")
+                        rawAttrs = rawget(itemX, "attributes") or rawAttrs
+                        rawAmount = rawget(itemX, "amount") or rawAmount
+                        rawLocked = rawget(itemX, "locked") or rawLocked
+                    end
                 end
             end
 
