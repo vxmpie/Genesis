@@ -604,15 +604,27 @@ function UI.Create(Config, AutoEquipModule)
             return
         end
 
+        local ranks = AutoEquipModule.RARITY_RANKS or {}
         local ranked = {}
         for _, u in ipairs(units) do
             local oNum, oFmt = AutoEquipModule.CalculateUnitOdds(u)
             u.Odds = oNum
             u.FormattedOdds = oFmt
-            u.Rarity = (u.Meta and u.Meta.rarity) or "Common"
+            u.Rarity = u.Rarity or (u.Meta and u.Meta.rarity) or "Common"
+            u.RarityRank = ranks[u.Rarity] or 1
             table.insert(ranked, u)
         end
-        table.sort(ranked, function(a, b) return a.Odds > b.Odds end)
+        table.sort(ranked, function(a, b)
+            local rankA = a.RarityRank or 1
+            local rankB = b.RarityRank or 1
+            if rankA ~= rankB then
+                return rankA > rankB
+            end
+            if a.Odds ~= b.Odds then
+                return a.Odds > b.Odds
+            end
+            return (a.Level or 1) > (b.Level or 1)
+        end)
 
         local lines = { string.format("Scanned %d total units! Top 7 Rarest:", #ranked) }
         for i = 1, math.min(7, #ranked) do

@@ -23,6 +23,7 @@ local RARITY_RANKS = {
     ["Secret2"] = 11,
     ["Exclusive"] = 12
 }
+AutoEquipModule.RARITY_RANKS = RARITY_RANKS
 
 local VARIANT_MULTIPLIERS = {
     ["Titanic"] = 100,
@@ -238,10 +239,11 @@ function AutoEquipModule.GetInventoryUnits()
         end
 
         if type(rawName) == "string" and rawName ~= "" then
-            local meta = entries[rawName]
+            local meta = nil
             local resolvedVariant = nil
 
-            if not meta and rawAttrs.variant then
+            -- [1] Check combo if variant in attributes
+            if rawAttrs.variant and tostring(rawAttrs.variant) ~= "" then
                 local vName = tostring(rawAttrs.variant)
                 local comboName = vName .. " " .. rawName
                 if entries[comboName] then
@@ -250,6 +252,18 @@ function AutoEquipModule.GetInventoryUnits()
                 end
             end
 
+            -- [2] Check rawName directly in entries
+            if not meta and entries[rawName] then
+                meta = entries[rawName]
+                for prefix, _ in pairs(VARIANT_MULTIPLIERS) do
+                    if string.sub(rawName, 1, #prefix + 1) == prefix .. " " then
+                        resolvedVariant = prefix
+                        break
+                    end
+                end
+            end
+
+            -- [3] Strip prefix to match baseName
             if not meta then
                 for prefix, _ in pairs(VARIANT_MULTIPLIERS) do
                     if string.sub(rawName, 1, #prefix + 1) == prefix .. " " then
@@ -271,15 +285,30 @@ function AutoEquipModule.GetInventoryUnits()
                 }
             end
 
+            -- Resolve numeric chance from function or number
+            local numChance = 1
+            local rawCh = meta.chance or meta.Chance or meta.odds or meta.Odds
+            if type(rawCh) == "function" then
+                local ok, res = pcall(rawCh)
+                if ok and type(res) == "number" then
+                    numChance = res
+                end
+            elseif type(rawCh) == "number" then
+                numChance = rawCh
+            end
+
             local level = rawAttrs.level or 1
             local mutation = rawAttrs.mutation or nil
             local trait = rawAttrs.trait or nil
             local variant = resolvedVariant or meta.variant or rawAttrs.variant or "Normal"
 
+            local resolvedRarity = meta.rarity or meta.Rarity or "Common"
             table.insert(units, {
                 GUID = tostring(guid),
                 Name = rawName,
                 Meta = meta,
+                Rarity = resolvedRarity,
+                BaseOdds = numChance,
                 Attributes = rawAttrs,
                 Level = tonumber(level) or 1,
                 Mutation = mutation,
@@ -302,28 +331,23 @@ function AutoEquipModule.CalculateUnitOdds(unitObj)
     local meta = unitObj.Meta
     if not meta then return 0, "1 in 1" end
 
-    local baseOdds = 1
-    if meta.chance and type(meta.chance) == "number" and meta.chance > 0 then
-        baseOdds = math.floor(1 / meta.chance)
-    elseif meta.odds and type(meta.odds) == "number" then
-        baseOdds = meta.odds
-    elseif meta.rarity then
-        local rank = RARITY_RANKS[meta.rarity] or 1
+    local baseOdds = unitObj.BaseOdds or 1
+    if baseOdds <= 1 then
+        local rawCh = meta.chance or meta.Chance or meta.odds or meta.Odds
+        if type(rawCh) == "function" then
+            local ok, res = pcall(rawCh)
+            if ok and type(res) == "number" then baseOdds = res end
+        elseif type(rawCh) == "number" then
+            baseOdds = rawCh
+        end
+    end
+
+    if baseOdds <= 1 and unitObj.Rarity then
+        local rank = RARITY_RANKS[unitObj.Rarity] or 1
         baseOdds = math.floor(10 ^ rank)
     end
 
     local finalOdds = baseOdds
-
-    local variantMult = VARIANT_MULTIPLIERS[unitObj.Variant] or 1
-    finalOdds = finalOdds * variantMult
-
-    if unitObj.Mutation and MUTATION_CHANCES[unitObj.Mutation] then
-        finalOdds = finalOdds * MUTATION_CHANCES[unitObj.Mutation]
-    end
-
-    local lvlBonus = (unitObj.Level or 1) * 0.05
-    finalOdds = finalOdds * (1 + lvlBonus)
-
     local formatted = AutoEquipModule.FormatOdds(finalOdds)
     return finalOdds, formatted
 end
@@ -443,21 +467,27 @@ function AutoEquipModule.ProcessAutoEquip(State)
         local rankedUnits = {}
 
         for _, u in ipairs(units) do
-            local rName = (u.Meta and u.Meta.rarity) or "Common"
+            local rName = u.Rarity or (u.Meta and u.Meta.rarity) or "Common"
             if rarityAllowed[rName] ~= false then
                 local oddsNum, oddsFmt = AutoEquipModule.CalculateUnitOdds(u)
                 u.Odds = oddsNum
                 u.FormattedOdds = oddsFmt
                 u.Rarity = rName
+                u.RarityRank = RARITY_RANKS[rName] or 1
                 table.insert(rankedUnits, u)
             end
         end
 
         table.sort(rankedUnits, function(a, b)
-            if a.Odds == b.Odds then
-                return (a.Level or 1) > (b.Level or 1)
+            local rankA = a.RarityRank or 1
+            local rankB = b.RarityRank or 1
+            if rankA ~= rankB then
+                return rankA > rankB
             end
-            return a.Odds > b.Odds
+            if a.Odds ~= b.Odds then
+                return a.Odds > b.Odds
+            end
+            return (a.Level or 1) > (b.Level or 1)
         end)
 
         lastScanResults = rankedUnits
