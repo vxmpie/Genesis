@@ -132,35 +132,48 @@ function AutoEquipModule.GetSlotsState()
         local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
         if dcMod then
             local dc = require(dcMod)
-            local dcC = rawget(dc, "___C")
-            if dcC and rawget(dcC, "Slots") then
-                local slotsNode = rawget(dcC, "Slots")
-                local rawSlots = rawget(slotsNode, "___C")
-                if rawSlots and type(rawSlots) == "table" then
-                    for sIndex, sData in pairs(rawSlots) do
-                        local uid = nil
-                        local sC = rawget(sData, "___C")
-                        if sC and type(sC) == "table" then
-                            local uidNode = rawget(sC, "unitId")
-                            if uidNode and type(uidNode) == "table" then
-                                local uidX = rawget(uidNode, "___X")
-                                if type(uidX) == "table" then
-                                    uid = rawget(uidX, "unitId")
-                                elseif type(uidX) == "string" then
-                                    uid = uidX
+            -- Priority 1: dc.___X.Slots (unproxied live slot data)
+            if dc.___X and type(dc.___X.Slots) == "table" then
+                for sIndex, sData in pairs(dc.___X.Slots) do
+                    if type(sData) == "table" and sData.unitId then
+                        slotsMap[tostring(sIndex)] = tostring(sData.unitId)
+                    elseif type(sData) == "string" and sData ~= "" then
+                        slotsMap[tostring(sIndex)] = tostring(sData)
+                    end
+                end
+            end
+            -- Priority 2: dc.___C.Slots proxy node
+            if next(slotsMap) == nil then
+                local dcC = rawget(dc, "___C")
+                if dcC and rawget(dcC, "Slots") then
+                    local slotsNode = rawget(dcC, "Slots")
+                    local rawSlots = rawget(slotsNode, "___C")
+                    if rawSlots and type(rawSlots) == "table" then
+                        for sIndex, sData in pairs(rawSlots) do
+                            local uid = nil
+                            local sC = rawget(sData, "___C")
+                            if sC and type(sC) == "table" then
+                                local uidNode = rawget(sC, "unitId")
+                                if uidNode and type(uidNode) == "table" then
+                                    local uidX = rawget(uidNode, "___X")
+                                    if type(uidX) == "table" then
+                                        uid = rawget(uidX, "unitId")
+                                    elseif type(uidX) == "string" then
+                                        uid = uidX
+                                    end
                                 end
                             end
-                        end
 
-                        if not uid then
-                            local sX = rawget(sData, "___X")
-                            if sX and type(sX) == "table" then
-                                uid = rawget(sX, "unitId")
+                            if not uid then
+                                local sX = rawget(sData, "___X")
+                                if sX and type(sX) == "table" then
+                                    uid = rawget(sX, "unitId")
+                                end
                             end
-                        end
 
-                        if uid and tostring(uid) ~= "" then
-                            slotsMap[tostring(sIndex)] = tostring(uid)
+                            if uid and tostring(uid) ~= "" then
+                                slotsMap[tostring(sIndex)] = tostring(uid)
+                            end
                         end
                     end
                 end
@@ -463,7 +476,25 @@ end
 
 -- --- Backpack Unit Selection & Placing ---
 local function holdUnitFromBackpack(targetGuid)
+    -- [1] Direct Framework UnitController:Equip (Instant, holds unit directly into player hand)
+    pcall(function()
+        local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
+        if ucMod then
+            local uc = require(ucMod)
+            if uc and uc.Equip then
+                uc:Equip(tostring(targetGuid))
+            end
+        end
+    end)
+    task.wait(0.2)
+
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local putBack = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+    if putBack and putBack.Visible then
+        return true
+    end
+
+    -- [2] Fallback: UI Button search in Backpack ScrollingFrame
     local root = pg and pg:FindFirstChild("Root")
     local bpMenu = root and root:FindFirstChild("Menus") and root.Menus:FindFirstChild("Backpack")
     local scroller = bpMenu and bpMenu:FindFirstChild("ScrollingFrame", true)
@@ -475,13 +506,11 @@ local function holdUnitFromBackpack(targetGuid)
                 for _, conn in ipairs(conns) do
                     if conn.Function and debug and debug.getupvalues then
                         local ups = debug.getupvalues(conn.Function)
-                        -- Up #4 is the exact unit GUID string
                         if ups[4] and tostring(ups[4]) == tostring(targetGuid) then
                             firesignal(btn.Activated)
                             task.wait(0.2)
                             return true
                         end
-                        -- General fallback check across all upvalues
                         for _, uval in ipairs(ups) do
                             if tostring(uval) == tostring(targetGuid) then
                                 firesignal(btn.Activated)
@@ -495,7 +524,7 @@ local function holdUnitFromBackpack(targetGuid)
         end
     end
 
-    -- Fallback: click first button if specific GUID not found in scroller
+    -- [3] Fallback: Click first button
     if scroller and firesignal then
         local firstBtn = scroller:FindFirstChildWhichIsA("ImageButton")
         if firstBtn then
@@ -508,7 +537,7 @@ local function holdUnitFromBackpack(targetGuid)
     return false
 end
 
-function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
+function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid, restorePos)
     local slotNum = tonumber(slotId)
     if not slotNum then return false end
 
@@ -519,7 +548,7 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
         if ok and res == true then return true end
     end
 
-    -- [2] Physical Prompt & Backpack Equip execution
+    -- [2] Physical Prompt & Framework Unit Placement execution
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local prompt = getSlotPrompt(slotNum)
@@ -530,9 +559,9 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
 
         local origCF = hrp.CFrame
         hrp.CFrame = CFrame.new(pPos + Vector3.new(0, 3, 3))
-        task.wait(0.2)
+        task.wait(0.25)
 
-        -- If slot currently has another unit, pick it up and put back first
+        -- If slot currently has another unit, pick it up and put back into backpack first
         if prompt.ActionText == "Pick Up" and prompt.Enabled then
             fireproximityprompt(prompt)
             task.wait(0.25)
@@ -540,7 +569,7 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
             task.wait(0.2)
         end
 
-        -- Hold desired unit from backpack
+        -- Hold desired unit from backpack into hand directly
         holdUnitFromBackpack(unitGuid)
         task.wait(0.3)
 
@@ -550,10 +579,12 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
                 prompt.Enabled = true
             end
             fireproximityprompt(prompt)
-            task.wait(0.35)
+            task.wait(0.4)
         end
 
-        hrp.CFrame = origCF
+        if restorePos ~= false then
+            hrp.CFrame = origCF
+        end
         return (prompt.ActionText == "Pick Up")
     end
 
@@ -630,6 +661,9 @@ function AutoEquipModule.ProcessAutoEquip(State)
         end
 
         local currentSlots = AutoEquipModule.GetSlotsState()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local origCharacterCF = hrp and hrp.CFrame
 
         print(string.format("[GENESIS AUTO EQUIP] Found %d total units. Equipping top %d to plot...", #rankedUnits, slotsToFill))
         for i = 1, math.min(5, slotsToFill) do
@@ -661,20 +695,27 @@ function AutoEquipModule.ProcessAutoEquip(State)
             end
 
             if slotNeedsPlacement then
-                local ok = AutoEquipModule.EquipUnitToSlot(i, targetUnit.GUID)
+                local ok = AutoEquipModule.EquipUnitToSlot(i, targetUnit.GUID, false)
                 if ok then
                     equippedCount = equippedCount + 1
                     currentSlots[targetSlotStr] = targetUnit.GUID
                 end
-                task.wait(0.15)
+                task.wait(0.2)
             end
 
-            if i <= 3 then
-                table.insert(topReport, string.format("#%d %s (%s)", i, targetUnit.Name, targetUnit.FormattedOdds))
+            if i <= 5 then
+                table.insert(topReport, string.format("#%d %s", i, targetUnit.Name))
             end
         end
 
-        local summaryMsg = string.format("Placed %d units! %s", equippedCount, table.concat(topReport, ", "))
+        -- Teleport back to initial spot once all slots are placed
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and origCharacterCF then
+            hrp.CFrame = origCharacterCF
+        end
+
+        local summaryMsg = string.format("Placed %d units! Top: %s", equippedCount, table.concat(topReport, ", "))
         sendNotice("Auto Equip Complete", summaryMsg)
     end)
 
