@@ -100,26 +100,31 @@ function AutoEquipModule.GetMyPlot()
 end
 
 function AutoEquipModule.GetUnlockedSlotsCount()
-    local ok, count = pcall(function()
+    local count = 0
+    pcall(function()
         local myPlot = AutoEquipModule.GetMyPlot()
         if myPlot then
             local sFolder = myPlot:FindFirstChild("Slots")
             if sFolder then
-                local c = 0
-                for _, ch in ipairs(sFolder:GetChildren()) do
-                    if tonumber(ch.Name) then
-                        c = c + 1
+                for _, sObj in ipairs(sFolder:GetChildren()) do
+                    local num = tonumber(sObj.Name)
+                    if num then
+                        local prompt = sObj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        -- Unlocked podiums have Action='Pick Up' or Action='Place'
+                        if prompt and (prompt.ActionText == "Pick Up" or prompt.ActionText == "Place") then
+                            if num > count then
+                                count = num
+                            end
+                        end
                     end
                 end
-                if c > 0 then return c end
             end
         end
-        return nil
     end)
-    if ok and count and count > 0 then
+    if count and count > 0 then
         return count
     end
-    return 14
+    return 12
 end
 
 function AutoEquipModule.GetSlotsState()
@@ -340,6 +345,7 @@ local function clickPutBackButton()
         if firesignal then
             pcall(function() firesignal(putBack.Activated) end)
             pcall(function() firesignal(putBack.MouseButton1Click) end)
+            pcall(function() firesignal(putBack.MouseButton1Up) end)
         end
         return true
     end
@@ -390,7 +396,6 @@ function AutoEquipModule.PickAll()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not myPlot or not hrp or not fireproximityprompt then
-        -- Remote fallback
         for s = 1, 14 do
             AutoEquipModule.UnequipSlot(s)
             task.wait(0.04)
@@ -444,6 +449,7 @@ local function holdUnitFromBackpack(targetGuid)
                         for _, uval in ipairs(ups) do
                             if tostring(uval) == tostring(targetGuid) then
                                 firesignal(btn.Activated)
+                                task.wait(0.15)
                                 return true
                             end
                         end
@@ -453,11 +459,12 @@ local function holdUnitFromBackpack(targetGuid)
         end
     end
 
-    -- Fallback: click first button if specific GUID not matched
+    -- Fallback: click first button if specific GUID not found in scroller
     if scroller and firesignal then
         local firstBtn = scroller:FindFirstChildWhichIsA("ImageButton")
         if firstBtn then
             firesignal(firstBtn.Activated)
+            task.wait(0.15)
             return true
         end
     end
@@ -501,10 +508,13 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
         holdUnitFromBackpack(unitGuid)
         task.wait(0.3)
 
-        -- Place held unit onto podium
-        if prompt.ActionText == "Place" and prompt.Enabled then
+        -- Place held unit onto podium (whether it was empty or previously occupied)
+        if prompt.ActionText == "Place" then
+            if not prompt.Enabled then
+                prompt.Enabled = true
+            end
             fireproximityprompt(prompt)
-            task.wait(0.3)
+            task.wait(0.35)
         end
 
         hrp.CFrame = origCF
@@ -599,13 +609,31 @@ function AutoEquipModule.ProcessAutoEquip(State)
             local targetSlotStr = tostring(i)
             local currentUnitInSlot = currentSlots[targetSlotStr]
 
-            if currentUnitInSlot ~= targetUnit.GUID then
+            -- Check if slot is empty or has a different unit placed
+            local prompt = getSlotPrompt(i)
+            local slotNeedsPlacement = false
+
+            if prompt then
+                if prompt.ActionText == "Place" then
+                    -- Slot is empty! Must place unit!
+                    slotNeedsPlacement = true
+                elseif prompt.ActionText == "Pick Up" and currentUnitInSlot ~= targetUnit.GUID then
+                    -- Slot has wrong unit! Must overwrite!
+                    slotNeedsPlacement = true
+                end
+            else
+                if currentUnitInSlot ~= targetUnit.GUID then
+                    slotNeedsPlacement = true
+                end
+            end
+
+            if slotNeedsPlacement then
                 local ok = AutoEquipModule.EquipUnitToSlot(i, targetUnit.GUID)
                 if ok then
                     equippedCount = equippedCount + 1
                     currentSlots[targetSlotStr] = targetUnit.GUID
                 end
-                task.wait(0.1)
+                task.wait(0.15)
             end
 
             if i <= 3 then
@@ -613,7 +641,7 @@ function AutoEquipModule.ProcessAutoEquip(State)
             end
         end
 
-        local summaryMsg = string.format("Placed %d top units! %s", equippedCount, table.concat(topReport, ", "))
+        local summaryMsg = string.format("Placed %d units! %s", equippedCount, table.concat(topReport, ", "))
         sendNotice("Auto Equip Complete", summaryMsg)
     end)
 
