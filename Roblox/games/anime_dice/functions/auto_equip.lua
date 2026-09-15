@@ -476,13 +476,19 @@ end
 
 -- --- Backpack Unit Selection & Placing ---
 local function holdUnitFromBackpack(targetGuid)
-    -- [1] Direct Framework UnitController:Equip (Instant, holds unit directly into player hand)
+    local guidStr = tostring(targetGuid)
+    local isHeld = false
+
+    -- [1] Direct Framework uc.Equip (WITHOUT self - proven by Diag V36 to return res: true and notify server)
     pcall(function()
         local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
         if ucMod then
             local uc = require(ucMod)
             if uc and uc.Equip then
-                uc:Equip(tostring(targetGuid))
+                local res = uc.Equip(guidStr)
+                if res == true then
+                    isHeld = true
+                end
             end
         end
     end)
@@ -490,7 +496,7 @@ local function holdUnitFromBackpack(targetGuid)
 
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
     local putBack = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
-    if putBack and putBack.Visible then
+    if isHeld or (putBack and putBack.Visible) then
         return true
     end
 
@@ -506,13 +512,13 @@ local function holdUnitFromBackpack(targetGuid)
                 for _, conn in ipairs(conns) do
                     if conn.Function and debug and debug.getupvalues then
                         local ups = debug.getupvalues(conn.Function)
-                        if ups[4] and tostring(ups[4]) == tostring(targetGuid) then
+                        if ups[4] and tostring(ups[4]) == guidStr then
                             firesignal(btn.Activated)
                             task.wait(0.2)
                             return true
                         end
                         for _, uval in ipairs(ups) do
-                            if tostring(uval) == tostring(targetGuid) then
+                            if tostring(uval) == guidStr then
                                 firesignal(btn.Activated)
                                 task.wait(0.2)
                                 return true
@@ -574,13 +580,11 @@ function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid, restorePos)
         task.wait(0.3)
 
         -- Place held unit onto podium
-        if prompt.ActionText == "Place" then
-            if not prompt.Enabled then
-                prompt.Enabled = true
-            end
-            fireproximityprompt(prompt)
-            task.wait(0.4)
+        if not prompt.Enabled then
+            prompt.Enabled = true
         end
+        fireproximityprompt(prompt)
+        task.wait(0.4)
 
         if restorePos ~= false then
             hrp.CFrame = origCF
