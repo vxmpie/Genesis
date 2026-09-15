@@ -15,71 +15,66 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V27] DATA REFRESH & INVENTORY PROBE")
+log("[GENESIS DIAG V28] LIVE INVENTORY INSPECTION")
 log("==================================================")
 
 local lp = Players.LocalPlayer
 
--- [1] Inspect DataController methods
+-- Check DataController reference
 local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
 if dcMod then
-    local ok, dc = pcall(require, dcMod)
-    if ok and dc then
-        log("DataController methods & keys:")
-        for k, v in pairs(dc) do
-            log(string.format("  dc.%s = %s (%s)", tostring(k), tostring(v), typeof(v)))
-        end
-        if dc.Get then
-            local gOk, gRes = pcall(function() return dc:Get() end)
-            log("dc:Get() ->", gOk, typeof(gRes))
-        end
-        if dc.GetData then
-            local gOk2, gRes2 = pcall(function() return dc:GetData() end)
-            log("dc:GetData() ->", gOk2, typeof(gRes2))
+    local dc = require(dcMod)
+    log("dc table pointer:", tostring(dc))
+    local dcC = rawget(dc, "___C")
+    local invNode = dcC and rawget(dcC, "Inventory")
+    local rawInv = invNode and rawget(invNode, "___C")
+    
+    log("invNode pointer:", tostring(invNode), "rawInv pointer:", tostring(rawInv))
+    
+    local count = 0
+    local sampleUnits = {}
+    if rawInv then
+        for guid, item in pairs(rawInv) do
+            count = count + 1
+            if count <= 5 then
+                local name = nil
+                local iC = rawget(item, "___C")
+                if iC and rawget(iC, "name") then
+                    local nNode = rawget(iC, "name")
+                    local x = rawget(nNode, "___X")
+                    name = type(x) == "table" and rawget(x, "name") or x
+                end
+                table.insert(sampleUnits, string.format("[%s] %s", tostring(guid):sub(1,8), tostring(name)))
+            end
         end
     end
+    log("Total items in rawInv:", count)
+    log("First 5 items:", table.concat(sampleUnits, ", "))
 end
 
--- [2] Compare raw DC inventory count vs Backpack UI count
+-- Inspect Backpack UI Scroller children names and titles
 local pg = lp:FindFirstChild("PlayerGui")
 local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
 local scroller = bpMenu and bpMenu:FindFirstChild("ScrollingFrame", true)
-
 if scroller then
-    local uiCount = 0
-    for _, c in ipairs(scroller:GetChildren()) do
-        if c:IsA("ImageButton") or c:IsA("TextButton") then
-            uiCount = uiCount + 1
+    local uiList = {}
+    for _, ch in ipairs(scroller:GetChildren()) do
+        if ch:IsA("ImageButton") then
+            local top = ch:FindFirstChild("TopLabel", true)
+            local bot = ch:FindFirstChild("BottomLabel", true)
+            table.insert(uiList, string.format("%s (%s, %s)", ch.Name, top and top.Text or "", bot and bot.Text or ""))
+            if #uiList >= 5 then break end
         end
     end
-    log("Backpack UI items count:", uiCount)
-end
-
--- [3] Inspect direct items in DataController
-if dcMod then
-    local ok, dc = pcall(require, dcMod)
-    if ok and dc and rawget(dc, "___C") then
-        local dcC = rawget(dc, "___C")
-        local invNode = rawget(dcC, "Inventory")
-        if invNode then
-            local rawInv = rawget(invNode, "___C")
-            local rawCount = 0
-            if rawInv and type(rawInv) == "table" then
-                for k, v in pairs(rawInv) do
-                    rawCount = rawCount + 1
-                end
-            end
-            log("DataController rawInventory count:", rawCount)
-        end
-    end
+    log("Top 5 items in Backpack UI:", table.concat(uiList, " | "))
 end
 
 log("==================================================")
-log("[GENESIS DIAG V27] COMPLETED")
+log("[GENESIS DIAG V28] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V27.txt"
+local fileName = "Genesis_AnimeDice_Diag_V28.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
