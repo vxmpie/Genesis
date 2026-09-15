@@ -84,22 +84,34 @@ function AutoEquipModule.GetUnitConfig()
     return (ok and res) or nil
 end
 
+function AutoEquipModule.GetMyPlot()
+    local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
+    if pcMod then
+        local ok, pc = pcall(require, pcMod)
+        if ok and pc and pc.plot then
+            return pc.plot
+        end
+    end
+    local claimed = game:GetService("Workspace"):FindFirstChild("Plots") and game:GetService("Workspace").Plots:FindFirstChild("Claimed")
+    if claimed and #claimed:GetChildren() > 0 then
+        return claimed:GetChildren()[1]
+    end
+    return nil
+end
+
 function AutoEquipModule.GetUnlockedSlotsCount()
     local ok, count = pcall(function()
-        local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
-        if dcMod then
-            local dc = require(dcMod)
-            local dcC = rawget(dc, "___C")
-            if dcC and rawget(dcC, "Slots") then
-                local slotsNode = rawget(dcC, "Slots")
-                local rawSlots = rawget(slotsNode, "___C")
-                if rawSlots and type(rawSlots) == "table" then
-                    local c = 0
-                    for _ in pairs(rawSlots) do
+        local myPlot = AutoEquipModule.GetMyPlot()
+        if myPlot then
+            local sFolder = myPlot:FindFirstChild("Slots")
+            if sFolder then
+                local c = 0
+                for _, ch in ipairs(sFolder:GetChildren()) do
+                    if tonumber(ch.Name) then
                         c = c + 1
                     end
-                    return c
                 end
+                if c > 0 then return c end
             end
         end
         return nil
@@ -138,13 +150,13 @@ function AutoEquipModule.GetSlotsState()
 
                         if not uid then
                             local sX = rawget(sData, "___X")
-                            if type(sX) == "table" then
+                            if sX and type(sX) == "table" then
                                 uid = rawget(sX, "unitId")
                             end
                         end
 
-                        if uid and type(uid) == "string" and uid ~= "" then
-                            slotsMap[tostring(sIndex)] = uid
+                        if uid and tostring(uid) ~= "" then
+                            slotsMap[tostring(sIndex)] = tostring(uid)
                         end
                     end
                 end
@@ -154,11 +166,12 @@ function AutoEquipModule.GetSlotsState()
     return slotsMap
 end
 
+-- --- Inventory Hydration & Retrieval ---
 function AutoEquipModule.GetInventoryUnits()
     local units = {}
     local rawInventory = nil
 
-    for attempt = 1, 5 do
+    for _ = 1, 5 do
         pcall(function()
             local dcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Data.DataController
             if dcMod then
@@ -181,11 +194,6 @@ function AutoEquipModule.GetInventoryUnits()
         return units
     end
 
-    local rawCount = 0
-    for _ in pairs(rawInventory) do
-        rawCount = rawCount + 1
-    end
-
     local unitConfig = AutoEquipModule.GetUnitConfig()
     local entries = (unitConfig and unitConfig.entries) or {}
 
@@ -195,7 +203,6 @@ function AutoEquipModule.GetInventoryUnits()
         local rawAmount = 1
         local rawLocked = false
 
-        -- [1] Method A: Inspect itemNode.___C.name.___X (Confirmed working via Probe V8)
         local itemC = rawget(itemNode, "___C")
         if type(itemC) == "table" then
             local nameNode = rawget(itemC, "name")
@@ -211,7 +218,6 @@ function AutoEquipModule.GetInventoryUnits()
                 end
             end
 
-            -- If attributes node has separate ___X
             if not rawAttrs or type(rawAttrs) ~= "table" or next(rawAttrs) == nil then
                 local attrNode = rawget(itemC, "attributes")
                 if type(attrNode) == "table" then
@@ -223,7 +229,6 @@ function AutoEquipModule.GetInventoryUnits()
             end
         end
 
-        -- [2] Method B: Fallback directly to itemNode.___X
         if not rawName then
             local itemX = rawget(itemNode, "___X")
             if type(itemX) == "table" then
@@ -242,7 +247,6 @@ function AutoEquipModule.GetInventoryUnits()
             local meta = nil
             local resolvedVariant = nil
 
-            -- [1] Check combo if variant in attributes
             if rawAttrs.variant and tostring(rawAttrs.variant) ~= "" then
                 local vName = tostring(rawAttrs.variant)
                 local comboName = vName .. " " .. rawName
@@ -252,99 +256,64 @@ function AutoEquipModule.GetInventoryUnits()
                 end
             end
 
-            -- [2] Check rawName directly in entries
-            if not meta and entries[rawName] then
+            if not meta then
                 meta = entries[rawName]
-                for prefix, _ in pairs(VARIANT_MULTIPLIERS) do
-                    if string.sub(rawName, 1, #prefix + 1) == prefix .. " " then
-                        resolvedVariant = prefix
+            end
+
+            if meta then
+                table.insert(units, {
+                    GUID = tostring(guid),
+                    Name = rawName,
+                    Meta = meta,
+                    Attributes = rawAttrs,
+                    Variant = resolvedVariant or rawAttrs.variant or "Normal",
+                    Mutation = rawAttrs.mutation or "Normal",
+                    Level = tonumber(rawAttrs.level) or 1,
+                    Locked = (rawLocked == true),
+                    Amount = tonumber(rawAmount) or 1,
+                    Rarity = meta.rarity or "Common"
+                })
+            else
+                local fallbackRarity = "Common"
+                for rName, _ in pairs(RARITY_RANKS) do
+                    if string.find(rawName, rName) then
+                        fallbackRarity = rName
                         break
                     end
                 end
+                table.insert(units, {
+                    GUID = tostring(guid),
+                    Name = rawName,
+                    Meta = { rarity = fallbackRarity, chance = 1 },
+                    Attributes = rawAttrs,
+                    Variant = rawAttrs.variant or "Normal",
+                    Mutation = rawAttrs.mutation or "Normal",
+                    Level = tonumber(rawAttrs.level) or 1,
+                    Locked = (rawLocked == true),
+                    Amount = tonumber(rawAmount) or 1,
+                    Rarity = fallbackRarity
+                })
             end
-
-            -- [3] Strip prefix to match baseName
-            if not meta then
-                for prefix, _ in pairs(VARIANT_MULTIPLIERS) do
-                    if string.sub(rawName, 1, #prefix + 1) == prefix .. " " then
-                        local baseName = string.sub(rawName, #prefix + 2)
-                        if entries[baseName] then
-                            meta = entries[baseName]
-                            resolvedVariant = prefix
-                            break
-                        end
-                    end
-                end
-            end
-
-            if not meta then
-                meta = {
-                    rarity = "Common",
-                    chance = 1,
-                    variant = "Normal"
-                }
-            end
-
-            -- Resolve numeric chance from function or number
-            local numChance = 1
-            local rawCh = meta.chance or meta.Chance or meta.odds or meta.Odds
-            if type(rawCh) == "function" then
-                local ok, res = pcall(rawCh)
-                if ok and type(res) == "number" then
-                    numChance = res
-                end
-            elseif type(rawCh) == "number" then
-                numChance = rawCh
-            end
-
-            local level = rawAttrs.level or 1
-            local mutation = rawAttrs.mutation or nil
-            local trait = rawAttrs.trait or nil
-            local variant = resolvedVariant or meta.variant or rawAttrs.variant or "Normal"
-
-            local resolvedRarity = meta.rarity or meta.Rarity or "Common"
-            table.insert(units, {
-                GUID = tostring(guid),
-                Name = rawName,
-                Meta = meta,
-                Rarity = resolvedRarity,
-                BaseOdds = numChance,
-                Attributes = rawAttrs,
-                Level = tonumber(level) or 1,
-                Mutation = mutation,
-                Trait = trait,
-                Variant = variant,
-                Amount = tonumber(rawAmount) or 1,
-                Locked = (rawLocked == true)
-            })
         end
-    end
-
-    if #units == 0 and rawCount > 0 then
-        warn(string.format("[GENESIS AUTO EQUIP] Warning: %d items in rawInventory but 0 parsed! Check name/___X format.", rawCount))
     end
 
     return units
 end
 
-function AutoEquipModule.CalculateUnitOdds(unitObj)
-    local meta = unitObj.Meta
-    if not meta then return 0, "1 in 1" end
+-- --- True Odds Calculation ---
+function AutoEquipModule.CalculateUnitOdds(unit)
+    local meta = unit.Meta
+    local baseOdds = 1
 
-    local baseOdds = unitObj.BaseOdds or 1
-    if baseOdds <= 1 then
-        local rawCh = meta.chance or meta.Chance or meta.odds or meta.Odds
-        if type(rawCh) == "function" then
-            local ok, res = pcall(rawCh)
-            if ok and type(res) == "number" then baseOdds = res end
-        elseif type(rawCh) == "number" then
-            baseOdds = rawCh
+    if meta then
+        if type(meta.chance) == "function" then
+            local ok, val = pcall(meta.chance)
+            if ok and type(val) == "number" and val > 0 then
+                baseOdds = val
+            end
+        elseif type(meta.chance) == "number" and meta.chance > 0 then
+            baseOdds = meta.chance
         end
-    end
-
-    if baseOdds <= 1 and unitObj.Rarity then
-        local rank = RARITY_RANKS[unitObj.Rarity] or 1
-        baseOdds = math.floor(10 ^ rank)
     end
 
     local finalOdds = baseOdds
@@ -352,95 +321,194 @@ function AutoEquipModule.CalculateUnitOdds(unitObj)
     return finalOdds, formatted
 end
 
--- --- Slot & Remote Actions ---
+-- --- Slot Prompt & Teleport Actions ---
+local function getSlotPrompt(slotId)
+    local myPlot = AutoEquipModule.GetMyPlot()
+    if not myPlot then return nil end
+    local slotsFolder = myPlot:FindFirstChild("Slots")
+    local slotModel = slotsFolder and slotsFolder:FindFirstChild(tostring(slotId))
+    if slotModel then
+        return slotModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+    end
+    return nil
+end
+
+local function clickPutBackButton()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local putBack = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+    if putBack and putBack.Visible then
+        if firesignal then
+            pcall(function() firesignal(putBack.Activated) end)
+            pcall(function() firesignal(putBack.MouseButton1Click) end)
+        end
+        return true
+    end
+    return false
+end
+
 function AutoEquipModule.UnequipSlot(slotId)
     local slotNum = tonumber(slotId)
-    local slotStr = tostring(slotId)
+    if not slotNum then return false end
 
+    -- Try Network RF first
     local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Unequip")
     if rf and rf:IsA("RemoteFunction") then
-        if slotNum then
-            local ok, res = pcall(function() return rf:InvokeServer(slotNum) end)
-            if ok and res == true then return true end
-        end
-        local ok2, res2 = pcall(function() return rf:InvokeServer(slotStr) end)
-        if ok2 and res2 == true then return true end
+        local ok, res = pcall(function() return rf:InvokeServer(slotNum) end)
+        if ok and res == true then return true end
     end
 
-    local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-    if ucMod then
-        local ok, uc = pcall(require, ucMod)
-        if ok and uc and uc.Unequip then
-            if slotNum then
-                local s, r = pcall(function() return uc:Unequip(slotNum) end)
-                if s and r == true then return true end
-            end
-            local s2, r2 = pcall(function() return uc:Unequip(slotStr) end)
-            if s2 and r2 == true then return true end
+    -- Physical Prompt Pick Up & PutBack execution
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local prompt = getSlotPrompt(slotNum)
+    if hrp and prompt and fireproximityprompt then
+        local pPart = prompt.Parent:IsA("BasePart") and prompt.Parent or prompt.Parent.Parent
+        local pPos = (pPart and pPart:IsA("BasePart")) and pPart.Position or Vector3.zero
+
+        local origCF = hrp.CFrame
+        hrp.CFrame = CFrame.new(pPos + Vector3.new(0, 3, 3))
+        task.wait(0.2)
+
+        if prompt.ActionText == "Pick Up" and prompt.Enabled then
+            fireproximityprompt(prompt)
+            task.wait(0.3)
+            clickPutBackButton()
+            task.wait(0.2)
         end
+
+        hrp.CFrame = origCF
+        return true
     end
 
     return false
 end
 
 function AutoEquipModule.PickAll()
-    local currentSlots = AutoEquipModule.GetSlotsState()
+    local myPlot = AutoEquipModule.GetMyPlot()
     local totalPicked = 0
-    for sIndex, _ in pairs(currentSlots) do
-        local ok = AutoEquipModule.UnequipSlot(sIndex)
-        if ok then
-            totalPicked = totalPicked + 1
-        end
-        task.wait(0.04)
-    end
-    -- Also sweep all slots 1..14 just in case
-    for s = 1, 14 do
-        if not currentSlots[tostring(s)] then
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not myPlot or not hrp or not fireproximityprompt then
+        -- Remote fallback
+        for s = 1, 14 do
             AutoEquipModule.UnequipSlot(s)
-            task.wait(0.02)
+            task.wait(0.04)
+        end
+        sendNotice("Pick All", "Sent unequip request for all slots!")
+        return 14
+    end
+
+    local origCF = hrp.CFrame
+    local slotsFolder = myPlot:FindFirstChild("Slots")
+    if slotsFolder then
+        for s = 1, 14 do
+            local sModel = slotsFolder:FindFirstChild(tostring(s))
+            local prompt = sModel and sModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.ActionText == "Pick Up" and prompt.Enabled then
+                local pPart = prompt.Parent:IsA("BasePart") and prompt.Parent or prompt.Parent.Parent
+                local pPos = (pPart and pPart:IsA("BasePart")) and pPart.Position or Vector3.zero
+
+                hrp.CFrame = CFrame.new(pPos + Vector3.new(0, 3, 3))
+                task.wait(0.15)
+
+                if prompt.ActionText == "Pick Up" and prompt.Enabled then
+                    fireproximityprompt(prompt)
+                    task.wait(0.25)
+                    clickPutBackButton()
+                    task.wait(0.15)
+                    totalPicked = totalPicked + 1
+                end
+            end
         end
     end
+
+    hrp.CFrame = origCF
     sendNotice("Pick All", string.format("Picked up all %d units to inventory!", totalPicked))
     return totalPicked
 end
 
-function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
-    local slotNum = tonumber(slotId)
-    local slotStr = tostring(slotId)
+-- --- Backpack Unit Selection & Placing ---
+local function holdUnitFromBackpack(targetGuid)
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+    local scroller = bpMenu and bpMenu:FindFirstChild("ScrollingFrame", true)
 
-    local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Equip")
-    if rf and rf:IsA("RemoteFunction") then
-        if slotNum then
-            local ok1, res1 = pcall(function() return rf:InvokeServer(slotNum, unitGuid) end)
-            if ok1 and res1 == true then return true end
-            local ok2, res2 = pcall(function() return rf:InvokeServer(unitGuid, slotNum) end)
-            if ok2 and res2 == true then return true end
+    if scroller and firesignal and getconnections then
+        for _, btn in ipairs(scroller:GetChildren()) do
+            if btn:IsA("ImageButton") or btn:IsA("TextButton") then
+                local conns = getconnections(btn.Activated)
+                for _, conn in ipairs(conns) do
+                    if conn.Function and debug and debug.getupvalues then
+                        local ups = debug.getupvalues(conn.Function)
+                        for _, uval in ipairs(ups) do
+                            if tostring(uval) == tostring(targetGuid) then
+                                firesignal(btn.Activated)
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
         end
-        local ok3, res3 = pcall(function() return rf:InvokeServer(slotStr, unitGuid) end)
-        if ok3 and res3 == true then return true end
-        local ok4, res4 = pcall(function() return rf:InvokeServer(unitGuid, slotStr) end)
-        if ok4 and res4 == true then return true end
-        local ok5, res5 = pcall(function() return rf:InvokeServer(unitGuid) end)
-        if ok5 and res5 == true then return true end
     end
 
-    local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-    if ucMod then
-        local ok, uc = pcall(require, ucMod)
-        if ok and uc and uc.Equip then
-            if slotNum then
-                local s1, r1 = pcall(function() return uc:Equip(slotNum, unitGuid) end)
-                if s1 and r1 == true then return true end
-                local s2, r2 = pcall(function() return uc:Equip(unitGuid, slotNum) end)
-                if s2 and r2 == true then return true end
-            end
-            local s3, r3 = pcall(function() return uc:Equip(slotStr, unitGuid) end)
-            if s3 and r3 == true then return true end
-            local s4, r4 = pcall(function() return uc:Equip(unitGuid, slotStr) end)
-            if s4 and r4 == true then return true end
-            local s5, r5 = pcall(function() return uc:Equip(unitGuid) end)
-            if s5 and r5 == true then return true end
+    -- Fallback: click first button if specific GUID not matched
+    if scroller and firesignal then
+        local firstBtn = scroller:FindFirstChildWhichIsA("ImageButton")
+        if firstBtn then
+            firesignal(firstBtn.Activated)
+            return true
         end
+    end
+
+    return false
+end
+
+function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
+    local slotNum = tonumber(slotId)
+    if not slotNum then return false end
+
+    -- [1] Try RemoteFunction Equip first
+    local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Equip")
+    if rf and rf:IsA("RemoteFunction") then
+        local ok, res = pcall(function() return rf:InvokeServer(slotNum, unitGuid) end)
+        if ok and res == true then return true end
+    end
+
+    -- [2] Physical Prompt & Backpack Equip execution
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local prompt = getSlotPrompt(slotNum)
+
+    if hrp and prompt and fireproximityprompt then
+        local pPart = prompt.Parent:IsA("BasePart") and prompt.Parent or prompt.Parent.Parent
+        local pPos = (pPart and pPart:IsA("BasePart")) and pPart.Position or Vector3.zero
+
+        local origCF = hrp.CFrame
+        hrp.CFrame = CFrame.new(pPos + Vector3.new(0, 3, 3))
+        task.wait(0.2)
+
+        -- If slot currently has another unit, pick it up and put back first
+        if prompt.ActionText == "Pick Up" and prompt.Enabled then
+            fireproximityprompt(prompt)
+            task.wait(0.25)
+            clickPutBackButton()
+            task.wait(0.2)
+        end
+
+        -- Hold desired unit from backpack
+        holdUnitFromBackpack(unitGuid)
+        task.wait(0.3)
+
+        -- Place held unit onto podium
+        if prompt.ActionText == "Place" and prompt.Enabled then
+            fireproximityprompt(prompt)
+            task.wait(0.3)
+        end
+
+        hrp.CFrame = origCF
+        return (prompt.ActionText == "Pick Up")
     end
 
     return false
@@ -449,9 +517,7 @@ end
 function AutoEquipModule.NativeEquipBest()
     local re = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("PlotService") and ReplicatedStorage.Network.PlotService:FindFirstChild("RE") and ReplicatedStorage.Network.PlotService.RE:FindFirstChild("EquipBest")
     if re and re:IsA("RemoteEvent") then
-        pcall(function()
-            re:FireServer()
-        end)
+        pcall(function() re:FireServer() end)
         sendNotice("Native Equip", "Fired game native EquipBest!")
         return true
     end
@@ -534,36 +600,12 @@ function AutoEquipModule.ProcessAutoEquip(State)
             local currentUnitInSlot = currentSlots[targetSlotStr]
 
             if currentUnitInSlot ~= targetUnit.GUID then
-                -- If this target unit is currently equipped in another slot, unequip it from that slot first
-                for sIndex, sGuid in pairs(currentSlots) do
-                    if sGuid == targetUnit.GUID and sIndex ~= targetSlotStr then
-                        AutoEquipModule.UnequipSlot(tonumber(sIndex) or sIndex)
-                        currentSlots[sIndex] = nil
-                        task.wait(0.05)
-                        break
-                    end
-                end
-
-                -- Force unequip whatever unit is currently in target slot to overwrite it
-                if currentUnitInSlot then
-                    AutoEquipModule.UnequipSlot(i)
-                    currentSlots[targetSlotStr] = nil
-                    task.wait(0.05)
-                end
-
                 local ok = AutoEquipModule.EquipUnitToSlot(i, targetUnit.GUID)
                 if ok then
                     equippedCount = equippedCount + 1
                     currentSlots[targetSlotStr] = targetUnit.GUID
-                else
-                    -- Fallback attempt string slot
-                    local okFallback = AutoEquipModule.EquipUnitToSlot(targetSlotStr, targetUnit.GUID)
-                    if okFallback then
-                        equippedCount = equippedCount + 1
-                        currentSlots[targetSlotStr] = targetUnit.GUID
-                    end
                 end
-                task.wait(0.08)
+                task.wait(0.1)
             end
 
             if i <= 3 then
