@@ -15,13 +15,13 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V19] PROMPT TRIGGER & CONTROLLER DISSECT")
+log("[GENESIS DIAG V20] PLACE & PICKUP CYCLE PROBE")
 log("==================================================")
 
 local lp = Players.LocalPlayer
 local pg = lp:FindFirstChild("PlayerGui")
 
--- [1] Find My Plot and inspect Slot 1 prompt before and after
+-- [1] Find My Plot
 local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
 local myPlot = nil
 if pcMod then
@@ -31,75 +31,58 @@ if pcMod then
     end
 end
 
+-- [2] Check Slot 1 prompt state right now
 if myPlot then
     local slotsFolder = myPlot:FindFirstChild("Slots")
-    if slotsFolder then
-        local slot1 = slotsFolder:FindFirstChild("1")
-        if slot1 then
-            local prompt = slot1:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt then
-                log(string.format("Slot 1 Prompt Before: Action='%s' Key='%s' Enabled=%s Parent=%s",
-                    prompt.ActionText, tostring(prompt.KeyboardKeyCode), tostring(prompt.Enabled), prompt.Parent:GetFullName()))
-                
-                -- Test fireproximityprompt directly on slot 1 prompt!
-                if fireproximityprompt then
-                    log("Invoking fireproximityprompt(prompt)...")
-                    pcall(function()
-                        fireproximityprompt(prompt)
-                    end)
-                    task.wait(0.5)
-                    log(string.format("Slot 1 Prompt After 0.5s: Action='%s' Enabled=%s", prompt.ActionText, tostring(prompt.Enabled)))
-                end
-            end
+    local slot1 = slotsFolder and slotsFolder:FindFirstChild("1")
+    local prompt1 = slot1 and slot1:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt1 then
+        log(string.format("Slot 1 Prompt Current: Action='%s' Key='%s' Enabled=%s", prompt1.ActionText, tostring(prompt1.KeyboardKeyCode), tostring(prompt1.Enabled)))
+        
+        -- If prompt is 'Place', test fireproximityprompt to see if it places held unit!
+        if prompt1.ActionText == "Place" and fireproximityprompt then
+            log("Prompt is 'Place'! Firing fireproximityprompt to place held unit...")
+            fireproximityprompt(prompt1)
+            task.wait(0.5)
+            log(string.format("Slot 1 Prompt after Place fire: Action='%s' Enabled=%s", prompt1.ActionText, tostring(prompt1.Enabled)))
         end
     end
 end
 
--- [2] Check if PutBack button can be clicked via firesignal or activate
+-- [3] Check PutBack button action
 local putBack = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
 if putBack then
-    log("PutBack Visible after prompt fire:", tostring(putBack.Visible))
-    if putBack.Visible then
-        log("Testing clicking PutBack...")
-        if firesignal then
-            pcall(function() firesignal(putBack.Activated) end)
-            pcall(function() firesignal(putBack.MouseButton1Click) end)
-        end
-    end
+    log("PutBack Button Visible:", tostring(putBack.Visible))
 end
 
--- [3] Dissect uc.Equip upvalues & constants
-local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-if ucMod then
-    local ok, uc = pcall(require, ucMod)
-    if ok and uc then
-        if debug and debug.getupvalues then
-            local ups = debug.getupvalues(uc.Equip)
-            log("uc.Equip upvalues count:", #ups)
-            for idx, val in ipairs(ups) do
-                log(string.format("  up #%d: %s (%s)", idx, tostring(val), typeof(val)))
+-- [4] Inspect Backpack EntryTemplate click behavior
+local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+if bpMenu then
+    local scroller = bpMenu:FindFirstChild("ScrollingFrame", true)
+    if scroller then
+        local entries = {}
+        for _, c in ipairs(scroller:GetChildren()) do
+            if c:IsA("ImageButton") or c:IsA("TextButton") then
+                table.insert(entries, c)
             end
         end
-        if debug and debug.getconstants then
-            local consts = debug.getconstants(uc.Equip)
-            log("uc.Equip constants:", table.concat(consts, ", "))
-        end
-        if debug and debug.getupvalues then
-            local unUps = debug.getupvalues(uc.Unequip)
-            log("uc.Unequip upvalues count:", #unUps)
-            for idx, val in ipairs(unUps) do
-                log(string.format("  unUp #%d: %s (%s)", idx, tostring(val), typeof(val)))
-            end
+        log(string.format("Backpack scroller has %d entries", #entries))
+        if #entries > 0 then
+            local firstEntry = entries[1]
+            local topLbl = firstEntry:FindFirstChild("TopLabel", true)
+            local botLbl = firstEntry:FindFirstChild("BottomLabel", true)
+            log(string.format("First Entry: Name='%s' Top='%s' Bot='%s' Class='%s'", 
+                firstEntry.Name, topLbl and topLbl.Text or "n/a", botLbl and botLbl.Text or "n/a", firstEntry.ClassName))
         end
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V19] COMPLETED")
+log("[GENESIS DIAG V20] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V19.txt"
+local fileName = "Genesis_AnimeDice_Diag_V20.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
