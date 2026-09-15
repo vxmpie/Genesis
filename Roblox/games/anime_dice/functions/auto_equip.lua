@@ -357,73 +357,90 @@ function AutoEquipModule.UnequipSlot(slotId)
     local slotNum = tonumber(slotId)
     local slotStr = tostring(slotId)
 
+    local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Unequip")
+    if rf and rf:IsA("RemoteFunction") then
+        if slotNum then
+            local ok, res = pcall(function() return rf:InvokeServer(slotNum) end)
+            if ok and res == true then return true end
+        end
+        local ok2, res2 = pcall(function() return rf:InvokeServer(slotStr) end)
+        if ok2 and res2 == true then return true end
+    end
+
     local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
     if ucMod then
         local ok, uc = pcall(require, ucMod)
         if ok and uc and uc.Unequip then
-            local success = pcall(function() return uc:Unequip(slotStr) end)
-            if success then return true end
             if slotNum then
-                local success2 = pcall(function() return uc:Unequip(slotNum) end)
-                if success2 then return true end
+                local s, r = pcall(function() return uc:Unequip(slotNum) end)
+                if s and r == true then return true end
             end
-        end
-    end
-
-    local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Unequip")
-    if rf and rf:IsA("RemoteFunction") then
-        local success = pcall(function() return rf:InvokeServer(slotStr) end)
-        if success then return true end
-        if slotNum then
-            local success2 = pcall(function() return rf:InvokeServer(slotNum) end)
-            if success2 then return true end
+            local s2, r2 = pcall(function() return uc:Unequip(slotStr) end)
+            if s2 and r2 == true then return true end
         end
     end
 
     return false
 end
 
+function AutoEquipModule.PickAll()
+    local currentSlots = AutoEquipModule.GetSlotsState()
+    local totalPicked = 0
+    for sIndex, _ in pairs(currentSlots) do
+        local ok = AutoEquipModule.UnequipSlot(sIndex)
+        if ok then
+            totalPicked = totalPicked + 1
+        end
+        task.wait(0.04)
+    end
+    -- Also sweep all slots 1..14 just in case
+    for s = 1, 14 do
+        if not currentSlots[tostring(s)] then
+            AutoEquipModule.UnequipSlot(s)
+            task.wait(0.02)
+        end
+    end
+    sendNotice("Pick All", string.format("Picked up all %d units to inventory!", totalPicked))
+    return totalPicked
+end
+
 function AutoEquipModule.EquipUnitToSlot(slotId, unitGuid)
     local slotNum = tonumber(slotId)
     local slotStr = tostring(slotId)
 
-    local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-    if ucMod then
-        local ok1, uc = pcall(require, ucMod)
-        if ok1 and uc and uc.Equip then
-            local s1 = pcall(function() return uc:Equip(slotStr, unitGuid) end)
-            if s1 then return true end
-            if slotNum then
-                local s2 = pcall(function() return uc:Equip(slotNum, unitGuid) end)
-                if s2 then return true end
-            end
-            local s3 = pcall(function() return uc:Equip(unitGuid, slotStr) end)
-            if s3 then return true end
-            if slotNum then
-                local s4 = pcall(function() return uc:Equip(unitGuid, slotNum) end)
-                if s4 then return true end
-            end
-            local s5 = pcall(function() return uc:Equip(unitGuid) end)
-            if s5 then return true end
-        end
-    end
-
     local rf = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Equip")
     if rf and rf:IsA("RemoteFunction") then
-        local ok2 = pcall(function() return rf:InvokeServer(slotStr, unitGuid) end)
-        if ok2 then return true end
         if slotNum then
-            local ok3 = pcall(function() return rf:InvokeServer(slotNum, unitGuid) end)
-            if ok3 then return true end
+            local ok1, res1 = pcall(function() return rf:InvokeServer(slotNum, unitGuid) end)
+            if ok1 and res1 == true then return true end
+            local ok2, res2 = pcall(function() return rf:InvokeServer(unitGuid, slotNum) end)
+            if ok2 and res2 == true then return true end
         end
-        local ok4 = pcall(function() return rf:InvokeServer(unitGuid, slotStr) end)
-        if ok4 then return true end
-        if slotNum then
-            local ok5 = pcall(function() return rf:InvokeServer(unitGuid, slotNum) end)
-            if ok5 then return true end
+        local ok3, res3 = pcall(function() return rf:InvokeServer(slotStr, unitGuid) end)
+        if ok3 and res3 == true then return true end
+        local ok4, res4 = pcall(function() return rf:InvokeServer(unitGuid, slotStr) end)
+        if ok4 and res4 == true then return true end
+        local ok5, res5 = pcall(function() return rf:InvokeServer(unitGuid) end)
+        if ok5 and res5 == true then return true end
+    end
+
+    local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
+    if ucMod then
+        local ok, uc = pcall(require, ucMod)
+        if ok and uc and uc.Equip then
+            if slotNum then
+                local s1, r1 = pcall(function() return uc:Equip(slotNum, unitGuid) end)
+                if s1 and r1 == true then return true end
+                local s2, r2 = pcall(function() return uc:Equip(unitGuid, slotNum) end)
+                if s2 and r2 == true then return true end
+            end
+            local s3, r3 = pcall(function() return uc:Equip(slotStr, unitGuid) end)
+            if s3 and r3 == true then return true end
+            local s4, r4 = pcall(function() return uc:Equip(unitGuid, slotStr) end)
+            if s4 and r4 == true then return true end
+            local s5, r5 = pcall(function() return uc:Equip(unitGuid) end)
+            if s5 and r5 == true then return true end
         end
-        local ok6 = pcall(function() return rf:InvokeServer(unitGuid) end)
-        if ok6 then return true end
     end
 
     return false
@@ -517,27 +534,36 @@ function AutoEquipModule.ProcessAutoEquip(State)
             local currentUnitInSlot = currentSlots[targetSlotStr]
 
             if currentUnitInSlot ~= targetUnit.GUID then
+                -- If this target unit is currently equipped in another slot, unequip it from that slot first
                 for sIndex, sGuid in pairs(currentSlots) do
                     if sGuid == targetUnit.GUID and sIndex ~= targetSlotStr then
-                        AutoEquipModule.UnequipSlot(sIndex)
+                        AutoEquipModule.UnequipSlot(tonumber(sIndex) or sIndex)
                         currentSlots[sIndex] = nil
-                        task.wait(0.08)
+                        task.wait(0.05)
                         break
                     end
                 end
 
+                -- Force unequip whatever unit is currently in target slot to overwrite it
                 if currentUnitInSlot then
-                    AutoEquipModule.UnequipSlot(targetSlotStr)
+                    AutoEquipModule.UnequipSlot(i)
                     currentSlots[targetSlotStr] = nil
-                    task.wait(0.08)
+                    task.wait(0.05)
                 end
 
-                local ok = AutoEquipModule.EquipUnitToSlot(targetSlotStr, targetUnit.GUID)
+                local ok = AutoEquipModule.EquipUnitToSlot(i, targetUnit.GUID)
                 if ok then
                     equippedCount = equippedCount + 1
                     currentSlots[targetSlotStr] = targetUnit.GUID
+                else
+                    -- Fallback attempt string slot
+                    local okFallback = AutoEquipModule.EquipUnitToSlot(targetSlotStr, targetUnit.GUID)
+                    if okFallback then
+                        equippedCount = equippedCount + 1
+                        currentSlots[targetSlotStr] = targetUnit.GUID
+                    end
                 end
-                task.wait(0.1)
+                task.wait(0.08)
             end
 
             if i <= 3 then

@@ -641,6 +641,15 @@ function UI.Create(Config, AutoEquipModule)
         })
     end, true)
 
+    actionsCard:AddButton("Pick All (Unequip All Slots to Bag)", function()
+        if AutoEquipModule and AutoEquipModule.PickAll then
+            local count = AutoEquipModule.PickAll()
+            if statusInfoLabel then
+                statusInfoLabel.Text = string.format("Picked up all %d units to backpack!", count)
+            end
+        end
+    end)
+
     actionsCard:AddButton("Native Equip Best (Game Server Call)", function()
         AutoEquipModule.NativeEquipBest()
     end, true)
