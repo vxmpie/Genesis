@@ -15,73 +15,74 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V16] PLOTCONTROLLER & PROMPT DEEP DIVE")
+log("[GENESIS DIAG V17] EQUIPPEDUNIT & PROMPT FIRE TEST")
 log("==================================================")
 
 local lp = Players.LocalPlayer
+local pg = lp:FindFirstChild("PlayerGui")
 
--- [1] Inspect PlotController instance & methods
-local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
-if pcMod then
-    local ok, pc = pcall(require, pcMod)
-    if ok and pc then
-        log("PlotController require OK:")
-        for k, v in pairs(pc) do
-            log(string.format("  pc.%s = %s (%s)", tostring(k), tostring(v), typeof(v)))
-        end
-        if pc.plot then
-            log("pc.plot:", pc.plot:GetFullName())
+-- [1] Check UnitController methods & upvalues
+local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
+if ucMod then
+    local ok, uc = pcall(require, ucMod)
+    if ok and uc then
+        if uc.EquippedUnit then
+            local eqOk, eqRes = pcall(function() return uc:EquippedUnit() end)
+            log("uc:EquippedUnit() ->", eqOk, tostring(eqRes), typeof(eqRes))
         end
     end
 end
 
--- [2] Inspect Plot Slots & Prompts
-local claimed = Workspace:FindFirstChild("Plots") and Workspace.Plots:FindFirstChild("Claimed")
-if claimed then
-    for _, plot in ipairs(claimed:GetChildren()) do
-        local slotsFolder = plot:FindFirstChild("Slots")
-        if slotsFolder then
-            log("Found Slots Folder in plot:", plot.Name, "Total slots:", #slotsFolder:GetChildren())
-            for i = 1, math.min(3, #slotsFolder:GetChildren()) do
-                local slotModel = slotsFolder:FindFirstChild(tostring(i))
-                if slotModel then
-                    log(string.format("  Slot [%d] Name=%s ClassName=%s", i, slotModel.Name, slotModel.ClassName))
-                    for _, d in ipairs(slotModel:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") then
-                            log(string.format("    Prompt in Slot [%d]: Action='%s' Key='%s' Enabled=%s Parent=%s", 
-                                i, d.ActionText, tostring(d.KeyboardKeyCode), tostring(d.Enabled), d.Parent.Name))
-                        end
-                    end
+-- [2] Check Plot Slots Models and Prompt Objects
+local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
+local myPlot = nil
+if pcMod then
+    local ok, pc = pcall(require, pcMod)
+    if ok and pc and pc.plot then
+        myPlot = pc.plot
+        log("My Plot confirmed:", myPlot:GetFullName())
+    end
+end
+
+if myPlot then
+    local slotsFolder = myPlot:FindFirstChild("Slots")
+    if slotsFolder then
+        local slot1 = slotsFolder:FindFirstChild("1")
+        if slot1 then
+            local prompt = slot1:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                log(string.format("Slot 1 Prompt: Action='%s' Object='%s' Key='%s' Enabled=%s", 
+                    prompt.ActionText, prompt.ObjectText, tostring(prompt.KeyboardKeyCode), tostring(prompt.Enabled)))
+                
+                -- Check what happens if we fireproximityprompt on Slot 1
+                if fireproximityprompt then
+                    log("fireproximityprompt function exists! Testing fire on Slot 1 prompt...")
+                    -- We won't trigger immediately, just confirm capability
+                    log("fireproximityprompt capability: true")
+                else
+                    log("fireproximityprompt not supported by executor!")
                 end
             end
         end
     end
 end
 
--- [3] Inspect UnitController for holding unit / equip logic
-local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-if ucMod then
-    local ok, uc = pcall(require, ucMod)
-    if ok and uc then
-        log("UnitController inspection:")
-        for k, v in pairs(uc) do
-            log(string.format("  uc.%s = %s (%s)", tostring(k), tostring(v), typeof(v)))
-        end
+-- [3] Check PutBack Button Click
+local putBackObj = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+if putBackObj then
+    log("PutBack Button: Visible =", tostring(putBackObj.Visible))
+    if getconnections then
+        local conns = getconnections(putBackObj.MouseButton1Click) or getconnections(putBackObj.Activated)
+        log("PutBack connections count:", #conns)
     end
 end
 
--- [4] Inspect InteractSlot RemoteEvent arguments if possible
-local isRE = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("PlotService") and ReplicatedStorage.Network.PlotService:FindFirstChild("RE") and ReplicatedStorage.Network.PlotService.RE:FindFirstChild("InteractSlot")
-if isRE then
-    log("PlotService.RE.InteractSlot found! ClassName:", isRE.ClassName)
-end
-
 log("==================================================")
-log("[GENESIS DIAG V16] COMPLETED")
+log("[GENESIS DIAG V17] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V16.txt"
+local fileName = "Genesis_AnimeDice_Diag_V17.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
