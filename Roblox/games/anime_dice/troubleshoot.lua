@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local logLines = {}
@@ -14,131 +15,102 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V29] INVENTORY UNITS & SORTING AUDIT")
+log("[GENESIS DIAG V30] EMPTY SLOT PLACEMENT TRACE")
 log("==================================================")
 
 local lp = Players.LocalPlayer
+local char = lp.Character or lp.CharacterAdded:Wait()
+local hrp = char:FindFirstChild("HumanoidRootPart")
+local pg = lp:FindFirstChild("PlayerGui")
 
-local RARITY_RANKS = {
-    ["Common"] = 1,
-    ["Uncommon"] = 2,
-    ["Rare"] = 3,
-    ["Epic"] = 4,
-    ["Legendary"] = 5,
-    ["Mythical"] = 6,
-    ["Divine"] = 7,
-    ["Exotic"] = 8,
-    ["Celestial"] = 9,
-    ["Secret I"] = 10,
-    ["Secret II"] = 11,
-    ["Exclusive"] = 12
-}
-
-local function formatOdds(num)
-    if not num or num <= 0 then return "1 in 1" end
-    if num >= 1e15 then return string.format("1 in %.2fQ", num / 1e15)
-    elseif num >= 1e12 then return string.format("1 in %.2fT", num / 1e12)
-    elseif num >= 1e9 then return string.format("1 in %.2fB", num / 1e9)
-    elseif num >= 1e6 then return string.format("1 in %.2fM", num / 1e6)
-    elseif num >= 1e3 then return string.format("1 in %.1fk", num / 1e3)
-    else return string.format("1 in %d", math.floor(num)) end
+local pcMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Plot.PlotController
+local myPlot = nil
+if pcMod then
+    local ok, pc = pcall(require, pcMod)
+    if ok and pc and pc.plot then myPlot = pc.plot end
 end
 
-local unitConfig = nil
-pcall(function()
-    unitConfig = require(ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitConfig)
-end)
-local entries = (unitConfig and unitConfig.entries) or {}
-
-local rawInv = nil
-pcall(function()
-    local dc = require(ReplicatedStorage.Framework.Features.Data.DataController)
-    rawInv = dc.___C.Inventory.___C
-end)
-
-if not rawInv then
-    log("Error: rawInv not found!")
+if not myPlot or not hrp then
+    log("Error: Plot or HRP not found!")
     return
 end
 
-local parsedUnits = {}
-for guid, itemNode in pairs(rawInv) do
-    local rawName = nil
-    local rawAttrs = {}
-    local itemC = rawget(itemNode, "___C")
-    if type(itemC) == "table" then
-        local nameNode = rawget(itemC, "name")
-        if type(nameNode) == "table" then
-            local xData = rawget(nameNode, "___X")
-            if type(xData) == "table" then
-                rawName = rawget(xData, "name")
-                rawAttrs = rawget(xData, "attributes") or rawAttrs
-            elseif type(xData) == "string" then
-                rawName = xData
-            end
-        end
-    end
-    if not rawName then
-        local itemX = rawget(itemNode, "___X")
-        if type(itemX) == "table" then
-            rawName = rawget(itemX, "name") or rawget(itemX, "entry")
-            rawAttrs = rawget(itemX, "attributes") or rawAttrs
-        end
-    end
+-- Inspect Slot 1
+local slotsFolder = myPlot:FindFirstChild("Slots")
+local slot1 = slotsFolder and slotsFolder:FindFirstChild("1")
+local prompt1 = slot1 and slot1:FindFirstChildWhichIsA("ProximityPrompt", true)
 
-    if type(rawName) == "string" and rawName ~= "" then
-        local meta = nil
-        local resolvedVariant = nil
-        if rawAttrs and rawAttrs.variant then
-            local combo = tostring(rawAttrs.variant) .. " " .. rawName
-            if entries[combo] then
-                meta = entries[combo]
-                resolvedVariant = tostring(rawAttrs.variant)
-            end
-        end
-        if not meta then meta = entries[rawName] end
+if not prompt1 then
+    log("Error: Slot 1 prompt not found!")
+    return
+end
 
-        local rName = (meta and meta.rarity) or "Common"
-        local odds = 1
-        if meta then
-            if type(meta.chance) == "function" then
-                local ok, val = pcall(meta.chance)
-                if ok and type(val) == "number" then odds = val end
-            elseif type(meta.chance) == "number" then
-                odds = meta.chance
-            end
-        end
+local pPart = prompt1.Parent:IsA("BasePart") and prompt1.Parent or prompt1.Parent.Parent
+local pPos = (pPart and pPart:IsA("BasePart")) and pPart.Position or Vector3.zero
 
-        table.insert(parsedUnits, {
-            Name = resolvedVariant and (resolvedVariant .. " " .. rawName) or rawName,
-            Rarity = rName,
-            RarityRank = RARITY_RANKS[rName] or 1,
-            Odds = odds,
-            Formatted = formatOdds(odds),
-            Level = rawAttrs and tonumber(rawAttrs.level) or 1
-        })
+log("Step 1: Teleporting near Slot 1 podium...")
+local origCF = hrp.CFrame
+hrp.CFrame = CFrame.new(pPos + Vector3.new(0, 3, 3))
+task.wait(0.3)
+
+log(string.format("Initial Slot 1 -> Action='%s' | Enabled=%s | Key='%s'", 
+    prompt1.ActionText, tostring(prompt1.Enabled), tostring(prompt1.KeyboardKeyCode)))
+
+-- Step 2: Open Backpack Menu and inspect buttons
+local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+log("Backpack Menu Visible:", tostring(bpMenu and bpMenu.Visible))
+
+local scroller = bpMenu and bpMenu:FindFirstChild("ScrollingFrame", true)
+local targetBtn = nil
+if scroller then
+    for _, btn in ipairs(scroller:GetChildren()) do
+        if btn:IsA("ImageButton") or btn:IsA("TextButton") then
+            targetBtn = btn
+            break
+        end
     end
 end
 
-table.sort(parsedUnits, function(a, b)
-    if a.RarityRank ~= b.RarityRank then return a.RarityRank > b.RarityRank end
-    if a.Odds ~= b.Odds then return a.Odds > b.Odds end
-    return a.Level > b.Level
-end)
-
-log(string.format("Total Parsed Units: %d", #parsedUnits))
-log("Top 10 Rarest Units in Player's Entire Inventory:")
-for i = 1, math.min(10, #parsedUnits) do
-    local u = parsedUnits[i]
-    log(string.format("  #%d: %s | %s | %s | Level %d", i, u.Name, u.Rarity, u.Formatted, u.Level))
+if targetBtn then
+    log("Found target backpack button:", targetBtn.Name, "ClassName:", targetBtn.ClassName)
+    log("Activating backpack button...")
+    if firesignal then
+        firesignal(targetBtn.Activated)
+    end
+    task.wait(0.4)
+    
+    local putBack = pg and pg.Root and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+    log("PutBack Button Visible after click:", tostring(putBack and putBack.Visible))
+    log(string.format("Slot 1 Prompt after unit selected -> Action='%s' | Enabled=%s", 
+        prompt1.ActionText, tostring(prompt1.Enabled)))
+    
+    -- Step 3: Test placing
+    if prompt1.ActionText == "Place" then
+        if not prompt1.Enabled then
+            log("Prompt was disabled, enabling it forcibly...")
+            prompt1.Enabled = true
+        end
+        log("Firing fireproximityprompt on Slot 1...")
+        if fireproximityprompt then
+            fireproximityprompt(prompt1)
+        end
+        task.wait(0.5)
+        log(string.format("After Fire -> Action='%s' | Enabled=%s", 
+            prompt1.ActionText, tostring(prompt1.Enabled)))
+    end
+else
+    log("No unit buttons found in Backpack scroller!")
 end
+
+log("Returning to original position...")
+hrp.CFrame = origCF
 
 log("==================================================")
-log("[GENESIS DIAG V29] COMPLETED")
+log("[GENESIS DIAG V30] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V29.txt"
+local fileName = "Genesis_AnimeDice_Diag_V30.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
