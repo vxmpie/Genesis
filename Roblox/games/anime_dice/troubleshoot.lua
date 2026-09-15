@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
@@ -15,105 +16,100 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V12] UNITCONTROLLER EQUIP DEEP PROBE")
+log("[GENESIS DIAG V13] PODIUM & PROXIMITY PROMPT PROBE")
 log("==================================================")
 
-local targetGuid = "abedb4ae-f150-4bfb-ac12-e5ae44928f23"
-local DataController = nil
-pcall(function()
-    DataController = require(ReplicatedStorage.Framework.Features.Data.DataController)
-end)
+local lp = Players.LocalPlayer
 
-if DataController then
-    local dcC = rawget(DataController, "___C")
-    if dcC and rawget(dcC, "Inventory") then
-        local invNode = rawget(dcC, "Inventory")
-        local rawInv = rawget(invNode, "___C")
-        if rawInv then
-            for guid, itemNode in pairs(rawInv) do
-                local itemC = rawget(itemNode, "___C")
-                local nameNode = itemC and rawget(itemC, "name")
-                local xData = nameNode and rawget(nameNode, "___X")
-                local rawName = (type(xData) == "table" and rawget(xData, "name")) or (type(xData) == "string" and xData)
-                if rawName and (string.find(rawName, "Okarin") or string.find(rawName, "Gon") or string.find(rawName, "Killer")) then
-                    targetGuid = tostring(guid)
-                    log(string.format("Selected Target Unit: %s [GUID %s]", rawName, targetGuid))
-                    break
-                end
+-- [1] Find Player's Plot in Workspace
+log("[1] Searching Workspace for Plots / Podiums:")
+local foundPlots = {}
+for _, obj in ipairs(Workspace:GetChildren()) do
+    local name = obj.Name
+    if string.find(name, "Plot") or string.find(name, "Podium") or string.find(name, "Island") or string.find(name, "Base") then
+        table.insert(foundPlots, obj)
+        log("  Found Workspace child:", name, "ClassName:", obj.ClassName)
+    end
+end
+
+-- Check Workspace.Plots or Plots folder if exists
+local plotsFolder = Workspace:FindFirstChild("Plots") or Workspace:FindFirstChild("PlayerPlots")
+if plotsFolder then
+    log("  Plots folder found with children:", #plotsFolder:GetChildren())
+    for _, p in ipairs(plotsFolder:GetChildren()) do
+        log("    Plot child:", p.Name, "ClassName:", p.ClassName)
+    end
+end
+
+-- [2] Search ProximityPrompts in Workspace
+log("----------------------------------------")
+log("[2] Searching ProximityPrompts near player:")
+local pChar = lp.Character or lp.CharacterAdded:Wait()
+local pRoot = pChar and pChar:FindFirstChild("HumanoidRootPart")
+
+local allPrompts = {}
+for _, desc in ipairs(Workspace:GetDescendants()) do
+    if desc:IsA("ProximityPrompt") then
+        local actionText = desc.ActionText
+        local objectText = desc.ObjectText
+        local parentName = desc.Parent and desc.Parent.Name or "nil"
+        local parentClass = desc.Parent and desc.Parent.ClassName or "nil"
+        local dist = 9999
+        if pRoot and desc.Parent and desc.Parent:IsA("BasePart") then
+            dist = (pRoot.Position - desc.Parent.Position).Magnitude
+        end
+        log(string.format("  Prompt: Action='%s' | Object='%s' | Parent='%s' (%s) | Dist=%.1f", actionText, objectText, parentName, parentClass, dist))
+        table.insert(allPrompts, desc)
+    end
+end
+log("Total ProximityPrompts found in Workspace:", #allPrompts)
+
+-- [3] Check PlotService Remotes specifically InteractSlot
+log("----------------------------------------")
+log("[3] Inspecting PlotService Remotes:")
+local plotService = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("PlotService")
+if plotService then
+    for _, f in ipairs(plotService:GetChildren()) do
+        for _, remote in ipairs(f:GetChildren()) do
+            log(string.format("  Remote: %s.%s (%s)", f.Name, remote.Name, remote.ClassName))
+        end
+    end
+end
+
+-- [4] Check Character Tools (Equipped item in hand)
+log("----------------------------------------")
+log("[4] Checking Character & Backpack Tools:")
+if pChar then
+    for _, ch in ipairs(pChar:GetChildren()) do
+        if ch:IsA("Tool") or ch:IsA("Model") then
+            if ch.Name ~= "Animate" then
+                log("  Character child (held):", ch.Name, "ClassName:", ch.ClassName)
             end
         end
     end
 end
 
--- [1] Inspect UnitController module
-local ucMod = ReplicatedStorage:FindFirstChild("Framework") and ReplicatedStorage.Framework.Features.Inventory.Kinds.Unit.UnitController
-if ucMod then
-    local uc = require(ucMod)
-    log("UnitController found. Testing uc:Equip directly:")
-
-    -- Inspect uc.Equip constants and upvalues if debug library exists
-    if debug and debug.getupvalues and uc.Equip then
-        log("Inspecting uc.Equip upvalues:")
-        for i, v in ipairs(debug.getupvalues(uc.Equip)) do
-            log("  upval #" .. i .. ":", tostring(v), "type:", type(v))
-        end
-    end
-    if debug and debug.getconstants and uc.Equip then
-        log("Inspecting uc.Equip constants:")
-        for i, c in ipairs(debug.getconstants(uc.Equip)) do
-            log("  const #" .. i .. ":", tostring(c))
-        end
-    end
-
-    -- Test calling uc:Equip
-    log("Calling uc:Equip(1, targetGuid):")
-    local ok1, res1 = pcall(function() return uc:Equip(1, targetGuid) end)
-    log("  uc:Equip(1, guid) -> ok:", ok1, "res:", tostring(res1))
-
-    log("Calling uc:Equip(targetGuid, 1):")
-    local ok2, res2 = pcall(function() return uc:Equip(targetGuid, 1) end)
-    log("  uc:Equip(guid, 1) -> ok:", ok2, "res:", tostring(res2))
-
-    log("Calling uc:Equip(targetGuid):")
-    local ok3, res3 = pcall(function() return uc:Equip(targetGuid) end)
-    log("  uc:Equip(guid) -> ok:", ok3, "res:", tostring(res3))
-
-    -- Check if UnitController has Unequip
-    if uc.Unequip then
-        log("Calling uc:Unequip(1):")
-        local oku, resu = pcall(function() return uc:Unequip(1) end)
-        log("  uc:Unequip(1) -> ok:", oku, "res:", tostring(resu))
-    end
-end
-
--- [2] Check RemoteFunction Equip error or signature
-local rfEquip = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("UnitService") and ReplicatedStorage.Network.UnitService:FindFirstChild("RF") and ReplicatedStorage.Network.UnitService.RF:FindFirstChild("Equip")
-if rfEquip then
-    log("----------------------------------------")
-    log("Detailed RF Equip testing:")
-    -- Maybe slot 1 is locked or occupied? Let's check Slot 14 or first empty slot
-    for testSlot = 1, 14 do
-        local ok, res = pcall(function() return rfEquip:InvokeServer(testSlot, targetGuid) end)
-        if res == true then
-            log(string.format("SUCCESS!! InvokeServer(%d, guid) returned true!", testSlot))
-            break
-        end
-    end
-    for testSlot = 1, 14 do
-        local ok, res = pcall(function() return rfEquip:InvokeServer(targetGuid, testSlot) end)
-        if res == true then
-            log(string.format("SUCCESS!! InvokeServer(guid, %d) returned true!", testSlot))
-            break
+-- [5] Check PlayerGui for "Put Back" button
+log("----------------------------------------")
+log("[5] Searching PlayerGui for 'Put Back' or Pickup UI:")
+local pg = lp:FindFirstChild("PlayerGui")
+if pg then
+    for _, desc in ipairs(pg:GetDescendants()) do
+        if desc:IsA("TextButton") or desc:IsA("ImageButton") or desc:IsA("TextLabel") then
+            local text = desc:IsA("TextLabel") and desc.Text or (desc:IsA("TextButton") and desc.Text or "")
+            if string.find(string.lower(text), "put") or string.find(string.lower(text), "back") or string.find(string.lower(text), "pickup") or string.find(string.lower(text), "place") then
+                log(string.format("  Found UI element: Name='%s' | Text='%s' | Path=%s", desc.Name, text, desc:GetFullName()))
+            end
         end
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V12] COMPLETED")
+log("[GENESIS DIAG V13] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V12.txt"
+local fileName = "Genesis_AnimeDice_Diag_V13.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
