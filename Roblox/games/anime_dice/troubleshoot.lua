@@ -16,100 +16,84 @@ local function log(...)
 end
 
 log("==================================================")
-log("[GENESIS DIAG V13] PODIUM & PROXIMITY PROMPT PROBE")
+log("[GENESIS DIAG V14] UI INTERACTION & PLOT PROBE")
 log("==================================================")
 
 local lp = Players.LocalPlayer
-
--- [1] Find Player's Plot in Workspace
-log("[1] Searching Workspace for Plots / Podiums:")
-local foundPlots = {}
-for _, obj in ipairs(Workspace:GetChildren()) do
-    local name = obj.Name
-    if string.find(name, "Plot") or string.find(name, "Podium") or string.find(name, "Island") or string.find(name, "Base") then
-        table.insert(foundPlots, obj)
-        log("  Found Workspace child:", name, "ClassName:", obj.ClassName)
-    end
-end
-
--- Check Workspace.Plots or Plots folder if exists
-local plotsFolder = Workspace:FindFirstChild("Plots") or Workspace:FindFirstChild("PlayerPlots")
-if plotsFolder then
-    log("  Plots folder found with children:", #plotsFolder:GetChildren())
-    for _, p in ipairs(plotsFolder:GetChildren()) do
-        log("    Plot child:", p.Name, "ClassName:", p.ClassName)
-    end
-end
-
--- [2] Search ProximityPrompts in Workspace
-log("----------------------------------------")
-log("[2] Searching ProximityPrompts near player:")
-local pChar = lp.Character or lp.CharacterAdded:Wait()
-local pRoot = pChar and pChar:FindFirstChild("HumanoidRootPart")
-
-local allPrompts = {}
-for _, desc in ipairs(Workspace:GetDescendants()) do
-    if desc:IsA("ProximityPrompt") then
-        local actionText = desc.ActionText
-        local objectText = desc.ObjectText
-        local parentName = desc.Parent and desc.Parent.Name or "nil"
-        local parentClass = desc.Parent and desc.Parent.ClassName or "nil"
-        local dist = 9999
-        if pRoot and desc.Parent and desc.Parent:IsA("BasePart") then
-            dist = (pRoot.Position - desc.Parent.Position).Magnitude
-        end
-        log(string.format("  Prompt: Action='%s' | Object='%s' | Parent='%s' (%s) | Dist=%.1f", actionText, objectText, parentName, parentClass, dist))
-        table.insert(allPrompts, desc)
-    end
-end
-log("Total ProximityPrompts found in Workspace:", #allPrompts)
-
--- [3] Check PlotService Remotes specifically InteractSlot
-log("----------------------------------------")
-log("[3] Inspecting PlotService Remotes:")
-local plotService = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("PlotService")
-if plotService then
-    for _, f in ipairs(plotService:GetChildren()) do
-        for _, remote in ipairs(f:GetChildren()) do
-            log(string.format("  Remote: %s.%s (%s)", f.Name, remote.Name, remote.ClassName))
-        end
-    end
-end
-
--- [4] Check Character Tools (Equipped item in hand)
-log("----------------------------------------")
-log("[4] Checking Character & Backpack Tools:")
-if pChar then
-    for _, ch in ipairs(pChar:GetChildren()) do
-        if ch:IsA("Tool") or ch:IsA("Model") then
-            if ch.Name ~= "Animate" then
-                log("  Character child (held):", ch.Name, "ClassName:", ch.ClassName)
-            end
-        end
-    end
-end
-
--- [5] Check PlayerGui for "Put Back" button
-log("----------------------------------------")
-log("[5] Searching PlayerGui for 'Put Back' or Pickup UI:")
 local pg = lp:FindFirstChild("PlayerGui")
-if pg then
-    for _, desc in ipairs(pg:GetDescendants()) do
-        if desc:IsA("TextButton") or desc:IsA("ImageButton") or desc:IsA("TextLabel") then
-            local text = desc:IsA("TextLabel") and desc.Text or (desc:IsA("TextButton") and desc.Text or "")
-            if string.find(string.lower(text), "put") or string.find(string.lower(text), "back") or string.find(string.lower(text), "pickup") or string.find(string.lower(text), "place") then
-                log(string.format("  Found UI element: Name='%s' | Text='%s' | Path=%s", desc.Name, text, desc:GetFullName()))
+
+-- [1] Inspect PutBack Frame in HUD
+log("[1] Inspecting PutBack UI:")
+local putBackObj = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("HUD") and pg.Root.HUD:FindFirstChild("PutBack")
+if putBackObj then
+    log("PutBack Object found:", putBackObj:GetFullName())
+    for _, desc in ipairs(putBackObj:GetDescendants()) do
+        log(string.format("  child: %s (%s) visible=%s", desc.Name, desc.ClassName, tostring(rawget(desc, "Visible"))))
+    end
+else
+    log("PutBack Object not found in HUD!")
+end
+
+-- [2] Inspect Backpack UI in Menus
+log("----------------------------------------")
+log("[2] Inspecting Backpack Menu:")
+local bpMenu = pg and pg:FindFirstChild("Root") and pg.Root:FindFirstChild("Menus") and pg.Root.Menus:FindFirstChild("Backpack")
+if bpMenu then
+    log("Backpack Menu found:", bpMenu:GetFullName())
+    -- Look for Equip / Hold / Place buttons
+    local foundBtns = 0
+    for _, desc in ipairs(bpMenu:GetDescendants()) do
+        if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+            foundBtns = foundBtns + 1
+            if foundBtns <= 15 then
+                local txt = desc:IsA("TextButton") and desc.Text or desc.Name
+                log(string.format("  btn #%d: Name='%s' | Text='%s' | Path=%s", foundBtns, desc.Name, txt, desc.Name))
             end
         end
+    end
+    log("Total buttons in Backpack Menu:", foundBtns)
+end
+
+-- [3] Find player's specific Plot in Workspace.Plots.Claimed
+log("----------------------------------------")
+log("[3] Inspecting Claimed Plots:")
+local claimed = Workspace:FindFirstChild("Plots") and Workspace.Plots:FindFirstChild("Claimed")
+if claimed then
+    log("Claimed plots count:", #claimed:GetChildren())
+    for _, plot in ipairs(claimed:GetChildren()) do
+        local owner = plot:FindFirstChild("Owner") or plot:GetAttribute("Owner") or plot:FindFirstChild("Player")
+        local ownerName = "nil"
+        if owner then
+            ownerName = tostring(owner:IsA("ValueBase") and owner.Value or owner)
+        end
+        log(string.format("  Plot: %s | Owner: %s", plot.Name, ownerName))
+        
+        -- Check if this plot belongs to us or inspect its children (Podiums/Slots)
+        local slotsFolder = plot:FindFirstChild("Slots") or plot:FindFirstChild("Podiums") or plot
+        local podiumCount = 0
+        for _, ch in ipairs(slotsFolder:GetChildren()) do
+            if string.find(ch.Name, "Slot") or string.find(ch.Name, "Podium") or tonumber(ch.Name) then
+                podiumCount = podiumCount + 1
+                if podiumCount <= 5 then
+                    log(string.format("    Slot/Podium: %s (%s)", ch.Name, ch.ClassName))
+                    for _, sub in ipairs(ch:GetDescendants()) do
+                        if sub:IsA("ProximityPrompt") then
+                            log(string.format("      ProximityPrompt in %s: Action='%s', Object='%s', HoldDuration=%.2f", ch.Name, sub.ActionText, sub.ObjectText, sub.HoldDuration))
+                        end
+                    end
+                end
+            end
+        end
+        log("    Total podiums/slots in this plot:", podiumCount)
     end
 end
 
 log("==================================================")
-log("[GENESIS DIAG V13] COMPLETED")
+log("[GENESIS DIAG V14] COMPLETED")
 log("==================================================")
 
 local fullOutput = table.concat(logLines, "\n")
-local fileName = "Genesis_AnimeDice_Diag_V13.txt"
+local fileName = "Genesis_AnimeDice_Diag_V14.txt"
 if writefile then
     pcall(function() writefile(fileName, fullOutput) end)
     print("[GENESIS] Log saved to: " .. fileName)
