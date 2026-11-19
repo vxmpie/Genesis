@@ -43,11 +43,23 @@ class TestDiscordNotifier(unittest.IsolatedAsyncioTestCase):
         )
         payload = build_embed_payload(ev)
         embed = payload["embeds"][0]
-        self.assertEqual(embed["title"], "[CRITICAL] MuMu Instance Crash Detected")
+        self.assertEqual(embed["title"], ":red_circle: [CRITICAL] MuMu Instance Crash Detected")
         self.assertEqual(embed["color"], 0xEF4444)
         self.assertTrue(embed["timestamp"].endswith("Z"))
         self.assertIsNone(_EMOJI_RE.search(embed["title"]))
         self.assertIsNone(_EMOJI_RE.search(embed["description"]))
+
+        startup_ev = NotificationEvent(
+            event_type="startup",
+            severity="info",
+            title="Genesis Core Online",
+            description="Online",
+            dedupe_key="startup_online",
+        )
+        self.assertEqual(
+            build_embed_payload(startup_ev)["embeds"][0]["title"],
+            ":green_circle: [INFO] Genesis Core Online",
+        )
 
     async def test_queue_delivery_and_429_retry(self) -> None:
         attempts_seen: list[str] = []

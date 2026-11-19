@@ -15,11 +15,22 @@ from backend.core.events import add_event, broadcast_payload_threadsafe
 
 Severity = Literal["critical", "warning", "recovery", "info"]
 
-SEVERITY_STYLES: dict[str, tuple[int, str]] = {
-    "critical": (0xEF4444, "CRITICAL"),
-    "warning": (0xF59E0B, "WARNING"),
-    "recovery": (0x10B981, "RESOLVED"),
-    "info": (0x3B82F6, "INFO"),
+SEVERITY_STYLES: dict[str, tuple[int, str, str]] = {
+    "critical": (0xEF4444, "CRITICAL", ":red_circle:"),
+    "warning": (0xF59E0B, "WARNING", ":warning:"),
+    "recovery": (0x10B981, "RESOLVED", ":white_check_mark:"),
+    "info": (0x3B82F6, "INFO", ":green_circle:"),
+}
+
+EVENT_ICON_SHORTCODES: dict[str, str] = {
+    "startup": ":green_circle:",
+    "mumu_crash": ":red_circle:",
+    "watchdog_recovery": ":arrows_counterclockwise:",
+    "ram_critical": ":warning:",
+    "vm_disk_critical": ":warning:",
+    "drift": ":shield:",
+    "net_outage": ":white_check_mark:",
+    "test": ":wrench:",
 }
 
 EVENT_TOGGLE_MAP: dict[str, str] = {
@@ -69,10 +80,16 @@ class NotificationEvent:
 
 
 def build_embed_payload(event: NotificationEvent) -> dict:
-    color, prefix = SEVERITY_STYLES.get(event.severity, (0x3B82F6, "INFO"))
+    color, prefix, fallback_icon = SEVERITY_STYLES.get(event.severity, (0x3B82F6, "INFO", ":green_circle:"))
+    if event.event_type == "tunnel_change":
+        icon = ":red_circle:" if event.severity == "warning" else ":globe_with_meridians:"
+    else:
+        icon = EVENT_ICON_SHORTCODES.get(event.event_type, fallback_icon)
+
     clean_title = event.title.strip()
     tag = f"[{prefix}]"
-    formatted_title = clean_title if clean_title.startswith("[") else f"{tag} {clean_title}"
+    base_title = clean_title if clean_title.startswith("[") else f"{tag} {clean_title}"
+    formatted_title = base_title if base_title.startswith(":") else f"{icon} {base_title}"
 
     host_label = socket.gethostname()
     return {
