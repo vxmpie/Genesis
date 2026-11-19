@@ -1,5 +1,6 @@
 import asyncio
 import json
+import psutil
 from fastapi import WebSocket, WebSocketDisconnect
 
 from backend.core.auth import is_auth_enabled, verify_session_token
@@ -10,7 +11,7 @@ from backend.core.config import (
     save_config,
     update_alerts_config,
 )
-from backend.core.events import get_recent_events
+from backend.core.events import add_event, get_recent_events
 from backend.services.discord_notifier import notifier, purge_discord_channel_messages
 from backend.services.maintenance import (
     check_hardening_drift,
@@ -27,9 +28,11 @@ from backend.services.maintenance import (
 )
 from backend.services.mumu_monitor import (
     check_mumu_health,
+    get_adb_port_for_instance,
     get_game_name_for_place_id,
     get_mumu_instances,
     governor_instance_action,
+    set_auto_rejoin,
     set_instance_place_id,
     set_instance_username,
 )
@@ -48,6 +51,7 @@ from backend.services.tunnel import get_tunnel_status, request_tunnel_restart
 from backend.services.win32_ops import (
     apply_pcore_affinity_for_mumu,
     get_affinity_status,
+    get_protected_names,
     get_timer_resolution_status,
     scan_and_flush_shader_cache,
     set_high_precision_timer,
@@ -412,32 +416,128 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
         await manager.send_to(ws, {"type": "total_boost_reset", "data": summary})
 
     elif cmd in ("trim_mumu_instance", "trim_mumu"):
-        pid = data.get("pid")
-        inst = data.get("instance")
+        def _parse_int(val: object, min_val: int = 1) -> int | None:
+            if val is None or isinstance(val, bool):
+                return None
+            try:
+                num = int(val)  # type: ignore[arg-type]
+                return num if num >= min_val else None
+            except (TypeError, ValueError):
+                return None
+
+        raw_pid = data.get("pid")
+        raw_inst = data.get("instance")
+        pid = _parse_int(raw_pid, 5)
+        if raw_pid is not None and pid is None:
+            await manager.send_to(
+                ws, {"type": "mumu_trim_result", "data": {"success": False, "error": "Invalid PID"}}
+            )
+            return
+
+        inst = _parse_int(raw_inst, 1)
+        adb_port: int | None = None
+        instances = get_mumu_instances()
         if not pid and inst:
             m_inst = next(
-                (
-                    x
-                    for x in get_mumu_instances()
-                    if x.get("instance_index") == inst or x.get("index") == inst
-                ),
+                (x for x in instances if x.get("instance_index") == inst or x.get("index") == inst),
                 None,
             )
             if m_inst:
-                pid = m_inst.get("pid")
+                pid = _parse_int(m_inst.get("pid"), 5)
+                if isinstance(m_inst.get("adb_port"), int) and m_inst["adb_port"] > 0:
+                    adb_port = m_inst["adb_port"]
+        elif pid:
+            m_inst = next((x for x in instances if x.get("pid") == pid), None)
+            if m_inst and isinstance(m_inst.get("adb_port"), int) and m_inst["adb_port"] > 0:
+                adb_port = m_inst["adb_port"]
+        if adb_port is None and inst is not None:
+            adb_port = get_adb_port_for_instance(inst)
         if not pid:
-            devs = [x for x in get_mumu_instances() if x.get("type") == "Emulator"]
+            devs = [x for x in instances if x.get("type") == "Emulator"]
             if devs:
-                pid = devs[0].get("pid")
+                pid = _parse_int(devs[0].get("pid"), 5)
+                if adb_port is None and isinstance(devs[0].get("adb_port"), int) and devs[0]["adb_port"] > 0:
+                    adb_port = devs[0]["adb_port"]
         if pid:
-            res = await asyncio.to_thread(
-                trim_single_process, int(pid), lambda: trim_vm_caches(16384)
-            )
+            fallback_fn = (lambda p=adb_port: trim_vm_caches(p)) if adb_port else None
+            res = await asyncio.to_thread(trim_single_process, pid, fallback_fn)
             await manager.send_to(ws, {"type": "mumu_trim_result", "data": res})
         else:
             await manager.send_to(
                 ws, {"type": "mumu_trim_result", "data": {"success": False, "error": "Instance PID not found"}}
             )
+
+    elif cmd == "trim_process":
+        raw_pid = data.get("pid")
+        pid = 0
+        if raw_pid is not None and not isinstance(raw_pid, bool):
+            try:
+                pid = int(raw_pid)
+            except (TypeError, ValueError):
+                pid = 0
+        if pid <= 4:
+            await manager.send_to(
+                ws, {"type": "process_trim_result", "data": {"success": False, "pid": pid, "error": "Invalid PID"}}
+            )
+            return
+        res = await asyncio.to_thread(trim_single_process, pid)
+        if isinstance(res, dict):
+            res.setdefault("pid", pid)
+        await manager.send_to(ws, {"type": "process_trim_result", "data": res})
+
+    elif cmd == "kill_process":
+        raw_pid = data.get("pid")
+        pid = 0
+        if raw_pid is not None and not isinstance(raw_pid, bool):
+            try:
+                pid = int(raw_pid)
+            except (TypeError, ValueError):
+                pid = 0
+        if pid <= 4:
+            await manager.send_to(
+                ws, {"type": "process_kill_result", "data": {"success": False, "pid": pid, "error": "Invalid PID"}}
+            )
+            return
+
+        def _kill_proc_sync(target_pid: int) -> dict:
+            try:
+                proc = psutil.Process(target_pid)
+                name = proc.name() or "Process"
+                if name.lower() in get_protected_names():
+                    return {"success": False, "pid": target_pid, "name": name, "error": f"{name} is protected"}
+                proc.terminate()
+                add_event("kill", f"Process killed: {name} (PID {target_pid})")
+                return {"success": True, "pid": target_pid, "name": name}
+            except psutil.NoSuchProcess:
+                return {"success": False, "pid": target_pid, "error": "Process not found"}
+            except psutil.AccessDenied:
+                return {"success": False, "pid": target_pid, "error": "Access denied"}
+            except Exception as exc:
+                return {"success": False, "pid": target_pid, "error": str(exc)}
+
+        res = await asyncio.to_thread(_kill_proc_sync, pid)
+        await manager.send_to(ws, {"type": "process_kill_result", "data": res})
+
+    elif cmd == "set_auto_rejoin":
+        raw_inst = data.get("instance")
+        inst_val: int | None
+        if raw_inst is None:
+            inst_val = None
+        elif isinstance(raw_inst, bool):
+            await manager.send_to(ws, {"type": "error", "error": "Invalid instance index"})
+            return
+        else:
+            try:
+                inst_val = int(raw_inst)
+            except (TypeError, ValueError):
+                await manager.send_to(ws, {"type": "error", "error": "Invalid instance index"})
+                return
+            if inst_val < 1:
+                await manager.send_to(ws, {"type": "error", "error": "Invalid instance index"})
+                return
+        enabled = bool(data.get("enabled", True))
+        res = await asyncio.to_thread(set_auto_rejoin, inst_val, enabled)
+        await broadcast_event({"type": "auto_rejoin_updated", **res})
 
     elif cmd == "toggle_timer_resolution":
         enable = bool(data.get("enabled", True))

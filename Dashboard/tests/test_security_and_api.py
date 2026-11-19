@@ -230,6 +230,9 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                     "governor_action",
                     "set_mumu_game",
                     "set_mumu_username",
+                    "set_auto_rejoin",
+                    "trim_process",
+                    "kill_process",
                     "flush_shader_cache",
                     "toggle_timer_resolution",
                     "toggle_pcore_affinity",
@@ -272,6 +275,105 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
             with tunnel_mod._tunnel_lock:
                 tunnel_mod._tunnel_state.clear()
                 tunnel_mod._tunnel_state.update(orig_state)
+
+    async def test_ws_trim_and_kill_process_validation_and_protection(self) -> None:
+        ws = _FakeWebSocket()
+        from backend.api import ws as ws_mod
+
+        await ws_mod.manager.connect(ws, True)
+        try:
+            with patch.object(ws_mod, "is_auth_enabled", return_value=True):
+                for bad_pid in (0, 4, -3, "bad", True):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "trim_process", "pid": bad_pid})
+                    self.assertEqual(ws.sent[-1]["type"], "process_trim_result")
+                    self.assertFalse(ws.sent[-1]["data"]["success"])
+
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "kill_process", "pid": bad_pid})
+                    self.assertEqual(ws.sent[-1]["type"], "process_kill_result")
+                    self.assertFalse(ws.sent[-1]["data"]["success"])
+
+                for bad_mumu_pid in ("bad", 4, True):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "trim_mumu_instance", "pid": bad_mumu_pid})
+                    self.assertEqual(ws.sent[-1]["type"], "mumu_trim_result")
+                    self.assertFalse(ws.sent[-1]["data"]["success"])
+
+                protected_proc = SimpleNamespace(
+                    name=lambda: "csrss.exe",
+                    terminate=lambda: (_ for _ in ()).throw(AssertionError("should not terminate protected")),
+                )
+                with patch.object(ws_mod.psutil, "Process", return_value=protected_proc):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "kill_process", "pid": 4444})
+                    self.assertEqual(ws.sent[-1]["type"], "process_kill_result")
+                    self.assertFalse(ws.sent[-1]["data"]["success"])
+                    self.assertIn("protected", ws.sent[-1]["data"]["error"])
+
+                terminated: list[bool] = []
+                regular_proc = SimpleNamespace(
+                    name=lambda: "notepad.exe",
+                    terminate=lambda: terminated.append(True),
+                )
+                with patch.object(ws_mod.psutil, "Process", return_value=regular_proc), patch.object(
+                    ws_mod, "add_event"
+                ):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "kill_process", "pid": 5555})
+                    self.assertEqual(ws.sent[-1]["type"], "process_kill_result")
+                    self.assertTrue(ws.sent[-1]["data"]["success"])
+                    self.assertEqual(terminated, [True])
+        finally:
+            ws_mod.manager.disconnect(ws)
+
+    async def test_ws_set_auto_rejoin_and_heartbeat_skip(self) -> None:
+        ws = _FakeWebSocket()
+        from backend.api import ws as ws_mod
+        from backend.services import mumu_monitor as mm
+
+        orig_mumu = copy.deepcopy(mm.CONFIG.get("mumu", {}))
+        await ws_mod.manager.connect(ws, True)
+        try:
+            with patch.object(ws_mod, "is_auth_enabled", return_value=True):
+                for bad_inst in (0, "bad"):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "set_auto_rejoin", "instance": bad_inst, "enabled": False})
+                    self.assertEqual(ws.sent[-1]["type"], "error")
+
+                with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+                    ws.sent.clear()
+                    await handle_ws_command(ws, {"command": "set_auto_rejoin", "instance": 2, "enabled": False})
+                    self.assertEqual(ws.sent[-1]["type"], "auto_rejoin_updated")
+                    self.assertEqual(ws.sent[-1]["instance"], 2)
+                    self.assertFalse(ws.sent[-1]["enabled"])
+                    self.assertFalse(mm.CONFIG["mumu"]["instance_auto_rejoin"]["2"])
+
+                    with patch(
+                        "backend.api.routes.record_bot_heartbeat",
+                        return_value={
+                            "instance": 2,
+                            "serial": "127.0.0.1:16416",
+                            "place_id": 123,
+                            "game_name": "TestGame",
+                            "status": "disconnected",
+                            "ack": 1.0,
+                        },
+                    ), patch("backend.api.routes.recover_roblox_instance") as mock_rec, patch(
+                        "backend.api.routes.add_event"
+                    ):
+                        st, body = await _call_asgi(
+                            "POST",
+                            "/api/bot/heartbeat",
+                            {"instance": 2, "status": "disconnected", "place_id": 123},
+                        )
+                        self.assertEqual(st, 200)
+                        self.assertTrue(body["ok"])
+                        self.assertTrue(body.get("rejoin_skipped"))
+                        mock_rec.assert_not_called()
+        finally:
+            mm.CONFIG["mumu"] = orig_mumu
+            ws_mod.manager.disconnect(ws)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,8 @@ DEFAULT_CONFIG: dict = {
         "adb_base_port": 16384,
         "adb_port_step": 32,
         "max_instances": 10,
+        "auto_reconnect": True,
+        "instance_auto_rejoin": {},
     },
     "metrics": {"update_interval_ms": 1000, "history_length": 60},
     "maintenance": {
@@ -241,6 +243,10 @@ def mask_config_for_client(cfg: dict | None = None) -> dict:
         alerts_cfg["heartbeat_url"] = ""
         alerts_cfg["heartbeat_configured"] = bool(raw_heartbeat)
         alerts_cfg["heartbeat_masked"] = mask_secret_url(raw_heartbeat)
+
+        mumu_cfg = safe_cfg.setdefault("mumu", {})
+        mumu_cfg.setdefault("auto_reconnect", True)
+        mumu_cfg.setdefault("instance_auto_rejoin", {})
 
         tunnel_cfg = safe_cfg.setdefault("tunnel", {})
         raw_ngrok = str(tunnel_cfg.get("ngrok_authtoken", "") or "").strip()

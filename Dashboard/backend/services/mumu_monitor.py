@@ -15,7 +15,7 @@ from backend.core.config import CONFIG, CONFIG_LOCK, save_config
 from backend.core.events import add_event
 from backend.services.discord_notifier import NotificationEvent, notifier
 from backend.services.telemetry import increment_watchdog_recovery, set_cached_top_processes
-from backend.services.win32_ops import disable_ecoqos_for_mumu
+from backend.services.win32_ops import disable_ecoqos_for_mumu, get_protected_names
 
 # --- Process Classification Sets (Exact Match, Zero Substring Guessing) ---
 HELPER_DENYLIST: frozenset[str] = frozenset(
@@ -289,7 +289,120 @@ _cached_mumu_health: dict = {
     "vm_disk_last_check": None,
     "instance_places": {},
     "game_presets": [],
+    "auto_rejoin_global": True,
+    "instance_auto_rejoin": {},
 }
+
+
+# --- Auto-Rejoin Policy & Canonical Slot/Port Mapping ---
+def get_adb_port_for_instance(instance_idx: int) -> int:
+    with _process_sampler_lock:
+        for inst in _cached_mumu_instances:
+            if inst.get("type") == "Emulator" and inst.get("instance_index") == instance_idx:
+                port_val = inst.get("adb_port")
+                if isinstance(port_val, int) and port_val > 0:
+                    return port_val
+    mumu_cfg = CONFIG.get("mumu", {})
+    base_port = int(mumu_cfg.get("adb_base_port", 16384))
+    step = int(mumu_cfg.get("adb_port_step", 32))
+    return base_port + ((max(1, int(instance_idx)) - 1) * step)
+
+
+def resolve_instance_index_from_serial(serial: str, fallback_idx: int = 1) -> int:
+    match = re.search(r":(\d+)$", str(serial or "").strip())
+    if not match:
+        return fallback_idx
+    port = int(match.group(1))
+    mumu_cfg = CONFIG.get("mumu", {})
+    base_port = int(mumu_cfg.get("adb_base_port", 16384))
+    step = int(mumu_cfg.get("adb_port_step", 32))
+    if step > 0 and port >= base_port and (port - base_port) % step == 0:
+        return ((port - base_port) // step) + 1
+    return fallback_idx
+
+
+def is_auto_rejoin_enabled(instance_idx: int | str, serial: str = "") -> bool:
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.get("mumu", {})
+        if not bool(mumu_cfg.get("auto_reconnect", True)):
+            return False
+        raw_flags = mumu_cfg.get("instance_auto_rejoin", {})
+        flags = raw_flags if isinstance(raw_flags, dict) else {}
+
+        if serial:
+            slot_from_serial = resolve_instance_index_from_serial(serial, -1)
+            if slot_from_serial > 0 and str(slot_from_serial) in flags:
+                return bool(flags[str(slot_from_serial)])
+            if serial in flags:
+                return bool(flags[serial])
+
+        idx_key = str(instance_idx) if instance_idx is not None else ""
+        if idx_key and idx_key in flags:
+            return bool(flags[idx_key])
+
+        return True
+
+
+def set_auto_rejoin(instance_idx: int | None, enabled: bool) -> dict:
+    idx: int | None = None
+    if instance_idx is not None:
+        idx = int(instance_idx)
+        if idx < 1:
+            raise ValueError("instance must be >= 1")
+
+    flag_bool = bool(enabled)
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.setdefault("mumu", {})
+        flags = mumu_cfg.get("instance_auto_rejoin")
+        if not isinstance(flags, dict):
+            flags = {}
+            mumu_cfg["instance_auto_rejoin"] = flags
+        if idx is None:
+            mumu_cfg["auto_reconnect"] = flag_bool
+        else:
+            flags[str(idx)] = flag_bool
+        save_config(CONFIG)
+        global_enabled = bool(mumu_cfg.get("auto_reconnect", True))
+        flags_snap = copy.deepcopy(flags)
+
+    if flag_bool:
+        now = time.time()
+        if idx is None:
+            _mumu_consecutive_idle.clear()
+            for hb in _bot_heartbeats.values():
+                hb["last_seen"] = now
+        else:
+            target_serial = f"127.0.0.1:{get_adb_port_for_instance(idx)}"
+            _mumu_consecutive_idle.pop(target_serial, None)
+            for key in list(_mumu_consecutive_idle.keys()):
+                if resolve_instance_index_from_serial(key, -1) == idx:
+                    _mumu_consecutive_idle.pop(key, None)
+            for key, hb in _bot_heartbeats.items():
+                if key == target_serial or resolve_instance_index_from_serial(key, -1) == idx:
+                    hb["last_seen"] = now
+
+    with _process_sampler_lock:
+        _cached_mumu_health["auto_rejoin_global"] = global_enabled
+        _cached_mumu_health["instance_auto_rejoin"] = copy.deepcopy(flags_snap)
+        for dev in _cached_mumu_health.get("devices", []):
+            dev_idx = dev.get("index") or dev.get("instance_index")
+            dev["auto_rejoin"] = global_enabled and bool(flags_snap.get(str(dev_idx), True))
+        for inst in _cached_mumu_instances:
+            if inst.get("type") == "Emulator":
+                inst_idx = inst.get("index") or inst.get("instance_index")
+                inst["auto_rejoin"] = global_enabled and bool(flags_snap.get(str(inst_idx), True))
+
+    if idx is None:
+        add_event("system", f"Global Auto-Rejoin {'enabled' if flag_bool else 'disabled'}")
+    else:
+        add_event("system", f"Instance #{idx} Auto-Rejoin {'enabled' if flag_bool else 'disabled'}")
+
+    return {
+        "instance": idx,
+        "enabled": flag_bool,
+        "global": global_enabled,
+        "instance_auto_rejoin": flags_snap,
+    }
 
 _vm_disk_cache_ref: list = []
 _vm_disk_last_check_ref: str | None = None
@@ -397,6 +510,7 @@ def _sample_all_processes_sync() -> None:
         pass
 
     emulator_allowlist = get_emulator_allowlist()
+    protected_names = get_protected_names()
     mgr_by_pid = query_mumu_manager_sync()
 
     all_procs: list[dict] = []
@@ -427,6 +541,7 @@ def _sample_all_processes_sync() -> None:
                     "name": raw_name,
                     "ram_mb": ram_mb,
                     "cpu_percent": 0.0,
+                    "protected": low_name in protected_names,
                 }
             )
 
@@ -453,6 +568,8 @@ def _sample_all_processes_sync() -> None:
             is_device = role == "emulator"
 
             device_idx = 0
+            adb_port: int | None = None
+            auto_rejoin_val = True
             target_place_id = None
             target_game_name = None
             saved_username = ""
@@ -461,7 +578,19 @@ def _sample_all_processes_sync() -> None:
             presence_status = "Unknown"
 
             if is_device:
-                device_idx = _assign_instance_index(pid, mgr_by_pid.get(pid), cached_proc)
+                mgr_info = mgr_by_pid.get(pid)
+                device_idx = _assign_instance_index(pid, mgr_info, cached_proc)
+                raw_port = mgr_info.get("adb_port") if isinstance(mgr_info, dict) else None
+                try:
+                    adb_port = int(raw_port) if raw_port else None
+                except (TypeError, ValueError):
+                    adb_port = None
+                if not adb_port or adb_port <= 0:
+                    mumu_snap = CONFIG.get("mumu", {})
+                    base_p = int(mumu_snap.get("adb_base_port", 16384))
+                    step_p = int(mumu_snap.get("adb_port_step", 32))
+                    adb_port = base_p + ((max(1, device_idx) - 1) * step_p)
+                auto_rejoin_val = is_auto_rejoin_enabled(device_idx, f"127.0.0.1:{adb_port}")
                 saved_username = CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(device_idx), "")
                 live_pres = _instance_live_presence.get(str(device_idx)) or {}
                 live_game = live_pres.get("game_name")
@@ -472,31 +601,34 @@ def _sample_all_processes_sync() -> None:
                 target_place_id = get_instance_place_id(device_idx)
                 target_game_name = get_game_name_for_place_id(target_place_id)
 
-            active_game_display = live_game or target_game_name or "Storage Hunters"
+            active_game_display = live_game or target_game_name or "Unassigned"
+            resolved_place = live_place or target_place_id or 0
 
-            mumu_instances.append(
-                {
-                    "pid": pid,
-                    "name": raw_name,
-                    "cpu_percent": cpu_pct,
-                    "ram_mb": ram_mb,
-                    "uptime": f"{hours}h{minutes:02d}m",
-                    "uptime_seconds": int(uptime_sec),
-                    "status": "running",
-                    "is_bloated": is_bloated,
-                    "index": device_idx if is_device else 0,
-                    "instance_index": device_idx if is_device else 0,
-                    "type": "Emulator" if is_device else "Launcher",
-                    "username": saved_username,
-                    "active_game": active_game_display,
-                    "active_place_id": live_place or target_place_id,
-                    "presence_status": presence_status,
-                    "place_id": live_place or target_place_id or 98800969324557,
-                    "target_place_id": live_place or target_place_id or 98800969324557,
-                    "target_game": active_game_display,
-                    "target_game_name": active_game_display,
-                }
-            )
+            entry: dict = {
+                "pid": pid,
+                "name": raw_name,
+                "cpu_percent": cpu_pct,
+                "ram_mb": ram_mb,
+                "uptime": f"{hours}h{minutes:02d}m",
+                "uptime_seconds": int(uptime_sec),
+                "status": "running",
+                "is_bloated": is_bloated,
+                "index": device_idx if is_device else 0,
+                "instance_index": device_idx if is_device else 0,
+                "type": "Emulator" if is_device else "Launcher",
+                "username": saved_username,
+                "active_game": active_game_display,
+                "active_place_id": resolved_place or None,
+                "presence_status": presence_status,
+                "place_id": resolved_place,
+                "target_place_id": resolved_place,
+                "target_game": active_game_display,
+                "target_game_name": active_game_display,
+            }
+            if is_device:
+                entry["adb_port"] = adb_port
+                entry["auto_rejoin"] = auto_rejoin_val
+            mumu_instances.append(entry)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
@@ -532,6 +664,11 @@ def _sample_all_processes_sync() -> None:
         mumu_cfg = CONFIG.get("mumu", {})
         instance_places_snap = copy.deepcopy(mumu_cfg.get("instance_places", {}))
         game_presets_snap = copy.deepcopy(mumu_cfg.get("game_presets", []))
+        auto_rejoin_global = bool(mumu_cfg.get("auto_reconnect", True))
+        raw_rejoin_flags = mumu_cfg.get("instance_auto_rejoin", {})
+        instance_auto_rejoin_snap = (
+            copy.deepcopy(raw_rejoin_flags) if isinstance(raw_rejoin_flags, dict) else {}
+        )
 
     with _process_sampler_lock:
         _cached_mumu_instances = mumu_instances
@@ -548,6 +685,8 @@ def _sample_all_processes_sync() -> None:
             "vm_disk_last_check": _vm_disk_last_check_ref,
             "instance_places": instance_places_snap,
             "game_presets": game_presets_snap,
+            "auto_rejoin_global": auto_rejoin_global,
+            "instance_auto_rejoin": instance_auto_rejoin_snap,
         }
 
 
@@ -632,7 +771,7 @@ _mumu_consecutive_idle: dict[str, int] = {}
 
 def resolve_roblox_game_name_sync(place_id: int) -> str:
     if not place_id or place_id <= 0:
-        return "Storage Hunters"
+        return "Unassigned"
     if place_id in _place_name_cache:
         return _place_name_cache[place_id]
 
@@ -784,7 +923,7 @@ def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
         except (ValueError, TypeError):
             pass
 
-    return int(mumu_cfg.get("default_place_id", 98800969324557))
+    return int(mumu_cfg.get("default_place_id", 0) or 0)
 
 
 def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
@@ -805,7 +944,7 @@ def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
 
 def get_game_name_for_place_id(place_id: int) -> str:
     if not place_id or place_id <= 0:
-        return "Storage Hunters"
+        return "Unassigned"
     if place_id in _place_name_cache:
         return _place_name_cache[place_id]
     return resolve_roblox_game_name_sync(place_id)
@@ -821,7 +960,24 @@ def record_bot_heartbeat(
     now = time.time()
     adb = find_mumu_adb()
     devices = get_mumu_adb_devices() if adb else []
-    serial = devices[0] if devices else "127.0.0.1:16384"
+    try:
+        inst_num = int(inst_id)
+    except (TypeError, ValueError):
+        inst_num = 1
+    expected_port = get_adb_port_for_instance(max(1, inst_num))
+    expected_serial = f"127.0.0.1:{expected_port}"
+    if expected_serial in devices:
+        serial = expected_serial
+    elif devices and 1 <= inst_num <= len(devices):
+        matched = next(
+            (d for d in devices if resolve_instance_index_from_serial(d, -1) == inst_num),
+            None,
+        )
+        serial = matched or devices[inst_num - 1]
+    elif devices:
+        serial = devices[0]
+    else:
+        serial = expected_serial
 
     place_num: int | None = None
     if place_id is not None:
@@ -866,7 +1022,7 @@ def governor_instance_action(instance_idx: int, action: str) -> dict:
         return {"success": False, "error": "ADB not found"}
 
     _state_tracker.mark_governor_action()
-    port = 16384 + ((instance_idx - 1) * 32)
+    port = get_adb_port_for_instance(instance_idx)
     device_id = f"127.0.0.1:{port}"
 
     if action == "restart_game":
@@ -1021,42 +1177,61 @@ async def roblox_presence_tracker_loop() -> None:
         await asyncio.sleep(6)
 
 
+def evaluate_watchdog_device_sync(
+    adb: Path,
+    serial: str,
+    enum_idx: int,
+    now: float | None = None,
+) -> str:
+    ts = now if now is not None else time.time()
+    slot_idx = resolve_instance_index_from_serial(serial, enum_idx)
+    if not is_auto_rejoin_enabled(slot_idx, serial):
+        _mumu_consecutive_idle[serial] = 0
+        return "skipped_disabled"
+
+    hb = _bot_heartbeats.get(serial)
+    if hb:
+        last_seen = hb.get("last_seen", 0)
+        if ts - last_seen > 45:
+            place_id = get_instance_place_id(slot_idx, serial)
+            recover_roblox_instance(serial, place_id, slot_idx)
+            hb["last_seen"] = ts
+            return "recovered_stale_hb"
+        return "ok"
+
+    r_pid = subprocess.run(
+        [str(adb), "-s", serial, "shell", "pidof", "com.roblox.client"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
+    if not pid_out:
+        _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
+        if _mumu_consecutive_idle[serial] >= 3:
+            place_id = get_instance_place_id(slot_idx, serial)
+            recover_roblox_instance(serial, place_id, slot_idx)
+            _mumu_consecutive_idle[serial] = 0
+            return "recovered_idle"
+        return "idle_incremented"
+
+    _mumu_consecutive_idle[serial] = 0
+    return "ok"
+
+
 async def mumu_game_watchdog_loop() -> None:
     await asyncio.sleep(20)
     while True:
         try:
             mumu_cfg = CONFIG.get("mumu", {})
             if mumu_cfg.get("auto_reconnect", True):
-                now = time.time()
                 adb = await asyncio.to_thread(find_mumu_adb)
                 if adb:
                     devices = await asyncio.to_thread(get_mumu_adb_devices)
-                    for idx, serial in enumerate(devices, 1):
-                        hb = _bot_heartbeats.get(serial)
-                        if hb:
-                            last_seen = hb.get("last_seen", 0)
-                            if now - last_seen > 45:
-                                place_id = get_instance_place_id(idx, serial)
-                                await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
-                                _bot_heartbeats[serial]["last_seen"] = now
-                        else:
-                            r_pid = await asyncio.to_thread(
-                                lambda s=serial, a=adb: subprocess.run(
-                                    [str(a), "-s", s, "shell", "pidof", "com.roblox.client"],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=5,
-                                )
-                            )
-                            pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
-                            if not pid_out:
-                                _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
-                                if _mumu_consecutive_idle[serial] >= 3:
-                                    place_id = get_instance_place_id(idx, serial)
-                                    await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
-                                    _mumu_consecutive_idle[serial] = 0
-                            else:
-                                _mumu_consecutive_idle[serial] = 0
+                    for enum_idx, serial in enumerate(devices, 1):
+                        await asyncio.to_thread(evaluate_watchdog_device_sync, adb, serial, enum_idx)
+            else:
+                _mumu_consecutive_idle.clear()
             interval = int(mumu_cfg.get("check_interval_seconds", 20))
             await asyncio.sleep(max(15, interval))
         except asyncio.CancelledError:

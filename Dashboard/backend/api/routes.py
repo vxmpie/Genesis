@@ -41,6 +41,8 @@ from backend.services.maintenance import (
 )
 from backend.services.mumu_monitor import (
     get_game_name_for_place_id,
+    get_mumu_instances,
+    is_auto_rejoin_enabled,
     record_bot_heartbeat,
     recover_roblox_instance,
     set_instance_place_id,
@@ -202,7 +204,16 @@ async def api_trim_mumu_instance(request: Request):
         pid_int = int(pid_raw)
     except (TypeError, ValueError):
         return JSONResponse({"error": "Invalid PID"}, status_code=400)
-    res = await asyncio.to_thread(trim_single_process, pid_int, lambda: trim_vm_caches(16384))
+    if pid_int <= 4:
+        return JSONResponse({"error": "Invalid PID"}, status_code=400)
+    matched = next((x for x in get_mumu_instances() if x.get("pid") == pid_int), None)
+    adb_port = (
+        matched.get("adb_port")
+        if matched and isinstance(matched.get("adb_port"), int) and matched["adb_port"] > 0
+        else None
+    )
+    fallback_fn = (lambda p=adb_port: trim_vm_caches(p)) if adb_port else None
+    res = await asyncio.to_thread(trim_single_process, pid_int, fallback_fn)
     return JSONResponse(res)
 
 
@@ -242,10 +253,17 @@ async def api_bot_heartbeat(request: Request):
     ack = await asyncio.to_thread(record_bot_heartbeat, place_id, inst_id, player, status, extra)
     if status == "disconnected":
         reason = extra.get("reason", "Disconnect Error 277")
-        add_event("warning", f"In-Game Bot: {reason} on Instance {inst_id} ({ack['serial']})")
-        asyncio.create_task(
-            asyncio.to_thread(recover_roblox_instance, ack["serial"], ack["place_id"], inst_id)
-        )
+        if is_auto_rejoin_enabled(inst_id, ack["serial"]):
+            add_event("warning", f"In-Game Bot: {reason} on Instance {inst_id} ({ack['serial']})")
+            asyncio.create_task(
+                asyncio.to_thread(recover_roblox_instance, ack["serial"], ack["place_id"], inst_id)
+            )
+        else:
+            add_event(
+                "warning",
+                f"In-Game Bot: {reason} on Instance {inst_id} ({ack['serial']}) -- Rejoin skipped (auto-rejoin off)",
+            )
+            return JSONResponse({"ok": True, "rejoin_skipped": True, **ack})
 
     return JSONResponse({"ok": True, **ack})
 
@@ -362,19 +380,26 @@ async def api_kill(request: Request, pid: int):
     auth_err = _require_auth(request)
     if auth_err:
         return auth_err
-    try:
-        proc = psutil.Process(pid)
-        name = proc.name()
-        protected = get_protected_names()
-        if name.lower() in protected:
-            return JSONResponse({"error": f"{name} is protected"}, status_code=403)
-        proc.terminate()
-        add_event("kill", f"Process killed: {name} (PID {pid})")
-        return JSONResponse({"ok": True, "name": name, "pid": pid})
-    except psutil.NoSuchProcess:
-        return JSONResponse({"error": "Process not found"}, status_code=404)
-    except psutil.AccessDenied:
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    if pid <= 4:
+        return JSONResponse({"error": "Invalid PID"}, status_code=400)
+
+    def _kill_sync() -> tuple[int, dict]:
+        try:
+            proc = psutil.Process(pid)
+            name = proc.name()
+            protected = get_protected_names()
+            if name.lower() in protected:
+                return 403, {"error": f"{name} is protected"}
+            proc.terminate()
+            add_event("kill", f"Process killed: {name} (PID {pid})")
+            return 200, {"ok": True, "name": name, "pid": pid}
+        except psutil.NoSuchProcess:
+            return 404, {"error": "Process not found"}
+        except psutil.AccessDenied:
+            return 403, {"error": "Access denied"}
+
+    status_code, payload = await asyncio.to_thread(_kill_sync)
+    return JSONResponse(payload, status_code=status_code)
 
 
 @router.get("/api/deep-clean/preview")
