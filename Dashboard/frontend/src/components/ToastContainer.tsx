@@ -1,5 +1,12 @@
 import React from 'react';
-import { Zap, AlertTriangle, AlertOctagon, Info, X } from 'lucide-react';
+import {
+  AlertOctagon,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  X,
+  Zap,
+} from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
 import type { ToastMessage } from '../types/dashboard';
 
@@ -7,37 +14,64 @@ export const ToastContainer: React.FC = () => {
   const toasts = useDashboardStore((s) => s.toasts);
   const removeToast = useDashboardStore((s) => s.removeToast);
 
-  const getToastIcon = (type: ToastMessage['type']) => {
+  if (toasts.length === 0) return null;
+
+  const getStyle = (type: ToastMessage['type']) => {
     switch (type) {
       case 'boost':
-        return <Zap className="w-4 h-4 text-genesis-accent shrink-0" />;
+        return {
+          border: 'border-l-ops-accent',
+          icon: <Zap className="w-4 h-4 text-ops-accent shrink-0" />,
+        };
+      case 'success':
+        return {
+          border: 'border-l-ops-ok',
+          icon: <CheckCircle2 className="w-4 h-4 text-ops-ok shrink-0" />,
+        };
       case 'warning':
-        return <AlertTriangle className="w-4 h-4 text-genesis-amber shrink-0" />;
+        return {
+          border: 'border-l-ops-warn',
+          icon: <AlertTriangle className="w-4 h-4 text-ops-warn shrink-0" />,
+        };
       case 'error':
       case 'crash':
-        return <AlertOctagon className="w-4 h-4 text-red-500 shrink-0" />;
+        return {
+          border: 'border-l-ops-danger',
+          icon: <AlertOctagon className="w-4 h-4 text-ops-danger shrink-0" />,
+        };
       default:
-        return <Info className="w-4 h-4 text-genesis-cyan shrink-0" />;
+        return {
+          border: 'border-l-ops-telemetry',
+          icon: <Info className="w-4 h-4 text-ops-telemetry shrink-0" />,
+        };
     }
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-2 sm:px-0">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className="pointer-events-auto flex items-start gap-2.5 p-3 rounded-lg bg-[#141522] border border-white/10 shadow-2xl backdrop-blur-xl text-xs text-slate-100 animate-slideInRight"
-        >
-          {getToastIcon(toast.type)}
-          <div className="flex-1 leading-snug">{toast.message}</div>
-          <button
-            onClick={() => removeToast(toast.id)}
-            className="text-slate-400 hover:text-white p-0.5"
+    <div
+      aria-live="polite"
+      className="fixed top-16 inset-x-3 sm:left-auto sm:right-4 sm:w-96 z-50 flex flex-col gap-2 pointer-events-none"
+    >
+      {toasts.map((toast) => {
+        const style = getStyle(toast.type);
+        return (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start gap-2.5 px-3 py-2.5 rounded-md bg-ops-surface border border-ops-borderStrong border-l-2 ${style.border} shadow-lg text-xs text-ops-text`}
           >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ))}
+            <div className="pt-0.5">{style.icon}</div>
+            <div className="flex-1 leading-snug break-words">{toast.message}</div>
+            <button
+              type="button"
+              onClick={() => removeToast(toast.id)}
+              aria-label="Dismiss notification"
+              className="text-ops-muted hover:text-ops-text p-0.5 rounded transition-colors shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 };

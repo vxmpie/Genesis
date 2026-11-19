@@ -5,8 +5,9 @@ import { useDashboardStore } from '../store/useDashboard';
 export const CpuCoresCard: React.FC = () => {
   const metrics = useDashboardStore((s) => s.metrics);
   const perCore = metrics?.cpu?.per_core || [];
-  const cpuCount = metrics?.cpu?.count || 16;
-  const cpuModel = (metrics?.cpu as any)?.model || '12th Gen Intel Core i5-12500H';
+  const cpuCount = metrics?.cpu?.count ?? 0;
+  const cpuModel = metrics?.cpu?.model || '—';
+  const cpuFreq = metrics?.cpu?.frequency_ghz;
 
   const pCores = perCore.slice(0, 8);
   const eCores = perCore.slice(8, 16);
@@ -25,7 +26,7 @@ export const CpuCoresCard: React.FC = () => {
               {cpuModel}
             </span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-300 border border-white/[0.08] inline-block mt-0.5 sm:mt-0">
-              12 Cores (4P + 8E) • {cpuCount} Threads @ 2.5 – 4.5 GHz
+              {cpuCount > 0 ? `${cpuCount} Threads` : '—'}{cpuFreq ? ` @ ${cpuFreq} GHz` : ''}
             </span>
           </div>
         </div>

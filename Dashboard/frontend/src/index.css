@@ -6,89 +6,59 @@
   * {
     box-sizing: border-box;
   }
-  
+
   html {
     scroll-behavior: smooth;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    color-scheme: dark;
   }
 
-  /* Custom Sleek Scrollbar */
   ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
+
   ::-webkit-scrollbar-track {
-    background: #0a0a0f;
+    background: #09090B;
   }
+
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 4px;
+    background: #27272F;
+    border-radius: 3px;
   }
+
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 229, 255, 0.4);
+    background: #3F3F4C;
   }
 }
 
 @layer components {
-  /* Cyberpunk Glass Card Base */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ops-card {
+    @apply bg-ops-surface border border-ops-border rounded-lg;
+  }
+
+  .ops-card-interactive {
+    @apply bg-ops-surface border border-ops-border rounded-lg transition-colors duration-150 hover:border-ops-borderStrong;
+  }
+
+  .ops-input {
+    @apply bg-ops-inset border border-ops-border rounded-md text-ops-text placeholder:text-ops-muted focus:outline-none focus:border-ops-accent focus:ring-1 focus:ring-ops-accent/40 transition-colors;
+  }
+
+  .ops-btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 select-none focus:outline-none focus:ring-1 focus:ring-ops-accent/50 disabled:opacity-45 disabled:cursor-not-allowed;
+  }
+
+  /* Legacy Compatibility Aliases for Milestone 3 Views */
   .cyber-card {
-    @apply bg-genesis-card/90 border border-white/[0.08] rounded-card shadow-card backdrop-blur-md transition-all duration-200 relative overflow-hidden;
-  }
-  
-  .cyber-card:hover {
-    @apply border-genesis-cyan/30;
+    @apply bg-ops-surface border border-ops-border rounded-lg transition-colors duration-150;
   }
 
-  /* Universal Interactive Cyber Button */
   .btn-cyber {
-    @apply relative overflow-hidden transition-all duration-150 active:scale-95 select-none focus:outline-none focus:ring-1 focus:ring-genesis-cyan/40;
+    @apply transition-colors duration-150 select-none focus:outline-none focus:ring-1 focus:ring-ops-accent/40;
   }
-
-  .btn-cyber::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
-    transition: transform 0.6s ease;
-    pointer-events: none;
-  }
-
-  .btn-cyber:hover::after {
-    transform: translateX(200%);
-  }
-
-  /* Glow Elements */
-  .glow-cyan {
-    filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.4));
-  }
-  
-  .glow-accent {
-    filter: drop-shadow(0 0 8px rgba(255, 60, 60, 0.4));
-  }
-  
-  .glow-green {
-    filter: drop-shadow(0 0 8px rgba(0, 255, 136, 0.4));
-  }
-}
-
-@keyframes pulseGlow {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(1.08); }
-}
-
-@keyframes buttonPressRipple {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.5); }
-  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 229, 255, 0); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
-}
-
-.animate-pulse-glow {
-  animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.animate-click-ripple:active {
-  animation: buttonPressRipple 0.3s ease-out;
 }

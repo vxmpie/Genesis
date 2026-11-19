@@ -1,21 +1,21 @@
 {
-  "name": "Genesis Autonomous Monitoring Suite",
+  "name": "Genesis Operations Console",
   "short_name": "Genesis",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0c14",
-  "theme_color": "#0b0c14",
+  "background_color": "#09090B",
+  "theme_color": "#09090B",
   "orientation": "any",
-  "description": "24/7 Autonomous Observability & Unattended Bot Farming Suite",
+  "description": "24/7 Autonomous Observability & Unattended Bot Operations Console",
   "icons": [
     {
-      "src": "/static/icon-192.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/static/icon-512.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

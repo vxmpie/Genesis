@@ -16,16 +16,17 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
     setTimeout(() => setScanning(false), 2000);
   };
 
-  const sigAge = defender?.signature_age_days ?? 0;
-  const qScanAge = defender?.quick_scan_age_days ?? 0;
-  const isRealtime = defender?.realtime_enabled ?? true;
+  const info = defender?.available ? defender : null;
+  const sigAge = info?.signature_age_days ?? -1;
+  const qScanAge = info?.quick_scan_age_days ?? -1;
+  const isRealtime = info?.realtime_enabled ?? null;
 
   return (
     <div className="cyber-card p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-          <Shield className="w-4 h-4 text-genesis-green animate-pulse" />
+          <Shield className="w-4 h-4 text-genesis-green" />
           Windows Defender Sentinel
         </span>
         <button
@@ -46,10 +47,10 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
           <div className="mt-1">
             <span
               className={`font-mono text-sm font-bold ${
-                sigAge > 3 ? 'text-genesis-amber' : 'text-genesis-green'
+                sigAge > 3 ? 'text-genesis-amber' : sigAge >= 0 ? 'text-genesis-green' : 'text-slate-400'
               }`}
             >
-              {defender?.signature_display || (sigAge >= 0 ? `${sigAge}d ago` : '—')}
+              {info?.signature_display || (sigAge >= 0 ? `${sigAge}d ago` : '—')}
             </span>
           </div>
         </div>
@@ -63,7 +64,7 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
                 qScanAge > 7 ? 'text-genesis-amber' : 'text-slate-200'
               }`}
             >
-              {defender?.quick_scan_display || (qScanAge >= 0 ? `${qScanAge}d ago` : 'Never')}
+              {info?.quick_scan_display || (qScanAge >= 0 ? `${qScanAge}d ago` : '—')}
             </span>
           </div>
         </div>
@@ -74,10 +75,14 @@ export const DefenderCard: React.FC<DefenderCardProps> = ({ onQuickScan }) => {
           <div className="mt-1">
             <span
               className={`font-mono text-sm font-bold ${
-                isRealtime ? 'text-genesis-green' : 'text-genesis-accent'
+                isRealtime === null
+                  ? 'text-slate-400'
+                  : isRealtime
+                  ? 'text-genesis-green'
+                  : 'text-genesis-accent'
               }`}
             >
-              {isRealtime ? 'ON' : 'OFF'}
+              {isRealtime === null ? '—' : isRealtime ? 'ON' : 'OFF'}
             </span>
           </div>
         </div>

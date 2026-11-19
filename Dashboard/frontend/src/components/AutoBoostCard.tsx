@@ -97,7 +97,7 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
             <label className="text-xs font-medium text-slate-300">Operating Mode</label>
             <select
               value={mode}
-              onChange={(e) => onSetMode(e.target.value as any)}
+              onChange={(e) => onSetMode(e.target.value as 'auto' | 'scheduled')}
               className="bg-black/50 border border-white/10 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none focus:border-genesis-accent hover:border-white/20 transition-colors"
             >
               <option value="scheduled">Scheduled Clock</option>

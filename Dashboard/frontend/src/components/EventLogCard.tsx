@@ -10,13 +10,13 @@ export const EventLogCard: React.FC = () => {
   const getEventIcon = (type: EventLogEntry['type']) => {
     switch (type) {
       case 'boost':
-        return <Zap className="w-3.5 h-3.5 text-genesis-accent shrink-0 animate-pulse" />;
+        return <Zap className="w-3.5 h-3.5 text-genesis-accent shrink-0" />;
       case 'warning':
-        return <AlertTriangle className="w-3.5 h-3.5 text-genesis-amber shrink-0 animate-bounce" />;
+        return <AlertTriangle className="w-3.5 h-3.5 text-genesis-amber shrink-0" />;
       case 'crash':
       case 'error':
       case 'kill':
-        return <AlertOctagon className="w-3.5 h-3.5 text-red-500 shrink-0 animate-pulse" />;
+        return <AlertOctagon className="w-3.5 h-3.5 text-red-500 shrink-0" />;
       default:
         return <Info className="w-3.5 h-3.5 text-genesis-cyan shrink-0" />;
     }
@@ -27,7 +27,7 @@ export const EventLogCard: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-          <Terminal className="w-4 h-4 text-slate-300 animate-pulse" />
+          <Terminal className="w-4 h-4 text-slate-300" />
           Event Log
         </span>
         <button

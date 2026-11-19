@@ -44,7 +44,7 @@ from backend.services.telemetry import (
     reset_session_boosts,
     reset_total_boosts,
 )
-from backend.services.tunnel import get_tunnel_status
+from backend.services.tunnel import get_tunnel_status, request_tunnel_restart
 from backend.services.win32_ops import (
     apply_pcore_affinity_for_mumu,
     get_affinity_status,
@@ -493,6 +493,10 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
     elif cmd == "test_discord_alert":
         res = await notifier.send_test_alert()
         await manager.send_to(ws, {"type": "alerts_test_result", **res})
+
+    elif cmd == "restart_tunnel":
+        res = await asyncio.to_thread(request_tunnel_restart)
+        await manager.send_to(ws, {"type": "tunnel_restart_result", **res})
 
     elif cmd == "purge_discord_alerts":
         try:

@@ -159,6 +159,7 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                 ("PUT", "/api/alerts/config", {"notify_on_drift": False}),
                 ("POST", "/api/alerts/test", {}),
                 ("POST", "/api/alerts/purge", {"limit": 50}),
+                ("POST", "/api/tunnel/restart", {}),
             ]:
                 st, _ = await _call_asgi(method, path, payload)
                 self.assertEqual(st, 401, f"Expected 401 for {method} {path}")
@@ -170,6 +171,19 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(
                     return_value={"ok": True, "http_status": 204, "error": "", "entry": {"status": "delivered"}}
                 ),
+            ), patch(
+                "backend.api.routes.request_tunnel_restart",
+                return_value={
+                    "ok": True,
+                    "tunnel": {
+                        "provider": "cloudflared",
+                        "status": "restarting",
+                        "tunnel_url": None,
+                        "local_url": "http://127.0.0.1:7700",
+                        "started_at": None,
+                        "last_error": None,
+                    },
+                },
             ):
                 st_cfg, body_cfg = await _call_asgi(
                     "PUT",
@@ -188,6 +202,16 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(st_test, 200)
                 self.assertTrue(body_test["ok"])
+
+                st_tun, body_tun = await _call_asgi(
+                    "POST",
+                    "/api/tunnel/restart",
+                    {},
+                    headers={"X-Auth-Token": "valid-test-token"},
+                )
+                self.assertEqual(st_tun, 200)
+                self.assertTrue(body_tun["ok"])
+                self.assertEqual(body_tun["tunnel"]["status"], "restarting")
 
     async def test_ws_init_masked_and_mutating_commands_require_auth(self) -> None:
         ws = _FakeWebSocket()
@@ -212,12 +236,42 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                     "update_alerts_config",
                     "test_discord_alert",
                     "purge_discord_alerts",
+                    "restart_tunnel",
                 ]:
                     ws.sent.clear()
                     await handle_ws_command(ws, {"command": cmd})
                     self.assertEqual(ws.sent[-1]["type"], "auth_required", f"Expected auth_required for {cmd}")
         finally:
             ws_mod.manager.disconnect(ws)
+
+    def test_request_tunnel_restart_guard_and_state_transition(self) -> None:
+        from backend.services import tunnel as tunnel_mod
+
+        orig_state = dict(tunnel_mod._tunnel_state)
+        try:
+            with patch.dict(
+                tunnel_mod.CONFIG,
+                {"tunnel": {"provider": "ngrok", "ngrok_authtoken": "tok123", "ngrok_domain": ""}},
+                clear=False,
+            ), patch.object(tunnel_mod, "add_event"), patch.object(
+                tunnel_mod, "broadcast_payload_threadsafe"
+            ) as mock_bcast:
+                tunnel_mod._update_tunnel_state(
+                    provider="ngrok", status="online", tunnel_url="https://example.ngrok.dev"
+                )
+                first = tunnel_mod.request_tunnel_restart()
+                self.assertTrue(first["ok"])
+                self.assertEqual(first["tunnel"]["status"], "restarting")
+                self.assertIsNone(first["tunnel"]["tunnel_url"])
+                self.assertTrue(mock_bcast.called)
+
+                second = tunnel_mod.request_tunnel_restart()
+                self.assertFalse(second["ok"])
+                self.assertIn("already in progress", second["error"])
+        finally:
+            with tunnel_mod._tunnel_lock:
+                tunnel_mod._tunnel_state.clear()
+                tunnel_mod._tunnel_state.update(orig_state)
 
 
 if __name__ == "__main__":

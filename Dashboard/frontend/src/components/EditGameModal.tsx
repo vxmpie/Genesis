@@ -115,10 +115,10 @@ const EditGameModalInner: React.FC<EditGameModalInnerProps> = ({ device, onClose
               }`}
             >
               {device.presence_status === 'InGame'
-                ? `🟢 In-Game (${device.active_game || 'Playing'})`
+                ? `In-Game (${device.active_game || 'Playing'})`
                 : device.presence_status === 'Online'
-                ? '🟡 In App / Website'
-                : '⚪ Offline / Standby'}
+                ? 'In App / Website'
+                : 'Offline / Standby'}
             </span>
           </div>
         )}

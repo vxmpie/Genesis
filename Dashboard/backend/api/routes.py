@@ -54,7 +54,7 @@ from backend.services.telemetry import (
     reset_session_boosts,
     reset_total_boosts,
 )
-from backend.services.tunnel import get_tunnel_status
+from backend.services.tunnel import get_tunnel_status, request_tunnel_restart
 from backend.services.win32_ops import get_protected_names, trim_single_process
 
 router = APIRouter()
@@ -463,6 +463,16 @@ async def api_reset_boosts(request: Request):
 @router.get("/api/tunnel")
 async def api_get_tunnel():
     return JSONResponse(get_tunnel_status())
+
+
+@router.post("/api/tunnel/restart")
+async def api_restart_tunnel(request: Request):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    res = await asyncio.to_thread(request_tunnel_restart)
+    status_code = 200 if res.get("ok") else 400
+    return JSONResponse(res, status_code=status_code)
 
 
 @router.post("/api/system/restart")

@@ -13,6 +13,7 @@ eggs/
 lib/
 !Roblox/lib/
 !Roblox/libraries/
+!Dashboard/frontend/src/lib/
 lib64/
 parts/
 sdist/

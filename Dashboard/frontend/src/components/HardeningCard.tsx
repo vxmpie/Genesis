@@ -17,10 +17,10 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
   };
 
   const items = [
-    { key: 'vbs', name: 'VBS', label: 'Virtualization-Based Security', status: hardening?.checks?.vbs || 'ok' },
-    { key: 'mpo', name: 'MPO', label: 'Multiplane Overlay', status: hardening?.checks?.mpo || 'ok' },
-    { key: 'hypervisor', name: 'Hypervisor', label: 'Hyper-V Host Guard', status: hardening?.checks?.hypervisor || 'ok' },
-    { key: 'defender_exclusion', name: 'Defender Excl.', label: 'Process Exclusion', status: hardening?.checks?.defender_exclusion || 'ok' },
+    { key: 'vbs', name: 'VBS', label: 'Virtualization-Based Security', status: hardening?.checks?.vbs || 'unknown' },
+    { key: 'mpo', name: 'MPO', label: 'Multiplane Overlay', status: hardening?.checks?.mpo || 'unknown' },
+    { key: 'hypervisor', name: 'Hypervisor', label: 'Hyper-V Host Guard', status: hardening?.checks?.hypervisor || 'unknown' },
+    { key: 'defender_exclusion', name: 'Defender Excl.', label: 'Process Exclusion', status: hardening?.checks?.defender_exclusion || 'unknown' },
   ];
 
   const getStatusBadge = (status: string) => {
@@ -92,7 +92,7 @@ export const HardeningCard: React.FC<HardeningCardProps> = ({ onRefresh }) => {
 
       {/* Last check footer */}
       <div className="mt-2.5 text-right font-mono text-[10px] text-slate-500">
-        Last check: {hardening?.last_check || '2026-08-26 16:00:00'}
+        Last check: {hardening?.last_check || '—'}
       </div>
     </div>
   );

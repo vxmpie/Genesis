@@ -1,117 +1,165 @@
-import React, { useState } from 'react';
-import { Lock, X, KeyRound, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { KeyRound, Lock, ShieldCheck, X } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
+import { authenticateSocket } from '../hooks/useWebSocket';
+import { loginWithPin } from '../lib/api';
 
-interface AuthModalProps {
-  onSuccess?: () => void;
-}
-
-export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
+export const AuthModal: React.FC = () => {
   const isOpen = useDashboardStore((s) => s.authModalOpen);
-  const setOpen = useDashboardStore((s) => s.setAuthModalOpen);
+  if (!isOpen) return null;
+  return <AuthModalDialog />;
+};
+
+const AuthModalDialog: React.FC = () => {
+  const closeAuthModal = useDashboardStore((s) => s.closeAuthModal);
+  const setAuthModalOpen = useDashboardStore((s) => s.setAuthModalOpen);
+  const consumePendingAuthAction = useDashboardStore((s) => s.consumePendingAuthAction);
   const setToken = useDashboardStore((s) => s.setToken);
-  const setAuthenticated = useDashboardStore((s) => s.setAuthenticated);
   const addToast = useDashboardStore((s) => s.addToast);
 
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeAuthModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [closeAuthModal]);
+
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutSeconds]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pin.trim()) return;
+    const trimmed = pin.trim();
+    if (!trimmed || loading || lockoutSeconds > 0) return;
 
     setLoading(true);
     setError('');
 
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pin.trim() }),
-      });
+    const result = await loginWithPin(trimmed);
+    setLoading(false);
 
-      const data = await res.json();
-
-      if (res.ok && data.token) {
-        setToken(data.token);
-        setAuthenticated(true);
-        addToast('system', 'Security Core Unlocked');
-        setOpen(false);
-        setPin('');
-        if (onSuccess) onSuccess();
-      } else {
-        setError(data.error || 'Invalid PIN code. Please try again.');
+    if (result.ok) {
+      setToken(result.token);
+      authenticateSocket(result.token);
+      addToast('success', 'Security session unlocked');
+      setPin('');
+      setLockoutSeconds(0);
+      const pending = consumePendingAuthAction();
+      setAuthModalOpen(false);
+      if (pending) {
+        pending();
       }
-    } catch (err) {
-      console.error('Auth error:', err);
-      setError('Connection error. Could not verify PIN.');
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    if (result.status === 429 && result.retryAfterSeconds) {
+      setLockoutSeconds(result.retryAfterSeconds);
+    }
+    setError(result.error);
   };
 
+  const isLockedOut = lockoutSeconds > 0;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-sm bg-genesis-card border border-white/10 rounded-xl p-6 shadow-2xl relative">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) closeAuthModal();
+      }}
+    >
+      <div className="w-full max-w-sm bg-ops-surface border border-ops-borderStrong rounded-lg p-5 shadow-xl relative">
         <button
-          onClick={() => setOpen(false)}
-          className="btn-cyber absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-md active:scale-90 hover:rotate-90 transition-all duration-200"
+          type="button"
+          onClick={closeAuthModal}
+          aria-label="Close authentication modal"
+          className="absolute top-3.5 right-3.5 p-1.5 rounded-md text-ops-muted hover:text-ops-text hover:bg-ops-elevated transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
 
-        <div className="flex flex-col items-center text-center">
-          <div className="w-12 h-12 rounded-xl bg-genesis-accent/15 border border-genesis-accent/30 flex items-center justify-center text-genesis-accent mb-3 shadow-glow-accent animate-pulse-glow">
-            <Lock className="w-6 h-6" />
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-md bg-ops-elevated border border-ops-borderStrong flex items-center justify-center text-ops-warn shrink-0">
+            <Lock className="w-5 h-5" />
           </div>
-          <h2 className="text-base font-extrabold text-white">Security Authentication</h2>
-          <p className="text-xs text-slate-400 mt-1">Enter your Genesis PIN to unlock control permissions</p>
-
-          <form onSubmit={handleSubmit} className="w-full mt-5 space-y-4">
-            <div>
-              <input
-                type="password"
-                maxLength={8}
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                placeholder="••••"
-                autoFocus
-                className="w-full text-center tracking-widest text-lg font-mono py-2.5 px-4 bg-black/40 border border-white/10 rounded-lg text-white placeholder:text-slate-600 focus:outline-none focus:border-genesis-accent focus:ring-1 focus:ring-genesis-accent transition-all"
-              />
-              {error && <p className="text-xs text-red-400 mt-2 font-mono">{error}</p>}
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="btn-cyber flex-1 py-2.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 text-xs font-semibold border border-white/10 transition-all active:scale-95"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn-cyber flex-1 py-2.5 rounded-lg bg-gradient-to-r from-genesis-accent to-red-600 hover:brightness-110 text-white text-xs font-bold shadow-glow-accent transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
-              >
-                {loading ? (
-                  <>
-                    <KeyRound className="w-3.5 h-3.5 animate-spin" />
-                    <span>Verifying...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Unlock</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
+          <div>
+            <h2 id="auth-modal-title" className="text-sm font-semibold text-ops-text">
+              Unlock Control Session
+            </h2>
+            <p className="text-xs text-ops-secondary mt-0.5">
+              Enter your operator PIN to authorize mutations.
+            </p>
+          </div>
         </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="genesis-pin-input" className="sr-only">
+              Operator PIN
+            </label>
+            <input
+              id="genesis-pin-input"
+              type="password"
+              inputMode="numeric"
+              maxLength={12}
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              placeholder="Enter PIN"
+              autoFocus
+              disabled={isLockedOut}
+              className="ops-input w-full text-center tracking-[0.3em] text-base font-mono py-2.5 px-4 disabled:opacity-50"
+            />
+            {isLockedOut ? (
+              <p className="num text-xs text-ops-danger mt-2 font-mono">
+                Too many failed attempts. Retry in {lockoutSeconds}s.
+              </p>
+            ) : error ? (
+              <p className="text-xs text-ops-danger mt-2 font-mono">{error}</p>
+            ) : null}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={closeAuthModal}
+              className="ops-btn flex-1 h-9 px-3 bg-ops-elevated hover:bg-ops-border text-ops-secondary hover:text-ops-text border border-ops-border text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading || isLockedOut || !pin.trim()}
+              className="ops-btn flex-1 h-9 px-3 bg-ops-accent hover:bg-blue-500 text-white text-xs font-semibold"
+            >
+              {loading ? (
+                <>
+                  <KeyRound className="w-3.5 h-3.5 animate-spin" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Unlock</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

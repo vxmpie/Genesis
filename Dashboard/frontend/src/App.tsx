@@ -1,201 +1,318 @@
-import { Zap } from 'lucide-react';
-import { useDashboardStore } from './store/useDashboard';
+import { useCallback, useEffect } from 'react';
+import { getViewFromHash, useDashboardStore } from './store/useDashboard';
 import { useWebSocket } from './hooks/useWebSocket';
+import { postRestartServer } from './lib/api';
+import type { AlertsConfigUpdatePayload, WorkspaceView } from './types/dashboard';
 
-import { Header } from './components/Header';
-import { HudSummary } from './components/HudSummary';
-import { MetricCards } from './components/MetricCards';
-import { CpuCoresCard } from './components/CpuCoresCard';
-import { HardeningCard } from './components/HardeningCard';
-import { AutoBoostCard } from './components/AutoBoostCard';
+import { AppShell } from './components/layout/AppShell';
+import { OverviewView } from './components/overview/OverviewView';
+import { PrecisionTelemetryChart } from './components/overview/PrecisionTelemetryChart';
+import { AlertsTunnelView } from './components/alerts/AlertsTunnelView';
+
 import { MuMuCard } from './components/MuMuCard';
+import { AutoBoostCard } from './components/AutoBoostCard';
+import { HardeningCard } from './components/HardeningCard';
 import { DeepCleanCard } from './components/DeepCleanCard';
 import { DefenderCard } from './components/DefenderCard';
-import { TelemetryChart } from './components/TelemetryChart';
-import { EventLogCard } from './components/EventLogCard';
 import { TopProcsCard } from './components/TopProcsCard';
+import { CpuCoresCard } from './components/CpuCoresCard';
 import { NetworkObservatory } from './components/NetworkObservatory';
-import { CommandPalette } from './components/CommandPalette';
+import { EventLogCard } from './components/EventLogCard';
+
+import { CommandPalette, type PaletteActionId } from './components/CommandPalette';
 import { AuthModal } from './components/AuthModal';
 import { EditGameModal } from './components/EditGameModal';
 import { ToastContainer } from './components/ToastContainer';
 
+const VIEW_SHORTCUTS: Record<string, WorkspaceView> = {
+  '1': 'overview',
+  '2': 'instances',
+  '3': 'system',
+  '4': 'telemetry',
+  '5': 'alerts',
+};
+
 export function App() {
   const activeView = useDashboardStore((s) => s.activeView);
-  const setAuthModalOpen = useDashboardStore((s) => s.setAuthModalOpen);
-  const setCmdPaletteOpen = useDashboardStore((s) => s.setCmdPaletteOpen);
-
+  const setActiveView = useDashboardStore((s) => s.setActiveView);
   const { sendCommand } = useWebSocket();
 
-  const requireAuthGuard = (callback: () => void) => {
-    const currentAuthed = useDashboardStore.getState().authenticated;
-    const currentToken = useDashboardStore.getState().token;
-    const req = useDashboardStore.getState().authRequired;
-
-    if (req && !currentAuthed && !currentToken) {
-      setAuthModalOpen(true);
+  const requireAuthGuard = useCallback((action: () => void) => {
+    const { authRequired, authenticated, openAuthModalWithAction } =
+      useDashboardStore.getState();
+    if (authRequired && !authenticated) {
+      openAuthModalWithAction(action);
       return;
     }
-    callback();
-  };
+    action();
+  }, []);
 
-  const handleCommandPaletteAction = (cmdId: string) => {
-    switch (cmdId) {
-      case 'boost':
-        requireAuthGuard(() => sendCommand('boost'));
-        break;
-      case 'scan_deep_clean':
-        sendCommand('deep_clean_preview');
-        break;
-      case 'refresh_hardening':
-        sendCommand('check_hardening');
-        break;
-      case 'flush_dns':
-        sendCommand('flush_dns');
-        break;
-      case 'quick_scan':
-        sendCommand('quick_scan');
-        break;
-      case 'reset_session':
-        sendCommand('reset_session_boosts');
-        break;
-      case 'reset_total':
-        requireAuthGuard(() => sendCommand('reset_total_boosts'));
-        break;
-      case 'toggle_timer':
-        sendCommand('toggle_timer_resolution', {
-          enabled: !useDashboardStore.getState().timerResolution?.active,
-        });
-        break;
-      case 'toggle_affinity':
-        sendCommand('toggle_pcore_affinity', {
-          enabled: !useDashboardStore.getState().pcoreAffinity?.enabled,
-        });
-        break;
-      case 'flush_shader':
-        requireAuthGuard(() => sendCommand('flush_shader_cache'));
-        break;
-    }
-  };
+  // --- Hash Sync & Numeric Room Shortcuts ---
+  useEffect(() => {
+    const handleHashChange = () => {
+      setActiveView(getViewFromHash(), false);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [setActiveView]);
 
-  const handleSaveGameTarget = (instance: number, placeId: number, username?: string) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const { authModalOpen, cmdPaletteOpen, editGameModalOpen } =
+        useDashboardStore.getState();
+      if (authModalOpen || cmdPaletteOpen || editGameModalOpen) return;
+
+      const view = VIEW_SHORTCUTS[e.key];
+      if (view) {
+        setActiveView(view);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setActiveView]);
+
+  // --- Command Dispatchers ---
+  const handleBoostNow = useCallback(() => {
     requireAuthGuard(() => {
-      sendCommand('set_mumu_game', { instance, place_id: placeId });
-      if (username !== undefined) {
-        sendCommand('set_mumu_username', { instance, username });
+      useDashboardStore.getState().setIsBoosting(true);
+      sendCommand('boost');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handleTestAlert = useCallback(() => {
+    requireAuthGuard(() => {
+      useDashboardStore.getState().setIsTestingAlert(true);
+      sendCommand('test_discord_alert');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handlePurgeAlerts = useCallback(
+    (limit: number, botOnly: boolean) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setIsPurgingAlerts(true);
+        sendCommand('purge_discord_alerts', { limit, bot_only: botOnly });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleSaveAlertsConfig = useCallback(
+    (payload: AlertsConfigUpdatePayload) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setIsSavingAlerts(true);
+        sendCommand('update_alerts_config', { alerts: payload });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleRestartTunnel = useCallback(() => {
+    requireAuthGuard(() => {
+      useDashboardStore.getState().setIsRestartingTunnel(true);
+      sendCommand('restart_tunnel');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handleRestartServer = useCallback(() => {
+    requireAuthGuard(async () => {
+      const { token, addToast } = useDashboardStore.getState();
+      const res = await postRestartServer(token);
+      if (res.ok) {
+        addToast('warning', 'Core server restarting...');
+      } else {
+        addToast('error', res.error || 'Failed to restart server');
       }
     });
-  };
+  }, [requireAuthGuard]);
+
+  const handleCommandPaletteAction = useCallback(
+    (cmdId: PaletteActionId) => {
+      switch (cmdId) {
+        case 'boost':
+          handleBoostNow();
+          break;
+        case 'scan_deep_clean':
+          useDashboardStore.getState().setIsScanningClean(true);
+          sendCommand('deep_clean_preview');
+          break;
+        case 'refresh_hardening':
+          sendCommand('check_hardening');
+          break;
+        case 'flush_dns':
+          requireAuthGuard(() => sendCommand('flush_dns'));
+          break;
+        case 'quick_scan':
+          requireAuthGuard(() => sendCommand('quick_scan'));
+          break;
+        case 'test_discord_alert':
+          handleTestAlert();
+          break;
+        case 'restart_tunnel':
+          handleRestartTunnel();
+          break;
+        case 'reset_session':
+          requireAuthGuard(() => sendCommand('reset_session_boosts'));
+          break;
+        case 'reset_total':
+          requireAuthGuard(() => sendCommand('reset_total_boosts'));
+          break;
+        case 'toggle_timer':
+          requireAuthGuard(() =>
+            sendCommand('toggle_timer_resolution', {
+              enabled: !useDashboardStore.getState().timerResolution?.active,
+            })
+          );
+          break;
+        case 'toggle_affinity':
+          requireAuthGuard(() =>
+            sendCommand('toggle_pcore_affinity', {
+              enabled: !useDashboardStore.getState().pcoreAffinity?.enabled,
+            })
+          );
+          break;
+        case 'flush_shader':
+          requireAuthGuard(() => sendCommand('flush_shader_cache'));
+          break;
+      }
+    },
+    [handleBoostNow, handleRestartTunnel, handleTestAlert, requireAuthGuard, sendCommand]
+  );
+
+  const handleSaveGameTarget = useCallback(
+    (instance: number, placeId: number, username?: string) => {
+      requireAuthGuard(() => {
+        sendCommand('set_mumu_game', { instance, place_id: placeId });
+        if (username !== undefined) {
+          sendCommand('set_mumu_username', { instance, username });
+        }
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
 
   return (
-    <div className="min-h-screen bg-genesis-bg text-slate-100 flex flex-col font-sans selection:bg-genesis-accent/30 selection:text-white">
-      {/* Top Header */}
-      <Header
-        onOpenPalette={() => setCmdPaletteOpen(true)}
-        onOpenAuth={() => setAuthModalOpen(true)}
-      />
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 flex flex-col gap-4 sm:gap-5">
-        {/* HUD Summary (Visible across Overview & System) */}
-        {(activeView === 'overview' || activeView === 'system') && (
-          <HudSummary
-            onResetSession={() => sendCommand('reset_session_boosts')}
-            onResetTotal={() => requireAuthGuard(() => sendCommand('reset_total_boosts'))}
+    <>
+      <AppShell>
+        {activeView === 'overview' && (
+          <OverviewView
+            onBoostNow={handleBoostNow}
+            onCheckHardening={() => sendCommand('check_hardening')}
+            onFlushDns={() => requireAuthGuard(() => sendCommand('flush_dns'))}
+            onTestAlert={handleTestAlert}
           />
         )}
 
-        {/* Top Priority Grid: MuMu Instances & Auto-Boost Core (Overview & Bots) */}
-        {(activeView === 'overview' || activeView === 'bots') && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {activeView === 'instances' && (
+          <div className="space-y-4">
             <MuMuCard
-              onTrimMemory={(pid, index) => requireAuthGuard(() => sendCommand('trim_mumu_instance', { pid, instance: index }))}
-              onGovernorAction={(instance, action) => requireAuthGuard(() => sendCommand('governor_action', { instance, action }))}
-            />
-            <AutoBoostCard
-              onToggle={(enabled) => {
-                useDashboardStore.getState().updateAutoBoost({ enabled });
-                sendCommand('set_auto_boost', { enabled });
-              }}
-              onSetThreshold={(threshold) => {
-                useDashboardStore.getState().updateAutoBoost({ threshold });
-                sendCommand('set_threshold', { threshold });
-              }}
-              onSetMode={(mode) => {
-                useDashboardStore.getState().updateAutoBoost({ mode });
-                sendCommand('set_boost_mode', { mode });
-              }}
-              onSetInterval={(interval_minutes) => {
-                useDashboardStore.getState().updateAutoBoost({ interval_minutes });
-                sendCommand('set_boost_interval', { interval_minutes });
-              }}
-              onBoostNow={() => requireAuthGuard(() => sendCommand('boost'))}
+              onTrimMemory={(pid, index) =>
+                requireAuthGuard(() =>
+                  sendCommand('trim_mumu_instance', { pid, instance: index })
+                )
+              }
+              onGovernorAction={(instance, action) =>
+                requireAuthGuard(() =>
+                  sendCommand('governor_action', { instance, action })
+                )
+              }
             />
           </div>
         )}
 
-        {/* 4 Hardware Metric Rings (Overview, Analytics) */}
-        {(activeView === 'overview' || activeView === 'analytics') && <MetricCards />}
+        {activeView === 'system' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <AutoBoostCard
+                onToggle={(enabled) =>
+                  requireAuthGuard(() => {
+                    useDashboardStore.getState().updateAutoBoost({ enabled });
+                    sendCommand('set_auto_boost', { enabled });
+                  })
+                }
+                onSetThreshold={(threshold) =>
+                  requireAuthGuard(() => {
+                    useDashboardStore.getState().updateAutoBoost({ threshold });
+                    sendCommand('set_threshold', { threshold });
+                  })
+                }
+                onSetMode={(mode) =>
+                  requireAuthGuard(() => {
+                    useDashboardStore.getState().updateAutoBoost({ mode });
+                    sendCommand('set_boost_mode', { mode });
+                  })
+                }
+                onSetInterval={(interval_minutes) =>
+                  requireAuthGuard(() => {
+                    useDashboardStore.getState().updateAutoBoost({ interval_minutes });
+                    sendCommand('set_boost_interval', { interval_minutes });
+                  })
+                }
+                onBoostNow={handleBoostNow}
+              />
+              <HardeningCard onRefresh={() => sendCommand('check_hardening')} />
+            </div>
 
-        {/* CPU 16-Core Matrix (Overview, Analytics) */}
-        {(activeView === 'overview' || activeView === 'analytics') && <CpuCoresCard />}
+            <DeepCleanCard
+              onScan={() => {
+                useDashboardStore.getState().setIsScanningClean(true);
+                sendCommand('deep_clean_preview');
+              }}
+              onExecuteClean={() =>
+                requireAuthGuard(() => {
+                  useDashboardStore.getState().setIsDeepCleaning(true);
+                  sendCommand('deep_clean_execute');
+                })
+              }
+            />
 
-        {/* Hardening Status (Overview, System) */}
-        {(activeView === 'overview' || activeView === 'system') && (
-          <HardeningCard onRefresh={() => sendCommand('check_hardening')} />
-        )}
+            <DefenderCard
+              onQuickScan={() => requireAuthGuard(() => sendCommand('quick_scan'))}
+            />
 
-        {/* Deep Clean Engine (Overview, System) */}
-        {(activeView === 'overview' || activeView === 'system') && (
-          <DeepCleanCard
-            onScan={() => {
-              useDashboardStore.getState().setIsScanningClean(true);
-              sendCommand('deep_clean_preview');
-            }}
-            onExecuteClean={() => {
-              useDashboardStore.getState().setIsDeepCleaning(true);
-              requireAuthGuard(() => sendCommand('deep_clean_execute'));
-            }}
-          />
-        )}
-
-        {/* Windows Defender Sentinel (Overview, System) */}
-        {(activeView === 'overview' || activeView === 'system') && (
-          <DefenderCard onQuickScan={() => sendCommand('quick_scan')} />
-        )}
-
-        {/* 30-Minute Real-Time Telemetry Graph (Overview, Analytics) */}
-        {(activeView === 'overview' || activeView === 'analytics') && <TelemetryChart />}
-
-        {/* Bottom Grid: Event Log + Top Processes */}
-        {(activeView === 'overview' || activeView === 'analytics') && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <EventLogCard />
             <TopProcsCard />
           </div>
         )}
 
-        {/* Network Observatory (Overview, Bots, Analytics) */}
-        {(activeView === 'overview' || activeView === 'bots' || activeView === 'analytics') && (
-          <NetworkObservatory onFlushDns={() => sendCommand('flush_dns')} />
+        {activeView === 'telemetry' && (
+          <div className="space-y-4">
+            <PrecisionTelemetryChart />
+            <CpuCoresCard />
+            <NetworkObservatory
+              onFlushDns={() => requireAuthGuard(() => sendCommand('flush_dns'))}
+            />
+            <EventLogCard />
+          </div>
         )}
-      </main>
 
-      {/* Floating Action Hub Button */}
-      <button
-        onClick={() => setCmdPaletteOpen(true)}
-        className="fixed bottom-4 right-4 z-40 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-genesis-cyan to-blue-600 text-black font-extrabold flex items-center justify-center shadow-glow-cyan hover:scale-105 active:scale-95 transition-all"
-        title="Open Command Hub (Ctrl+K)"
-      >
-        <Zap className="w-5 h-5 fill-current" />
-      </button>
+        {activeView === 'alerts' && (
+          <AlertsTunnelView
+            onSaveAlertsConfig={handleSaveAlertsConfig}
+            onSendTestAlert={handleTestAlert}
+            onPurgeAlerts={handlePurgeAlerts}
+            onRefreshAlertsHistory={() => sendCommand('alerts_history')}
+            onRestartTunnel={handleRestartTunnel}
+            onRestartServer={handleRestartServer}
+          />
+        )}
+      </AppShell>
 
-      {/* Modals & Toasts */}
       <CommandPalette onExecute={handleCommandPaletteAction} />
       <AuthModal />
       <EditGameModal onSave={handleSaveGameTarget} />
       <ToastContainer />
-    </div>
+    </>
   );
 }
 
