@@ -77,7 +77,7 @@ export const TunnelControlCard: React.FC<TunnelControlCardProps> = ({
   const localUrl = tunnel?.local_url || '';
 
   return (
-    <div className="ops-card p-4 flex flex-col justify-between gap-4 h-full">
+    <div className="ops-card p-4 flex flex-col gap-4">
       <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between gap-2">

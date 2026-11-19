@@ -139,3 +139,29 @@ export async function postRestartServer(
     token
   );
 }
+
+export interface ResolvePlaceResponse {
+  place_id: number;
+  game_name: string;
+}
+
+export async function resolveRobloxPlace(
+  placeId: number,
+  signal?: AbortSignal
+): Promise<ResolvePlaceResponse | null> {
+  try {
+    const res = await fetch(`/api/roblox/resolve_place?place_id=${placeId}`, { signal });
+    if (!res.ok) return null;
+    const raw: unknown = await res.json().catch(() => null);
+    if (
+      isRecord(raw) &&
+      typeof raw.place_id === 'number' &&
+      typeof raw.game_name === 'string'
+    ) {
+      return { place_id: raw.place_id, game_name: raw.game_name };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

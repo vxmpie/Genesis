@@ -17,6 +17,7 @@ import type {
   AlertsStatus,
   AlertToggleKey,
 } from '../../types/dashboard';
+import { OpsSwitch, StatusBadge } from '../ui';
 
 interface DiscordAlertsCardProps {
   onSaveConfig: (payload: AlertsConfigUpdatePayload) => void;
@@ -34,6 +35,10 @@ interface FormDraft {
   minInterval?: number;
   heartbeatMinutes?: number;
   channelId?: string;
+  autoPurgeEnabled?: boolean;
+  autoPurgeOnStartup?: boolean;
+  autoPurgeKeepLatest?: number;
+  autoPurgeIntervalHours?: number;
   toggles?: Partial<Record<AlertToggleKey, boolean>>;
 }
 
@@ -84,6 +89,8 @@ const OPS_TOGGLES: readonly ToggleMeta[] = [
 ];
 
 const COOLDOWN_PRESETS = [15, 60, 180, 300] as const;
+const KEEP_LATEST_PRESETS = [5, 15, 50] as const;
+const INTERVAL_HOUR_PRESETS = [1, 6, 12, 24] as const;
 const PURGE_LIMITS = [50, 100, 250, 500] as const;
 
 function isValidHttpUrl(raw: string): boolean {
@@ -136,6 +143,14 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
   const heartbeatMinutes =
     draft.heartbeatMinutes ?? alertsStatus?.heartbeat_interval_minutes ?? 5;
   const channelIdInput = draft.channelId ?? alertsStatus?.discord_channel_id ?? '';
+  const autoPurgeEnabled =
+    draft.autoPurgeEnabled ?? alertsStatus?.auto_purge_enabled ?? true;
+  const autoPurgeOnStartup =
+    draft.autoPurgeOnStartup ?? alertsStatus?.auto_purge_on_startup ?? true;
+  const autoPurgeKeepLatest =
+    draft.autoPurgeKeepLatest ?? alertsStatus?.auto_purge_keep_latest ?? 15;
+  const autoPurgeIntervalHours =
+    draft.autoPurgeIntervalHours ?? alertsStatus?.auto_purge_interval_hours ?? 6;
 
   const getToggleValue = (key: AlertToggleKey): boolean =>
     draft.toggles?.[key] ?? alertsStatus?.[key] ?? true;
@@ -144,6 +159,10 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
     draft.minInterval !== undefined ||
     draft.heartbeatMinutes !== undefined ||
     draft.channelId !== undefined ||
+    draft.autoPurgeEnabled !== undefined ||
+    draft.autoPurgeOnStartup !== undefined ||
+    draft.autoPurgeKeepLatest !== undefined ||
+    draft.autoPurgeIntervalHours !== undefined ||
     (draft.toggles !== undefined && Object.keys(draft.toggles).length > 0) ||
     webhookInput.length > 0 ||
     heartbeatInput.length > 0 ||
@@ -202,11 +221,25 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
       1,
       Math.min(1440, Math.round(Number(heartbeatMinutes) || 5))
     );
+    const parsedKeep = Number(autoPurgeKeepLatest);
+    const clampedKeepLatest = Math.max(
+      0,
+      Math.min(100, Number.isFinite(parsedKeep) ? Math.round(parsedKeep) : 15)
+    );
+    const parsedIntervalHours = Number(autoPurgeIntervalHours);
+    const clampedIntervalHours = Math.max(
+      1,
+      Math.min(168, Number.isFinite(parsedIntervalHours) ? Math.round(parsedIntervalHours) : 6)
+    );
 
     const payload: AlertsConfigUpdatePayload = {
       min_alert_interval_seconds: clampedCooldown,
       heartbeat_interval_minutes: clampedHbMinutes,
       discord_channel_id: trimmedChannelId,
+      auto_purge_enabled: autoPurgeEnabled,
+      auto_purge_on_startup: autoPurgeOnStartup,
+      auto_purge_keep_latest: clampedKeepLatest,
+      auto_purge_interval_hours: clampedIntervalHours,
       notify_on_startup: getToggleValue('notify_on_startup'),
       notify_on_mumu_crash: getToggleValue('notify_on_mumu_crash'),
       notify_on_watchdog_recovery: getToggleValue('notify_on_watchdog_recovery'),
@@ -235,22 +268,11 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
           <div className="text-xs font-medium text-ops-text">{meta.label}</div>
           <div className="text-[11px] text-ops-muted truncate">{meta.desc}</div>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={checked}
-          aria-label={meta.label}
-          onClick={() => handleToggleChange(meta.key)}
-          className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 ${
-            checked ? 'bg-ops-accent' : 'bg-ops-borderStrong'
-          }`}
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform ${
-              checked ? 'translate-x-4' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <OpsSwitch
+          ariaLabel={meta.label}
+          checked={checked}
+          onChange={() => handleToggleChange(meta.key)}
+        />
       </div>
     );
   };
@@ -260,7 +282,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
   );
 
   return (
-    <form onSubmit={handleSave} className="ops-card p-4 flex flex-col justify-between gap-4 h-full">
+    <form onSubmit={handleSave} className="ops-card p-4 flex flex-col gap-4">
       <div className="space-y-4">
         {/* Card Header */}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -272,11 +294,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
               Write-only secret storage. Existing tokens are masked and never returned in plaintext.
             </p>
           </div>
-          {isDirty && (
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-ops-warn/10 text-ops-warn border border-ops-warn/30">
-              Unsaved changes
-            </span>
-          )}
+          {isDirty && <StatusBadge tone="warn">Unsaved changes</StatusBadge>}
         </div>
 
         {/* Webhook Input Section */}
@@ -286,15 +304,9 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
               Discord Webhook URL
             </label>
             <div className="flex items-center gap-2">
-              <span
-                className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                  alertsStatus?.discord_webhook_configured
-                    ? 'bg-ops-ok/10 text-ops-ok border-ops-ok/30'
-                    : 'bg-ops-warn/10 text-ops-warn border-ops-warn/30'
-                }`}
-              >
+              <StatusBadge tone={alertsStatus?.discord_webhook_configured ? 'ok' : 'warn'}>
                 {alertsStatus?.discord_webhook_configured ? 'Configured' : 'Not Configured'}
-              </span>
+              </StatusBadge>
               {alertsStatus?.discord_webhook_configured &&
                 (confirmClearWebhook ? (
                   <div className="inline-flex items-center gap-1">
@@ -434,17 +446,11 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
                 (Dead-man switch ping)
               </span>
             </div>
-            <span
-              className={`num text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
-                alertsStatus?.heartbeat_configured
-                  ? 'bg-ops-ok/10 text-ops-ok border-ops-ok/30'
-                  : 'bg-ops-surface text-ops-muted border-ops-border'
-              }`}
-            >
+            <StatusBadge tone={alertsStatus?.heartbeat_configured ? 'ok' : 'muted'}>
               {alertsStatus?.heartbeat_configured
                 ? `Active (${alertsStatus.heartbeat_interval_minutes}m)`
                 : 'Not Set'}
-            </span>
+            </StatusBadge>
           </button>
 
           {heartbeatOpen && (
@@ -534,7 +540,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
           )}
         </div>
 
-        {/* Collapsible: Channel Purge (Bot API) */}
+        {/* Collapsible: Bot Auto-Purge & Channel Cleanup */}
         <div className="rounded-md border border-ops-border bg-ops-inset overflow-hidden">
           <button
             type="button"
@@ -547,24 +553,27 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
               ) : (
                 <ChevronRight className="w-3.5 h-3.5 text-ops-muted shrink-0" />
               )}
-              <span className="text-xs font-medium text-ops-text">Channel Purge (Bot API)</span>
+              <span className="text-xs font-medium text-ops-text">
+                Bot Auto-Purge & Channel Cleanup
+              </span>
               <span className="text-[11px] text-ops-muted hidden sm:inline">
-                (Bulk-delete alerts channel history)
+                (Scheduled & on-demand retention)
               </span>
             </div>
-            <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
-                botPurgeReady
-                  ? 'bg-ops-ok/10 text-ops-ok border-ops-ok/30'
-                  : 'bg-ops-surface text-ops-muted border-ops-border'
-              }`}
+            <StatusBadge
+              tone={!botPurgeReady ? 'muted' : autoPurgeEnabled ? 'ok' : 'info'}
             >
-              {botPurgeReady ? 'Ready' : 'Not Configured'}
-            </span>
+              {!botPurgeReady
+                ? 'Not Configured'
+                : autoPurgeEnabled
+                ? `Auto (${autoPurgeIntervalHours}h / keep ${autoPurgeKeepLatest})`
+                : 'Manual Only'}
+            </StatusBadge>
           </button>
 
           {purgeOpen && (
             <div className="px-3 pb-3 pt-2 border-t border-ops-border space-y-3">
+              {/* Bot Credentials */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
@@ -656,6 +665,143 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
                 </div>
               </div>
 
+              {/* Auto-Purge Schedule */}
+              <div className="p-2.5 rounded-md bg-ops-surface border border-ops-border space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-ops-muted">
+                    Auto-Purge Schedule
+                  </span>
+                  {!botPurgeReady && (
+                    <span className="text-[11px] text-ops-warn">
+                      Configure Bot Token and Channel ID first, then save to enable scheduled auto-purge.
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="flex items-center justify-between gap-2 py-1.5 px-2.5 rounded bg-ops-inset border border-ops-border">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-ops-text">
+                        Enable Periodic Auto-Purge
+                      </div>
+                      <div className="text-[10px] text-ops-muted">
+                        Background retention cleanup
+                      </div>
+                    </div>
+                    <OpsSwitch
+                      ariaLabel="Enable Periodic Auto-Purge"
+                      checked={autoPurgeEnabled}
+                      disabled={!botPurgeReady}
+                      onChange={(next) =>
+                        setDraft((prev) => ({ ...prev, autoPurgeEnabled: next }))
+                      }
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 py-1.5 px-2.5 rounded bg-ops-inset border border-ops-border">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-ops-text">
+                        Purge on Core Startup
+                      </div>
+                      <div className="text-[10px] text-ops-muted">
+                        Clean channel history at boot
+                      </div>
+                    </div>
+                    <OpsSwitch
+                      ariaLabel="Purge on Core Startup"
+                      checked={autoPurgeOnStartup}
+                      disabled={!botPurgeReady}
+                      onChange={(next) =>
+                        setDraft((prev) => ({ ...prev, autoPurgeOnStartup: next }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="flex items-center justify-between gap-2 py-1.5 px-2.5 rounded bg-ops-inset border border-ops-border">
+                    <label htmlFor="auto-purge-keep-input" className="text-xs text-ops-secondary shrink-0">
+                      Keep Latest
+                    </label>
+                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                      {KEEP_LATEST_PRESETS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={!botPurgeReady}
+                          onClick={() =>
+                            setDraft((prev) => ({ ...prev, autoPurgeKeepLatest: n }))
+                          }
+                          className={`num px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors disabled:opacity-45 ${
+                            autoPurgeKeepLatest === n
+                              ? 'bg-ops-elevated text-ops-text border-ops-borderStrong'
+                              : 'bg-ops-surface text-ops-muted border-ops-border hover:text-ops-text'
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                      <input
+                        id="auto-purge-keep-input"
+                        type="number"
+                        min={0}
+                        max={100}
+                        disabled={!botPurgeReady}
+                        value={autoPurgeKeepLatest}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            autoPurgeKeepLatest: Number(e.target.value),
+                          }))
+                        }
+                        className="ops-input num w-14 h-7 px-1.5 text-xs font-mono text-right disabled:opacity-45"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 py-1.5 px-2.5 rounded bg-ops-inset border border-ops-border">
+                    <label htmlFor="auto-purge-hours-input" className="text-xs text-ops-secondary shrink-0">
+                      Interval (h)
+                    </label>
+                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                      {INTERVAL_HOUR_PRESETS.map((h) => (
+                        <button
+                          key={h}
+                          type="button"
+                          disabled={!botPurgeReady}
+                          onClick={() =>
+                            setDraft((prev) => ({ ...prev, autoPurgeIntervalHours: h }))
+                          }
+                          className={`num px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors disabled:opacity-45 ${
+                            autoPurgeIntervalHours === h
+                              ? 'bg-ops-elevated text-ops-text border-ops-borderStrong'
+                              : 'bg-ops-surface text-ops-muted border-ops-border hover:text-ops-text'
+                          }`}
+                        >
+                          {h}h
+                        </button>
+                      ))}
+                      <input
+                        id="auto-purge-hours-input"
+                        type="number"
+                        min={1}
+                        max={168}
+                        disabled={!botPurgeReady}
+                        value={autoPurgeIntervalHours}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            autoPurgeIntervalHours: Number(e.target.value),
+                          }))
+                        }
+                        className="ops-input num w-14 h-7 px-1.5 text-xs font-mono text-right disabled:opacity-45"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manual Purge Now Bar */}
               <div className="p-2.5 rounded-md bg-ops-surface border border-ops-border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-1.5">
@@ -724,7 +870,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
                     ) : (
                       <>
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>Purge Messages</span>
+                        <span>Purge Now</span>
                       </>
                     )}
                   </button>
@@ -733,7 +879,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
 
               {lastPurgeResult && (
                 <div
-                  className={`text-[11px] font-mono px-2.5 py-1.5 rounded border ${
+                  className={`num text-[11px] font-mono px-2.5 py-1.5 rounded border ${
                     lastPurgeResult.ok
                       ? 'bg-ops-ok/10 text-ops-ok border-ops-ok/30'
                       : 'bg-ops-danger/10 text-ops-danger border-ops-danger/30'
@@ -742,6 +888,17 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
                   {lastPurgeResult.ok
                     ? `Deleted ${lastPurgeResult.deleted_count} message(s) (scanned ${
                         lastPurgeResult.scanned ?? 0
+                      }${
+                        typeof lastPurgeResult.bulk_deleted === 'number' ||
+                        typeof lastPurgeResult.single_deleted === 'number'
+                          ? `, bulk ${lastPurgeResult.bulk_deleted ?? 0} / single ${
+                              lastPurgeResult.single_deleted ?? 0
+                            }`
+                          : ''
+                      }${
+                        typeof lastPurgeResult.errors === 'number' && lastPurgeResult.errors > 0
+                          ? `, errors ${lastPurgeResult.errors}`
+                          : ''
                       })`
                     : lastPurgeResult.error || 'Purge failed'}
                 </div>

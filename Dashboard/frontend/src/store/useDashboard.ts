@@ -5,10 +5,12 @@ import type {
   AlertsStatus,
   AlertTestResult,
   AutoBoostConfig,
+  AutoRejoinUpdateResult,
   ChartHistory,
   ClientConfig,
   ConnectionState,
   CoreAffinityInfo,
+  DeepCleanExecuteResult,
   DeepCleanPreviewItem,
   DefenderStatus,
   EventLogEntry,
@@ -48,11 +50,6 @@ export function getViewFromHash(): WorkspaceView {
   if (typeof window === 'undefined') return 'overview';
   const raw = window.location.hash.replace(/^#/, '').trim() as WorkspaceView;
   return VALID_VIEWS.has(raw) ? raw : 'overview';
-}
-
-function getInitialSidebarCollapsed(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem('genesis_sidebar_collapsed') === '1';
 }
 
 // --- Immutable Payload Normalizers ---
@@ -159,7 +156,6 @@ function appendChartPoint(
 // --- Store Interface ---
 interface DashboardState {
   activeView: WorkspaceView;
-  sidebarCollapsed: boolean;
   connected: boolean;
   connectionState: ConnectionState;
   lastMessageAt: number | null;
@@ -196,6 +192,8 @@ interface DashboardState {
   isSavingAlerts: boolean;
   isPurgingAlerts: boolean;
   isRestartingTunnel: boolean;
+  pendingOps: Record<string, number>;
+  lastDeepCleanResult: DeepCleanExecuteResult | null;
   lastAlertTestResult: AlertTestResult | null;
   lastAlertPurgeResult: AlertsPurgeResult | null;
   lastAlertsSavedAt: number | null;
@@ -209,7 +207,6 @@ interface DashboardState {
 
   // Navigation & UI Actions
   setActiveView: (view: WorkspaceView, syncHash?: boolean) => void;
-  toggleSidebarCollapsed: () => void;
   setConnectionState: (state: ConnectionState) => void;
   setAuthenticated: (authed: boolean) => void;
   setAuthRequired: (required: boolean) => void;
@@ -243,6 +240,12 @@ interface DashboardState {
   setIsSavingAlerts: (v: boolean) => void;
   setIsPurgingAlerts: (v: boolean) => void;
   setIsRestartingTunnel: (v: boolean) => void;
+  setPendingOp: (key: string) => void;
+  clearPendingOp: (key: string) => void;
+  clearPendingPrefix: (prefix: string) => void;
+  pruneStalePendingOps: (maxAgeMs?: number) => void;
+  setLastDeepCleanResult: (res: DeepCleanExecuteResult | null) => void;
+  applyAutoRejoinUpdate: (update: AutoRejoinUpdateResult) => void;
   setLastAlertTestResult: (res: AlertTestResult | null) => void;
   setLastAlertPurgeResult: (res: AlertsPurgeResult | null) => void;
   markAlertsSaved: () => void;
@@ -268,7 +271,6 @@ interface DashboardState {
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   activeView: getViewFromHash(),
-  sidebarCollapsed: getInitialSidebarCollapsed(),
   connected: false,
   connectionState: 'connecting',
   lastMessageAt: null,
@@ -309,6 +311,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   isSavingAlerts: false,
   isPurgingAlerts: false,
   isRestartingTunnel: false,
+  pendingOps: {},
+  lastDeepCleanResult: null,
   lastAlertTestResult: null,
   lastAlertPurgeResult: null,
   lastAlertsSavedAt: null,
@@ -329,15 +333,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }
     set({ activeView });
   },
-
-  toggleSidebarCollapsed: () =>
-    set((s) => {
-      const next = !s.sidebarCollapsed;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('genesis_sidebar_collapsed', next ? '1' : '0');
-      }
-      return { sidebarCollapsed: next };
-    }),
 
   setConnectionState: (connectionState) =>
     set({
@@ -436,12 +431,75 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setIsSavingAlerts: (isSavingAlerts) => set({ isSavingAlerts }),
   setIsPurgingAlerts: (isPurgingAlerts) => set({ isPurgingAlerts }),
   setIsRestartingTunnel: (isRestartingTunnel) => set({ isRestartingTunnel }),
+  setPendingOp: (key) =>
+    set((s) => ({
+      pendingOps: { ...s.pendingOps, [key]: Date.now() },
+    })),
+  clearPendingOp: (key) =>
+    set((s) => {
+      if (!(key in s.pendingOps)) return s;
+      const next = { ...s.pendingOps };
+      delete next[key];
+      return { pendingOps: next };
+    }),
+  clearPendingPrefix: (prefix) =>
+    set((s) => {
+      const keys = Object.keys(s.pendingOps).filter((k) => k.startsWith(prefix));
+      if (keys.length === 0) return s;
+      const next = { ...s.pendingOps };
+      for (const k of keys) delete next[k];
+      return { pendingOps: next };
+    }),
+  pruneStalePendingOps: (maxAgeMs = 30_000) =>
+    set((s) => {
+      const cutoff = Date.now() - maxAgeMs;
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const [k, ts] of Object.entries(s.pendingOps)) {
+        if (ts >= cutoff) {
+          next[k] = ts;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? { pendingOps: next } : s;
+    }),
+  setLastDeepCleanResult: (lastDeepCleanResult) => set({ lastDeepCleanResult }),
+  applyAutoRejoinUpdate: (update) =>
+    set((s) => {
+      const nextConfig = s.config
+        ? {
+            ...s.config,
+            mumu: {
+              ...s.config.mumu,
+              auto_reconnect: update.global,
+              instance_auto_rejoin: { ...update.instance_auto_rejoin },
+            },
+          }
+        : s.config;
+
+      const nextMumu = s.mumu
+        ? {
+            ...s.mumu,
+            auto_rejoin_global: update.global,
+            instance_auto_rejoin: { ...update.instance_auto_rejoin },
+            devices: s.mumu.devices.map((dev) => ({
+              ...dev,
+              auto_rejoin:
+                update.global && update.instance_auto_rejoin[String(dev.index)] !== false,
+            })),
+          }
+        : s.mumu;
+
+      return { config: nextConfig, mumu: nextMumu };
+    }),
   setLastAlertTestResult: (lastAlertTestResult) => set({ lastAlertTestResult }),
   setLastAlertPurgeResult: (lastAlertPurgeResult) => set({ lastAlertPurgeResult }),
   markAlertsSaved: () => set({ lastAlertsSavedAt: Date.now() }),
 
   clearPendingOperations: () =>
     set({
+      pendingOps: {},
       isDeepCleaning: false,
       isScanningClean: false,
       isBoosting: false,
@@ -452,10 +510,25 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }),
 
   setAuthModalOpen: (authModalOpen) =>
-    set((s) => ({
-      authModalOpen,
-      pendingAuthAction: authModalOpen ? s.pendingAuthAction : null,
-    })),
+    set((s) =>
+      authModalOpen
+        ? {
+            authModalOpen: true,
+            pendingAuthAction: s.pendingAuthAction,
+          }
+        : {
+            authModalOpen: false,
+            pendingAuthAction: null,
+            pendingOps: {},
+            isDeepCleaning: false,
+            isScanningClean: false,
+            isBoosting: false,
+            isTestingAlert: false,
+            isSavingAlerts: false,
+            isPurgingAlerts: false,
+            isRestartingTunnel: false,
+          }
+    ),
 
   openAuthModalWithAction: (action) =>
     set({
@@ -463,7 +536,19 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       pendingAuthAction: action ?? null,
     }),
 
-  closeAuthModal: () => set({ authModalOpen: false, pendingAuthAction: null }),
+  closeAuthModal: () =>
+    set({
+      authModalOpen: false,
+      pendingAuthAction: null,
+      pendingOps: {},
+      isDeepCleaning: false,
+      isScanningClean: false,
+      isBoosting: false,
+      isTestingAlert: false,
+      isSavingAlerts: false,
+      isPurgingAlerts: false,
+      isRestartingTunnel: false,
+    }),
 
   consumePendingAuthAction: () => {
     const fn = get().pendingAuthAction;

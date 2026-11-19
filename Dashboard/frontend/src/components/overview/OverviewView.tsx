@@ -22,11 +22,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     <div className="space-y-4">
       <OverviewKpiStrip />
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-        <div className="xl:col-span-7">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+        <div className="lg:col-span-7">
           <PrecisionTelemetryChart />
         </div>
-        <div className="xl:col-span-5">
+        <div className="lg:col-span-5">
           <OverviewQuickActions
             onBoostNow={onBoostNow}
             onCheckHardening={onCheckHardening}
@@ -36,11 +36,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-        <div className="xl:col-span-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="lg:col-span-6">
           <OverviewInstancesSummary />
         </div>
-        <div className="xl:col-span-6">
+        <div className="lg:col-span-6">
           <OverviewIncidentsCard />
         </div>
       </div>

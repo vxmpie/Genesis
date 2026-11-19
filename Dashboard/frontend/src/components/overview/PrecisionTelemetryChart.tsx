@@ -11,7 +11,13 @@ interface HoverPoint {
   ram: number;
 }
 
-export const PrecisionTelemetryChart: React.FC = () => {
+interface PrecisionTelemetryChartProps {
+  tall?: boolean;
+}
+
+export const PrecisionTelemetryChart: React.FC<PrecisionTelemetryChartProps> = ({
+  tall = false,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -372,7 +378,9 @@ export const PrecisionTelemetryChart: React.FC = () => {
       {/* Canvas Container */}
       <div
         ref={containerRef}
-        className="relative w-full h-56 sm:h-60 bg-ops-inset rounded-md overflow-hidden border border-ops-border touch-none"
+        className={`relative w-full ${
+          tall ? 'h-72 sm:h-80' : 'h-56 sm:h-60'
+        } bg-ops-inset rounded-md overflow-hidden border border-ops-border touch-none`}
       >
         <canvas
           ref={canvasRef}

@@ -5,6 +5,7 @@ import type {
   AlertsStatus,
   AlertTestResult,
   AutoBoostConfig,
+  AutoRejoinUpdateResult,
   ChartHistory,
   ClientConfig,
   CoreAffinityInfo,
@@ -18,6 +19,8 @@ import type {
   HardeningStatus,
   MuMuHealth,
   NetworkObservatory,
+  ProcessKillResult,
+  ProcessTrimResult,
   RamBoostResult,
   RobloxLivePresence,
   SessionSummary,
@@ -132,6 +135,9 @@ export type WsServerMessage =
   | { type: 'flush_dns_result'; success: boolean }
   | { type: 'observatory_update'; data: NetworkObservatory }
   | { type: 'mumu_trim_result'; data: TrimSingleProcessResult }
+  | { type: 'process_trim_result'; data: ProcessTrimResult }
+  | { type: 'process_kill_result'; data: ProcessKillResult }
+  | ({ type: 'auto_rejoin_updated' } & AutoRejoinUpdateResult)
   | { type: 'timer_resolution_result'; data: TimerResolutionInfo }
   | { type: 'pcore_affinity_result'; data: CoreAffinityInfo }
   | { type: 'shader_cache_result'; data: ShaderCacheInfo }
@@ -155,6 +161,7 @@ export interface WsCommandMap {
   refresh_hardening: Record<string, never>;
   set_mumu_game: { instance: number | string; place_id: number };
   set_mumu_username: { instance: number | string; username: string };
+  set_auto_rejoin: { instance: number | null; enabled: boolean };
   defender_status: Record<string, never>;
   quick_scan: Record<string, never>;
   growth_data: Record<string, never>;
@@ -163,6 +170,8 @@ export interface WsCommandMap {
   reset_session_boosts: Record<string, never>;
   reset_total_boosts: Record<string, never>;
   trim_mumu_instance: { pid?: number; instance?: number };
+  trim_process: { pid: number };
+  kill_process: { pid: number };
   toggle_timer_resolution: { enabled: boolean };
   toggle_pcore_affinity: { enabled: boolean };
   flush_shader_cache: Record<string, never>;
@@ -209,12 +218,15 @@ const KNOWN_WS_TYPES: ReadonlySet<string> = new Set([
   'hardening_status',
   'instance_game_updated',
   'mumu_username_set',
+  'auto_rejoin_updated',
   'defender_status',
   'quick_scan_result',
   'growth_data',
   'flush_dns_result',
   'observatory_update',
   'mumu_trim_result',
+  'process_trim_result',
+  'process_kill_result',
   'timer_resolution_result',
   'pcore_affinity_result',
   'shader_cache_result',

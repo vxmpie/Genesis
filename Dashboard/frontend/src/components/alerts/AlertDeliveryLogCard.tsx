@@ -79,14 +79,14 @@ export const AlertDeliveryLogCard: React.FC<AlertDeliveryLogCardProps> = ({ onRe
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center bg-ops-inset p-0.5 rounded-md border border-ops-border text-[11px] font-mono">
+        <div className="flex items-center gap-2 flex-wrap max-w-full">
+          <div className="flex items-center bg-ops-inset p-0.5 rounded-md border border-ops-border text-[10px] sm:text-[11px] font-mono overflow-x-auto max-w-full">
             {(['all', 'delivered', 'failed', 'suppressed'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setFilter(key)}
-                className={`num px-2.5 py-1 rounded capitalize transition-colors ${
+                className={`num px-1.5 sm:px-2.5 py-1 rounded capitalize transition-colors whitespace-nowrap shrink-0 ${
                   filter === key
                     ? 'bg-ops-elevated text-ops-text border border-ops-borderStrong'
                     : 'text-ops-muted hover:text-ops-text border border-transparent'

@@ -74,6 +74,7 @@ export function useWebSocket() {
         break;
       case 'auth_failed':
         store.clearSession();
+        store.clearPendingOperations();
         store.addToast('error', 'Session PIN invalid or expired');
         break;
       case 'auth_required':
@@ -87,6 +88,7 @@ export function useWebSocket() {
         break;
       case 'boost_result':
         store.setIsBoosting(false);
+        store.clearPendingOp('boost');
         store.setSummary(msg.summary);
         store.addToast(
           'boost',
@@ -110,6 +112,7 @@ export function useWebSocket() {
         }
         break;
       case 'config_updated':
+        store.clearPendingPrefix('autoboost:');
         store.setConfig(msg.config);
         store.updateAutoBoost({
           enabled: msg.auto_boost.enabled,
@@ -124,6 +127,7 @@ export function useWebSocket() {
         break;
       case 'deep_clean_preview': {
         store.setIsScanningClean(false);
+        store.clearPendingOp('deepclean:scan');
         const items = msg.items || msg.data || [];
         store.setDeepCleanPreview(items);
         store.addToast(
@@ -134,8 +138,10 @@ export function useWebSocket() {
       }
       case 'deep_clean_result': {
         store.setIsDeepCleaning(false);
+        store.clearPendingOp('deepclean:execute');
         store.setDeepCleanPreview([]);
         const cleanRes = msg.result || msg.data;
+        store.setLastDeepCleanResult(cleanRes);
         store.addToast(
           'success',
           `Deep Clean freed ${cleanRes.total_freed_mb} MB (${cleanRes.total_deleted} files)`
@@ -143,9 +149,11 @@ export function useWebSocket() {
         break;
       }
       case 'vm_disk_status':
+        store.clearPendingOp('vmdisk:refresh');
         store.setVmDisk(msg.data);
         break;
       case 'vm_trim_result':
+        store.clearPendingOp(`vmTrim:${msg.port}`);
         store.addToast(
           msg.success ? 'success' : 'error',
           msg.success
@@ -154,12 +162,15 @@ export function useWebSocket() {
         );
         break;
       case 'hardening_status':
+        store.clearPendingOp('hardening');
         store.setHardening(msg.data);
         break;
       case 'defender_status':
+        store.clearPendingOp('defender:refresh');
         store.setDefender(msg.data);
         break;
       case 'quick_scan_result':
+        store.clearPendingOp('defender:scan');
         store.addToast(
           msg.success ? 'system' : 'warning',
           msg.success
@@ -168,15 +179,18 @@ export function useWebSocket() {
         );
         break;
       case 'growth_data':
+        store.clearPendingOp('growth:refresh');
         store.setGrowthData(msg.data);
         break;
       case 'flush_dns_result':
+        store.clearPendingOp('dns');
         store.addToast(
           msg.success ? 'success' : 'error',
           msg.success ? 'DNS resolver cache flushed' : 'Failed to flush DNS cache'
         );
         break;
       case 'observatory_update':
+        store.clearPendingOp('observatory:refresh');
         store.setObservatory(msg.data);
         break;
       case 'instance_game_updated':
@@ -195,7 +209,20 @@ export function useWebSocket() {
             : `Cleared username binding on Instance #${msg.instance}`
         );
         break;
+      case 'auto_rejoin_updated':
+        store.clearPendingOp(
+          msg.instance === null ? 'rejoin:global' : `rejoin:${msg.instance}`
+        );
+        store.applyAutoRejoinUpdate(msg);
+        store.addToast(
+          'system',
+          msg.instance === null
+            ? `Global Auto-Rejoin ${msg.enabled ? 'enabled' : 'disabled'}`
+            : `Instance #${msg.instance} Auto-Rejoin ${msg.enabled ? 'enabled' : 'disabled'}`
+        );
+        break;
       case 'mumu_trim_result':
+        store.clearPendingPrefix('trim:');
         if (msg.data.success) {
           store.addToast(
             'success',
@@ -205,7 +232,35 @@ export function useWebSocket() {
           store.addToast('error', msg.data.error);
         }
         break;
+      case 'process_trim_result':
+        if (typeof msg.data.pid === 'number') {
+          store.clearPendingOp(`procTrim:${msg.data.pid}`);
+        } else {
+          store.clearPendingPrefix('procTrim:');
+        }
+        if (msg.data.success) {
+          store.addToast(
+            'success',
+            `Trimmed ${msg.data.name} (freed ${msg.data.freed_mb} MB)`
+          );
+        } else {
+          store.addToast('error', msg.data.error);
+        }
+        break;
+      case 'process_kill_result':
+        if (typeof msg.data.pid === 'number') {
+          store.clearPendingOp(`procKill:${msg.data.pid}`);
+        } else {
+          store.clearPendingPrefix('procKill:');
+        }
+        if (msg.data.success) {
+          store.addToast('warning', `Terminated ${msg.data.name} (PID ${msg.data.pid})`);
+        } else {
+          store.addToast('error', msg.data.error);
+        }
+        break;
       case 'timer_resolution_result':
+        store.clearPendingOp('timer');
         store.setTimerResolution(msg.data);
         store.addToast(
           'system',
@@ -213,10 +268,12 @@ export function useWebSocket() {
         );
         break;
       case 'pcore_affinity_result':
+        store.clearPendingOp('affinity');
         store.setPcoreAffinity(msg.data);
         store.addToast('system', `CPU Affinity: ${msg.data.mode}`);
         break;
       case 'shader_cache_result':
+        store.clearPendingOp('shader:flush');
         store.setShaderCache(msg.data);
         if (msg.data.success !== false) {
           store.addToast(
@@ -228,15 +285,18 @@ export function useWebSocket() {
         }
         break;
       case 'shader_cache_status':
+        store.clearPendingOp('shader:scan');
         store.setShaderCache(msg.data);
         break;
       case 'governor_result':
         if (msg.data.success) {
+          store.clearPendingOp(`governor:${msg.data.instance}:${msg.data.action}`);
           store.addToast(
             'success',
             `Instance #${msg.data.instance}: ${msg.data.action} completed`
           );
         } else {
+          store.clearPendingPrefix('governor:');
           store.addToast('error', `Governor error: ${msg.data.error}`);
         }
         break;
@@ -385,6 +445,13 @@ export function useWebSocket() {
   useEffect(() => {
     connect();
 
+    const pruneTimer = setInterval(() => {
+      const pending = useDashboardStore.getState().pendingOps;
+      if (Object.keys(pending).length > 0) {
+        useDashboardStore.getState().pruneStalePendingOps(30_000);
+      }
+    }, 5000);
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         if (!globalWs || globalWs.readyState !== WebSocket.OPEN) {
@@ -397,6 +464,7 @@ export function useWebSocket() {
     window.addEventListener('focus', handleVisibility);
 
     return () => {
+      clearInterval(pruneTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
     };

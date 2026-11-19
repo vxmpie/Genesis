@@ -60,7 +60,7 @@ export const OverviewKpiStrip: React.FC = () => {
     : '—';
 
   return (
-    <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+    <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       {/* KPI 1: CPU Load */}
       <div className="ops-card p-4 flex flex-col justify-between gap-3">
         <div className="flex items-center justify-between gap-2">

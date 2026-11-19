@@ -1,9 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { Gamepad2, X, Check, Save, User, Activity, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Activity, Check, Gamepad2, Loader2, Save, User, X } from 'lucide-react';
 import { useDashboardStore } from '../store/useDashboard';
+import { resolveRobloxPlace } from '../lib/api';
+import type { MuMuDevice } from '../types/dashboard';
+import { OpsSwitch, StatusBadge, type SemanticTone } from './ui';
 
-interface EditGameModalProps {
-  onSave: (instance: number, placeId: number, username?: string) => void;
+export interface EditGameModalProps {
+  onSave: (
+    instance: number,
+    updates: { placeId?: number; username?: string; autoRejoin?: boolean }
+  ) => void;
 }
 
 export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
@@ -13,194 +19,292 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({ onSave }) => {
 
   if (!isOpen || !device) return null;
 
-  return <EditGameModalInner device={device} onClose={close} onSave={onSave} />;
+  return <EditGameModalInner key={device.pid} device={device} onClose={close} onSave={onSave} />;
 };
 
 interface EditGameModalInnerProps {
-  device: NonNullable<ReturnType<typeof useDashboardStore.getState>['editingDevice']>;
+  device: MuMuDevice;
   onClose: () => void;
-  onSave: (instance: number, placeId: number, username?: string) => void;
+  onSave: (
+    instance: number,
+    updates: { placeId?: number; username?: string; autoRejoin?: boolean }
+  ) => void;
+}
+
+function getPresenceTone(status: string): SemanticTone {
+  switch (status) {
+    case 'InGame':
+      return 'ok';
+    case 'Online':
+      return 'info';
+    case 'InStudio':
+      return 'accent';
+    default:
+      return 'muted';
+  }
 }
 
 const EditGameModalInner: React.FC<EditGameModalInnerProps> = ({ device, onClose, onSave }) => {
-  const [placeId, setPlaceId] = useState<string>(
-    String(device.target_place_id || device.place_id || '98800969324557')
+  const mumu = useDashboardStore((s) => s.mumu);
+  const config = useDashboardStore((s) => s.config);
+
+  const initialPlaceId =
+    device.target_place_id > 0
+      ? String(device.target_place_id)
+      : device.place_id > 0
+      ? String(device.place_id)
+      : '';
+  const initialUsername = device.username || '';
+  const rowSupported = device.auto_rejoin !== undefined;
+  const globalRejoin = Boolean(mumu?.auto_rejoin_global ?? true);
+  const initialAutoRejoin = device.auto_rejoin ?? true;
+
+  const [placeId, setPlaceId] = useState<string>(initialPlaceId);
+  const [username, setUsername] = useState<string>(initialUsername);
+  const [autoRejoin, setAutoRejoin] = useState<boolean>(initialAutoRejoin);
+  const [resolvedEntry, setResolvedEntry] = useState<{ pid: number; name: string | null } | null>(
+    null
   );
-  const [username, setUsername] = useState<string>(device.username || '');
-  const [resolvedName, setResolvedName] = useState<string | null>(null);
-  const [isResolving, setIsResolving] = useState(false);
+  const [resolvingPid, setResolvingPid] = useState<number | null>(null);
+
+  const presets = mumu?.game_presets ?? config?.mumu.game_presets ?? [];
+
+  const trimmedPlace = placeId.trim();
+  const parsedPlace = Number(trimmedPlace);
+  const validPid =
+    trimmedPlace.length > 0 && Number.isInteger(parsedPlace) && parsedPlace > 0
+      ? parsedPlace
+      : null;
 
   useEffect(() => {
-    if (!placeId || isNaN(Number(placeId))) return;
-    const pid = Number(placeId);
-    if (pid <= 0) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (validPid === null) return;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      setIsResolving(true);
-      fetch(`/api/roblox/resolve_place?place_id=${pid}`, { signal: controller.signal })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.game_name) {
-            setResolvedName(data.game_name);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          setIsResolving(false);
-        });
-    }, 150);
+    const timer = setTimeout(async () => {
+      setResolvingPid(validPid);
+      const result = await resolveRobloxPlace(validPid, controller.signal);
+      if (!controller.signal.aborted) {
+        setResolvedEntry({ pid: validPid, name: result ? result.game_name : null });
+        setResolvingPid((prev) => (prev === validPid ? null : prev));
+      }
+    }, 180);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [placeId]);
+  }, [validPid]);
 
-  const presets = [
-    { name: 'Storage Hunters', placeId: '98800969324557' },
-    { name: 'Gym League', placeId: '17450551531' },
-    { name: 'Anime Defenders', placeId: '17017769292' },
-    { name: 'Blox Fruits', placeId: '2753915549' },
-  ];
+  const resolvedName =
+    validPid !== null && resolvedEntry?.pid === validPid ? resolvedEntry.name : null;
+  const isResolving = validPid !== null && resolvingPid === validPid;
 
-  const handleClose = () => {
-    setResolvedName(null);
-    onClose();
-  };
-
-  const handleSave = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const pidNum = parseInt(placeId.trim());
-    if (isNaN(pidNum) || pidNum <= 0) return;
-    onSave(device.index, pidNum, username.trim());
-    setResolvedName(null);
+    const updates: { placeId?: number; username?: string; autoRejoin?: boolean } = {};
+
+    if (validPid !== null && trimmedPlace !== initialPlaceId) {
+      updates.placeId = validPid;
+    }
+
+    const trimmedUser = username.trim();
+    if (trimmedUser !== initialUsername) {
+      updates.username = trimmedUser;
+    }
+
+    if (rowSupported && autoRejoin !== initialAutoRejoin) {
+      updates.autoRejoin = autoRejoin;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      onSave(device.index, updates);
+    }
     onClose();
   };
+
+  const invalidPlaceInput = trimmedPlace.length > 0 && validPid === null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-md bg-genesis-card border border-white/10 rounded-xl p-5 shadow-2xl relative">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-game-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md bg-ops-surface border border-ops-borderStrong rounded-lg p-5 shadow-xl relative space-y-4">
         <button
-          onClick={handleClose}
-          className="btn-cyber absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-md active:scale-90 hover:rotate-90 transition-all duration-200"
+          type="button"
+          onClick={onClose}
+          aria-label="Close instance configuration modal"
+          className="absolute top-3.5 right-3.5 p-1.5 rounded-md text-ops-muted hover:text-ops-text hover:bg-ops-elevated transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-2 mb-2">
-          <Gamepad2 className="w-5 h-5 text-genesis-cyan animate-pulse" />
-          <h2 className="text-sm font-extrabold text-white">
-            Instance #{device.index} — Game & Auto-Rejoin Target
-          </h2>
-        </div>
-        <p className="text-xs text-slate-400 mb-4">
-          Bind your Roblox username for Real-Time Presence tracking or configure Place ID for auto-reconnect.
-        </p>
-
-        {/* Live Presence Status if available */}
-        {device.presence_status && (
-          <div className="mb-4 p-2.5 rounded-lg bg-black/40 border border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="w-3.5 h-3.5 text-genesis-cyan" />
-              <span className="text-xs text-slate-300">Live Status:</span>
-            </div>
-            <span
-              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                device.presence_status === 'InGame'
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
-                  : device.presence_status === 'Online'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700'
-              }`}
-            >
-              {device.presence_status === 'InGame'
-                ? `In-Game (${device.active_game || 'Playing'})`
-                : device.presence_status === 'Online'
-                ? 'In App / Website'
-                : 'Offline / Standby'}
-            </span>
+        <div className="flex items-start gap-2.5 pr-6">
+          <div className="w-9 h-9 rounded-md bg-ops-elevated border border-ops-borderStrong flex items-center justify-center text-ops-telemetry shrink-0">
+            <Gamepad2 className="w-4 h-4" />
           </div>
-        )}
+          <div>
+            <h2 id="edit-game-modal-title" className="text-sm font-semibold text-ops-text">
+              Instance #{device.index} — Target & Auto-Rejoin
+            </h2>
+            <p className="text-xs text-ops-secondary mt-0.5">
+              Bind a Roblox username for presence tracking, configure Place ID, or toggle Auto-Rejoin.
+            </p>
+          </div>
+        </div>
 
-        {/* Form */}
-        <form onSubmit={handleSave} className="space-y-4">
+        {/* Live Presence Readout */}
+        <div className="p-2.5 rounded-md bg-ops-inset border border-ops-border flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-ops-secondary">
+            <Activity className="w-3.5 h-3.5 text-ops-telemetry shrink-0" />
+            <span>Live Status</span>
+          </div>
+          <StatusBadge tone={getPresenceTone(device.presence_status)} dot>
+            {device.presence_status === 'InGame'
+              ? `In-Game (${device.active_game || 'Playing'})`
+              : device.presence_status === 'Online'
+              ? 'In App / Website'
+              : device.presence_status || 'Offline'}
+          </StatusBadge>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Per-Instance Auto-Rejoin */}
+          <div className="p-3 rounded-md bg-ops-inset border border-ops-border flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-ops-text">Auto-Rejoin Target Map</div>
+              <div className="text-[11px] text-ops-muted">
+                {!rowSupported
+                  ? 'Restart elevated server to enable per-instance toggle.'
+                  : !globalRejoin
+                  ? 'Master switch Auto-Rejoin (All) is currently off.'
+                  : autoRejoin
+                  ? 'Watchdog & heartbeat keep Roblox attached to target map.'
+                  : 'Paused for this slot. Stored Place ID & username stay saved.'}
+              </div>
+            </div>
+            <OpsSwitch
+              ariaLabel={`Auto-Rejoin Instance #${device.index}`}
+              checked={autoRejoin && globalRejoin}
+              disabled={!rowSupported || !globalRejoin}
+              tone="ok"
+              onChange={setAutoRejoin}
+            />
+          </div>
+
           {/* Roblox Username Binding */}
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
-              <User className="w-3 h-3 text-genesis-cyan" />
-              <span>Roblox Username (Auto-Detect Live Game)</span>
+            <label
+              htmlFor="edit-game-username"
+              className="text-[11px] font-mono uppercase tracking-wider text-ops-secondary flex items-center gap-1.5 mb-1.5"
+            >
+              <User className="w-3 h-3 text-ops-telemetry" />
+              <span>Roblox Username (Optional)</span>
             </label>
             <input
+              id="edit-game-username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. MyBotPlayer123"
-              className="w-full px-3 py-2 bg-black/50 border border-white/15 rounded-lg text-xs font-mono text-white outline-none focus:border-genesis-cyan focus:ring-1 focus:ring-genesis-cyan transition-all"
+              placeholder="Leave empty to clear username binding"
+              className="ops-input w-full h-9 px-3 text-xs font-mono"
             />
-            <span className="text-[10px] text-slate-500 mt-1 block">
-              When set, Genesis tracks your active game in real-time and auto-syncs reconnect target!
-            </span>
           </div>
 
-          {/* Quick Presets */}
+          {/* Backend Presets */}
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-              Quick Presets
-            </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {presets.map((p) => (
-                <button
-                  key={p.placeId}
-                  type="button"
-                  onClick={() => setPlaceId(p.placeId)}
-                  className={`btn-cyber p-2 rounded border text-left text-xs font-mono transition-all active:scale-95 ${
-                    placeId === p.placeId
-                      ? 'bg-genesis-cyan/15 border-genesis-cyan/40 text-genesis-cyan font-bold shadow-[0_0_8px_rgba(0,229,255,0.2)]'
-                      : 'bg-white/[0.03] border-white/[0.06] text-slate-300 hover:bg-white/[0.06] hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>{p.name}</span>
-                    {placeId === p.placeId && <Check className="w-3 h-3 text-genesis-cyan" />}
-                  </div>
-                  <div className="text-[10px] text-slate-500">{p.placeId}</div>
-                </button>
-              ))}
+            <div className="text-[11px] font-mono uppercase tracking-wider text-ops-secondary mb-1.5">
+              Configured Presets
             </div>
+            {presets.length === 0 ? (
+              <div className="p-2.5 rounded-md bg-ops-inset border border-ops-border text-xs text-ops-muted font-mono">
+                No game presets configured in backend config.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5">
+                {presets.map((p) => {
+                  const idStr = String(p.place_id);
+                  const active = placeId.trim() === idStr;
+                  return (
+                    <button
+                      key={p.place_id}
+                      type="button"
+                      onClick={() => setPlaceId(idStr)}
+                      className={`p-2 rounded-md border text-left text-xs font-mono transition-colors ${
+                        active
+                          ? 'bg-ops-accent/10 border-ops-accent/40 text-ops-text'
+                          : 'bg-ops-inset border-ops-border text-ops-secondary hover:border-ops-borderStrong'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-sans font-medium truncate">{p.name}</span>
+                        {active && <Check className="w-3 h-3 text-ops-accent shrink-0" />}
+                      </div>
+                      <div className="num text-[10px] text-ops-muted">{idStr}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Custom Place ID */}
+          {/* Manual Place ID */}
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
-              <span>Target Roblox Place ID</span>
-              {resolvedName && (
-                <span className="text-[10px] text-genesis-cyan font-semibold flex items-center gap-1">
-                  {isResolving && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                  {resolvedName}
-                </span>
-              )}
-            </label>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label
+                htmlFor="edit-game-place-id"
+                className="text-[11px] font-mono uppercase tracking-wider text-ops-secondary"
+              >
+                Target Place ID
+              </label>
+              <span className="text-[11px] font-mono text-ops-telemetry flex items-center gap-1 truncate max-w-[200px]">
+                {isResolving && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+                {resolvedName || (placeId.trim() ? '—' : 'Unassigned')}
+              </span>
+            </div>
             <input
+              id="edit-game-place-id"
               type="text"
+              inputMode="numeric"
               value={placeId}
               onChange={(e) => setPlaceId(e.target.value)}
-              placeholder="e.g. 98800969324557"
-              className="w-full px-3 py-2 bg-black/50 border border-white/15 rounded-lg text-xs font-mono text-white outline-none focus:border-genesis-cyan focus:ring-1 focus:ring-genesis-cyan transition-all"
+              placeholder="Enter numeric Roblox Place ID"
+              className="ops-input num w-full h-9 px-3 text-xs font-mono"
             />
+            {invalidPlaceInput && (
+              <p className="text-[11px] text-ops-danger font-mono mt-1">
+                Place ID must be a positive integer.
+              </p>
+            )}
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-ops-border">
             <button
               type="button"
-              onClick={handleClose}
-              className="btn-cyber px-4 py-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 text-xs font-semibold border border-white/10 active:scale-95 transition-all"
+              onClick={onClose}
+              className="ops-btn h-9 px-3 bg-ops-elevated hover:bg-ops-border border border-ops-border text-xs text-ops-secondary"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="btn-cyber px-4 py-2 rounded-lg bg-gradient-to-r from-genesis-cyan to-blue-600 hover:brightness-110 text-white text-xs font-bold shadow-glow-cyan active:scale-95 transition-all flex items-center gap-1.5"
+              disabled={invalidPlaceInput}
+              className="ops-btn h-9 px-4 bg-ops-accent hover:bg-blue-500 text-white text-xs font-semibold"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Save & Apply</span>

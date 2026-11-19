@@ -15,7 +15,7 @@ export const MobileBottomNav: React.FC = () => {
   return (
     <nav
       aria-label="Mobile navigation"
-      className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-ops-chrome/95 backdrop-blur-sm border-t border-ops-border pb-[env(safe-area-inset-bottom)]"
+      className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-ops-chrome/95 backdrop-blur-sm border-t border-ops-border pb-[env(safe-area-inset-bottom)]"
     >
       <div className="grid grid-cols-5">
         {NAV_ITEMS.map((item) => {

@@ -30,7 +30,7 @@ export const AlertsTunnelView: React.FC<AlertsTunnelViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Top 4 Pipeline KPI Cards */}
-      <section aria-label="Alert pipeline statistics" className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <section aria-label="Alert pipeline statistics" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="ops-card p-4 flex flex-col justify-between gap-2">
           <div className="flex items-center justify-between text-xs text-ops-secondary">
             <span>Webhook Pipeline</span>
@@ -100,15 +100,15 @@ export const AlertsTunnelView: React.FC<AlertsTunnelViewProps> = ({
       </section>
 
       {/* Control Plane Split */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-        <div className="xl:col-span-7">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="lg:col-span-7">
           <DiscordAlertsCard
             onSaveConfig={onSaveAlertsConfig}
             onSendTest={onSendTestAlert}
             onPurgeMessages={onPurgeAlerts}
           />
         </div>
-        <div className="xl:col-span-5">
+        <div className="lg:col-span-5 lg:sticky lg:top-[calc(env(safe-area-inset-top)+7rem)]">
           <TunnelControlCard
             onRestartTunnel={onRestartTunnel}
             onRestartServer={onRestartServer}

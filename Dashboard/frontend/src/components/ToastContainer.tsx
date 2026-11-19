@@ -50,7 +50,7 @@ export const ToastContainer: React.FC = () => {
   return (
     <div
       aria-live="polite"
-      className="fixed top-16 inset-x-3 sm:left-auto sm:right-4 sm:w-96 z-50 flex flex-col gap-2 pointer-events-none"
+      className="fixed top-[calc(env(safe-area-inset-top)+4.25rem)] md:top-[calc(env(safe-area-inset-top)+6.75rem)] inset-x-3 sm:left-auto sm:right-4 sm:w-96 z-50 flex flex-col gap-2 pointer-events-none"
     >
       {toasts.map((toast) => {
         const style = getStyle(toast.type);

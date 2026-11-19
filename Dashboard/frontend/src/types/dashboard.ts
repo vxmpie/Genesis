@@ -121,6 +121,8 @@ export interface MuMuDevice {
   is_bloated: boolean;
   index: number;
   instance_index: number;
+  adb_port?: number;
+  auto_rejoin?: boolean;
   type: 'Emulator' | 'Launcher' | string;
   username: string;
   active_game: string;
@@ -155,6 +157,8 @@ export interface MuMuHealth {
   vm_disk_last_check: string | null;
   instance_places: Record<string, number>;
   game_presets: GamePreset[];
+  auto_rejoin_global?: boolean;
+  instance_auto_rejoin?: Record<string, boolean>;
 }
 
 export interface RobloxLivePresence {
@@ -176,12 +180,28 @@ export type TrimSingleProcessResult =
   | { success: true; pid: number; name: string; freed_mb: number; note?: string }
   | { success: false; error: string };
 
+export type ProcessTrimResult =
+  | { success: true; pid: number; name: string; freed_mb: number; note?: string }
+  | { success: false; pid?: number; error: string };
+
+export type ProcessKillResult =
+  | { success: true; pid: number; name: string }
+  | { success: false; pid?: number; name?: string; error: string };
+
+export interface AutoRejoinUpdateResult {
+  instance: number | null;
+  enabled: boolean;
+  global: boolean;
+  instance_auto_rejoin: Record<string, boolean>;
+}
+
 // --- Processes, Hardening & Maintenance ---
 export interface TopProcess {
   pid: number;
   name: string;
   ram_mb: number;
   cpu_percent: number;
+  protected?: boolean;
 }
 
 export type HardeningCheckValue = 'ok' | 'drift' | 'disabled' | 'unknown' | string;
@@ -526,6 +546,7 @@ export interface ClientConfig {
     max_instances: number;
     instance_places?: Record<string, number>;
     instance_usernames?: Record<string, string>;
+    instance_auto_rejoin?: Record<string, boolean>;
     game_presets?: GamePreset[];
     default_place_id?: number;
     auto_reconnect?: boolean;

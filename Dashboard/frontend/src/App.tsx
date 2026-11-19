@@ -1,23 +1,15 @@
 import { useCallback, useEffect } from 'react';
 import { getViewFromHash, useDashboardStore } from './store/useDashboard';
 import { useWebSocket } from './hooks/useWebSocket';
-import { postRestartServer } from './lib/api';
+import { postPurgeDiscordAlerts, postRestartServer } from './lib/api';
 import type { AlertsConfigUpdatePayload, WorkspaceView } from './types/dashboard';
 
 import { AppShell } from './components/layout/AppShell';
 import { OverviewView } from './components/overview/OverviewView';
-import { PrecisionTelemetryChart } from './components/overview/PrecisionTelemetryChart';
+import { InstancesView } from './components/instances/InstancesView';
+import { SystemView } from './components/system/SystemView';
+import { TelemetryView } from './components/telemetry/TelemetryView';
 import { AlertsTunnelView } from './components/alerts/AlertsTunnelView';
-
-import { MuMuCard } from './components/MuMuCard';
-import { AutoBoostCard } from './components/AutoBoostCard';
-import { HardeningCard } from './components/HardeningCard';
-import { DeepCleanCard } from './components/DeepCleanCard';
-import { DefenderCard } from './components/DefenderCard';
-import { TopProcsCard } from './components/TopProcsCard';
-import { CpuCoresCard } from './components/CpuCoresCard';
-import { NetworkObservatory } from './components/NetworkObservatory';
-import { EventLogCard } from './components/EventLogCard';
 
 import { CommandPalette, type PaletteActionId } from './components/CommandPalette';
 import { AuthModal } from './components/AuthModal';
@@ -83,11 +75,66 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setActiveView]);
 
-  // --- Command Dispatchers ---
+  // --- Shared Command Dispatchers ---
   const handleBoostNow = useCallback(() => {
     requireAuthGuard(() => {
-      useDashboardStore.getState().setIsBoosting(true);
+      const store = useDashboardStore.getState();
+      store.setIsBoosting(true);
+      store.setPendingOp('boost');
       sendCommand('boost');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handleCheckHardening = useCallback(() => {
+    useDashboardStore.getState().setPendingOp('hardening');
+    sendCommand('check_hardening');
+  }, [sendCommand]);
+
+  const handleFlushDns = useCallback(() => {
+    requireAuthGuard(() => {
+      useDashboardStore.getState().setPendingOp('dns');
+      sendCommand('flush_dns');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handleScanDeepClean = useCallback(() => {
+    const store = useDashboardStore.getState();
+    store.setIsScanningClean(true);
+    store.setPendingOp('deepclean:scan');
+    sendCommand('deep_clean_preview');
+  }, [sendCommand]);
+
+  const handleQuickScanDefender = useCallback(() => {
+    requireAuthGuard(() => {
+      useDashboardStore.getState().setPendingOp('defender:scan');
+      sendCommand('quick_scan');
+    });
+  }, [requireAuthGuard, sendCommand]);
+
+  const handleToggleTimer = useCallback(
+    (enabled: boolean) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp('timer');
+        sendCommand('toggle_timer_resolution', { enabled });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleToggleAffinity = useCallback(
+    (enabled: boolean) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp('affinity');
+        sendCommand('toggle_pcore_affinity', { enabled });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleFlushShader = useCallback(() => {
+    requireAuthGuard(() => {
+      useDashboardStore.getState().setPendingOp('shader:flush');
+      sendCommand('flush_shader_cache');
     });
   }, [requireAuthGuard, sendCommand]);
 
@@ -100,12 +147,53 @@ export function App() {
 
   const handlePurgeAlerts = useCallback(
     (limit: number, botOnly: boolean) => {
+      const executePurge = async () => {
+        const store = useDashboardStore.getState();
+        store.setIsPurgingAlerts(true);
+        const res = await postPurgeDiscordAlerts(
+          { limit, bot_only: botOnly },
+          store.token
+        );
+        const current = useDashboardStore.getState();
+        current.setIsPurgingAlerts(false);
+
+        if (res.status === 401) {
+          current.clearSession();
+          current.openAuthModalWithAction(() => {
+            void executePurge();
+          });
+          return;
+        }
+
+        if (res.data) {
+          current.setLastAlertPurgeResult(res.data);
+          if (res.ok && res.data.ok) {
+            current.addToast(
+              'success',
+              `Purged ${res.data.deleted_count} Discord message(s)`
+            );
+          } else {
+            current.addToast(
+              'error',
+              `Purge failed: ${res.data.error || res.error || 'Unknown error'}`
+            );
+          }
+        } else {
+          const errMsg = res.error || 'Purge request failed';
+          current.setLastAlertPurgeResult({
+            ok: false,
+            deleted_count: 0,
+            error: errMsg,
+          });
+          current.addToast('error', `Purge failed: ${errMsg}`);
+        }
+      };
+
       requireAuthGuard(() => {
-        useDashboardStore.getState().setIsPurgingAlerts(true);
-        sendCommand('purge_discord_alerts', { limit, bot_only: botOnly });
+        void executePurge();
       });
     },
-    [requireAuthGuard, sendCommand]
+    [requireAuthGuard]
   );
 
   const handleSaveAlertsConfig = useCallback(
@@ -144,17 +232,16 @@ export function App() {
           handleBoostNow();
           break;
         case 'scan_deep_clean':
-          useDashboardStore.getState().setIsScanningClean(true);
-          sendCommand('deep_clean_preview');
+          handleScanDeepClean();
           break;
         case 'refresh_hardening':
-          sendCommand('check_hardening');
+          handleCheckHardening();
           break;
         case 'flush_dns':
-          requireAuthGuard(() => sendCommand('flush_dns'));
+          handleFlushDns();
           break;
         case 'quick_scan':
-          requireAuthGuard(() => sendCommand('quick_scan'));
+          handleQuickScanDefender();
           break;
         case 'test_discord_alert':
           handleTestAlert();
@@ -169,33 +256,47 @@ export function App() {
           requireAuthGuard(() => sendCommand('reset_total_boosts'));
           break;
         case 'toggle_timer':
-          requireAuthGuard(() =>
-            sendCommand('toggle_timer_resolution', {
-              enabled: !useDashboardStore.getState().timerResolution?.active,
-            })
-          );
+          handleToggleTimer(!useDashboardStore.getState().timerResolution?.active);
           break;
         case 'toggle_affinity':
-          requireAuthGuard(() =>
-            sendCommand('toggle_pcore_affinity', {
-              enabled: !useDashboardStore.getState().pcoreAffinity?.enabled,
-            })
-          );
+          handleToggleAffinity(!useDashboardStore.getState().pcoreAffinity?.enabled);
           break;
         case 'flush_shader':
-          requireAuthGuard(() => sendCommand('flush_shader_cache'));
+          handleFlushShader();
           break;
       }
     },
-    [handleBoostNow, handleRestartTunnel, handleTestAlert, requireAuthGuard, sendCommand]
+    [
+      handleBoostNow,
+      handleCheckHardening,
+      handleFlushDns,
+      handleFlushShader,
+      handleQuickScanDefender,
+      handleRestartTunnel,
+      handleScanDeepClean,
+      handleTestAlert,
+      handleToggleAffinity,
+      handleToggleTimer,
+      requireAuthGuard,
+      sendCommand,
+    ]
   );
 
   const handleSaveGameTarget = useCallback(
-    (instance: number, placeId: number, username?: string) => {
+    (
+      instance: number,
+      updates: { placeId?: number; username?: string; autoRejoin?: boolean }
+    ) => {
       requireAuthGuard(() => {
-        sendCommand('set_mumu_game', { instance, place_id: placeId });
-        if (username !== undefined) {
-          sendCommand('set_mumu_username', { instance, username });
+        if (typeof updates.placeId === 'number') {
+          sendCommand('set_mumu_game', { instance, place_id: updates.placeId });
+        }
+        if (updates.username !== undefined) {
+          sendCommand('set_mumu_username', { instance, username: updates.username });
+        }
+        if (typeof updates.autoRejoin === 'boolean') {
+          useDashboardStore.getState().setPendingOp(`rejoin:${instance}`);
+          sendCommand('set_auto_rejoin', { instance, enabled: updates.autoRejoin });
         }
       });
     },
@@ -208,92 +309,125 @@ export function App() {
         {activeView === 'overview' && (
           <OverviewView
             onBoostNow={handleBoostNow}
-            onCheckHardening={() => sendCommand('check_hardening')}
-            onFlushDns={() => requireAuthGuard(() => sendCommand('flush_dns'))}
+            onCheckHardening={handleCheckHardening}
+            onFlushDns={handleFlushDns}
             onTestAlert={handleTestAlert}
           />
         )}
 
         {activeView === 'instances' && (
-          <div className="space-y-4">
-            <MuMuCard
-              onTrimMemory={(pid, index) =>
-                requireAuthGuard(() =>
-                  sendCommand('trim_mumu_instance', { pid, instance: index })
-                )
-              }
-              onGovernorAction={(instance, action) =>
-                requireAuthGuard(() =>
-                  sendCommand('governor_action', { instance, action })
-                )
-              }
-            />
-          </div>
+          <InstancesView
+            onGovernorAction={(instance, action) =>
+              requireAuthGuard(() => {
+                useDashboardStore
+                  .getState()
+                  .setPendingOp(`governor:${instance}:${action}`);
+                sendCommand('governor_action', { instance, action });
+              })
+            }
+            onToggleAutoRejoin={(instance, enabled) =>
+              requireAuthGuard(() => {
+                useDashboardStore
+                  .getState()
+                  .setPendingOp(instance === null ? 'rejoin:global' : `rejoin:${instance}`);
+                sendCommand('set_auto_rejoin', { instance, enabled });
+              })
+            }
+            onRefreshVmDisk={() => {
+              useDashboardStore.getState().setPendingOp('vmdisk:refresh');
+              sendCommand('vm_disk_refresh');
+            }}
+            onTrimVmCache={(port) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp(`vmTrim:${port}`);
+                sendCommand('vm_trim_cache', { port });
+              })
+            }
+          />
         )}
 
         {activeView === 'system' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <AutoBoostCard
-                onToggle={(enabled) =>
-                  requireAuthGuard(() => {
-                    useDashboardStore.getState().updateAutoBoost({ enabled });
-                    sendCommand('set_auto_boost', { enabled });
-                  })
-                }
-                onSetThreshold={(threshold) =>
-                  requireAuthGuard(() => {
-                    useDashboardStore.getState().updateAutoBoost({ threshold });
-                    sendCommand('set_threshold', { threshold });
-                  })
-                }
-                onSetMode={(mode) =>
-                  requireAuthGuard(() => {
-                    useDashboardStore.getState().updateAutoBoost({ mode });
-                    sendCommand('set_boost_mode', { mode });
-                  })
-                }
-                onSetInterval={(interval_minutes) =>
-                  requireAuthGuard(() => {
-                    useDashboardStore.getState().updateAutoBoost({ interval_minutes });
-                    sendCommand('set_boost_interval', { interval_minutes });
-                  })
-                }
-                onBoostNow={handleBoostNow}
-              />
-              <HardeningCard onRefresh={() => sendCommand('check_hardening')} />
-            </div>
-
-            <DeepCleanCard
-              onScan={() => {
-                useDashboardStore.getState().setIsScanningClean(true);
-                sendCommand('deep_clean_preview');
-              }}
-              onExecuteClean={() =>
-                requireAuthGuard(() => {
-                  useDashboardStore.getState().setIsDeepCleaning(true);
-                  sendCommand('deep_clean_execute');
-                })
-              }
-            />
-
-            <DefenderCard
-              onQuickScan={() => requireAuthGuard(() => sendCommand('quick_scan'))}
-            />
-
-            <TopProcsCard />
-          </div>
+          <SystemView
+            onToggleAutoBoost={(enabled) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('autoboost:enabled');
+                sendCommand('set_auto_boost', { enabled });
+              })
+            }
+            onSetThreshold={(threshold) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('autoboost:threshold');
+                sendCommand('set_threshold', { threshold });
+              })
+            }
+            onSetMode={(mode) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('autoboost:mode');
+                sendCommand('set_boost_mode', { mode });
+              })
+            }
+            onSetInterval={(interval_minutes) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('autoboost:interval');
+                sendCommand('set_boost_interval', { interval_minutes });
+              })
+            }
+            onBoostNow={handleBoostNow}
+            onResetSessionBoosts={() =>
+              requireAuthGuard(() => sendCommand('reset_session_boosts'))
+            }
+            onResetTotalBoosts={() =>
+              requireAuthGuard(() => sendCommand('reset_total_boosts'))
+            }
+            onToggleTimerResolution={handleToggleTimer}
+            onTogglePcoreAffinity={handleToggleAffinity}
+            onScanShaderCache={() => {
+              useDashboardStore.getState().setPendingOp('shader:scan');
+              sendCommand('scan_shader_cache');
+            }}
+            onFlushShaderCache={handleFlushShader}
+            onRefreshHardening={handleCheckHardening}
+            onScanDeepClean={handleScanDeepClean}
+            onExecuteDeepClean={() =>
+              requireAuthGuard(() => {
+                const store = useDashboardStore.getState();
+                store.setIsDeepCleaning(true);
+                store.setPendingOp('deepclean:execute');
+                sendCommand('deep_clean_execute');
+              })
+            }
+            onRefreshDefender={() => {
+              useDashboardStore.getState().setPendingOp('defender:refresh');
+              sendCommand('defender_status');
+            }}
+            onQuickScanDefender={handleQuickScanDefender}
+            onTrimProcess={(pid) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp(`procTrim:${pid}`);
+                sendCommand('trim_process', { pid });
+              })
+            }
+            onKillProcess={(pid) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp(`procKill:${pid}`);
+                sendCommand('kill_process', { pid });
+              })
+            }
+          />
         )}
 
         {activeView === 'telemetry' && (
-          <div className="space-y-4">
-            <PrecisionTelemetryChart />
-            <CpuCoresCard />
-            <NetworkObservatory
-              onFlushDns={() => requireAuthGuard(() => sendCommand('flush_dns'))}
-            />
-            <EventLogCard />
-          </div>
+          <TelemetryView
+            onRefreshObservatory={() => {
+              useDashboardStore.getState().setPendingOp('observatory:refresh');
+              sendCommand('observatory_refresh');
+            }}
+            onFlushDns={handleFlushDns}
+            onRefreshGrowth={() => {
+              useDashboardStore.getState().setPendingOp('growth:refresh');
+              sendCommand('growth_data');
+            }}
+          />
         )}
 
         {activeView === 'alerts' && (
