@@ -480,6 +480,8 @@ async def _bot_request_with_429(
 async def purge_discord_channel_messages(
     limit: int = 100,
     bot_only: bool = False,
+    keep_latest: int = 0,
+    min_age_seconds: float = 0.0,
     config_provider: Callable[[], dict] | None = None,
     bot_http_fn: Callable[[str, str, str, dict | None], tuple[int, dict[str, str], str]] | None = None,
     clock: Callable[[], float] | None = None,
@@ -539,6 +541,9 @@ async def purge_discord_channel_messages(
     else:
         candidates = collected
 
+    if keep_latest > 0:
+        candidates = candidates[keep_latest:]
+
     now_sec = now_fn()
     recent_ids: list[str] = []
     old_ids: list[str] = []
@@ -548,6 +553,8 @@ async def purge_discord_channel_messages(
         if not mid.isdigit():
             continue
         age_sec = now_sec - snowflake_timestamp_sec(mid)
+        if min_age_seconds > 0.0 and age_sec < min_age_seconds:
+            continue
         if age_sec < BULK_DELETE_MAX_AGE_SEC:
             recent_ids.append(mid)
         else:
@@ -592,3 +599,35 @@ async def purge_discord_channel_messages(
         "errors": errors,
         "scanned": len(collected),
     }
+
+
+async def run_auto_discord_purge(
+    on_startup: bool = False,
+    config_provider: Callable[[], dict] | None = None,
+    bot_http_fn: Callable[[str, str, str, dict | None], tuple[int, dict[str, str], str]] | None = None,
+    clock: Callable[[], float] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] | None = None,
+) -> dict | None:
+    cfg = (config_provider or (lambda: CONFIG))()
+    alerts_cfg = cfg.get("alerts", {})
+    if not alerts_cfg.get("auto_purge_enabled", True):
+        return None
+    if on_startup and not alerts_cfg.get("auto_purge_on_startup", True):
+        return None
+    if not str(alerts_cfg.get("discord_bot_token", "") or "").strip():
+        return None
+    if not str(alerts_cfg.get("discord_channel_id", "") or "").strip():
+        return None
+
+    keep_latest = 0 if on_startup else max(0, int(alerts_cfg.get("auto_purge_keep_latest", 15)))
+    min_age = 15.0 if on_startup else 0.0
+    return await purge_discord_channel_messages(
+        limit=200,
+        bot_only=False,
+        keep_latest=keep_latest,
+        min_age_seconds=min_age,
+        config_provider=config_provider,
+        bot_http_fn=bot_http_fn,
+        clock=clock,
+        sleep_fn=sleep_fn,
+    )

@@ -18,6 +18,7 @@ from backend.services.discord_notifier import (  # noqa: E402
     NotificationEvent,
     build_embed_payload,
     purge_discord_channel_messages,
+    run_auto_discord_purge,
 )
 from backend.services.maintenance import check_and_alert_ram_critical  # noqa: E402
 
@@ -344,6 +345,68 @@ class TestDiscordNotifier(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["deleted_count"], 3)
         self.assertEqual(bulk_attempts, 2)
         self.assertTrue(any(m == "DELETE" and old_1 in u for m, u in calls))
+
+    async def test_auto_discord_purge_keeps_latest_and_protects_brand_new_startup_msg(self) -> None:
+        now_sec = 1_795_000_000.0
+
+        def make_snowflake(age_sec: float) -> str:
+            ts_ms = int((now_sec - age_sec) * 1000)
+            return str((ts_ms - DISCORD_EPOCH_MS) << 22)
+
+        brand_new = make_snowflake(2)
+        older_1 = make_snowflake(120)
+        older_2 = make_snowflake(240)
+        deleted_ids: list[str] = []
+
+        def fake_bot_http(method: str, url: str, _token: str, payload: dict | None):
+            if method == "GET":
+                return 200, {}, json.dumps([{"id": brand_new}, {"id": older_1}, {"id": older_2}])
+            if method == "POST" and url.endswith("/bulk-delete") and payload:
+                deleted_ids.extend(payload["messages"])
+                return 204, {}, ""
+            if method == "DELETE":
+                deleted_ids.append(url.rsplit("/", 1)[-1])
+                return 204, {}, ""
+            return 404, {}, ""
+
+        async def no_sleep(_sec: float):
+            return None
+
+        cfg = {
+            "alerts": {
+                **copy.deepcopy(DEFAULT_ALERTS_CONFIG),
+                "discord_bot_token": "FAKE_BOT_TOKEN",
+                "discord_channel_id": "1541091932657426521",
+                "auto_purge_enabled": True,
+                "auto_purge_on_startup": True,
+                "auto_purge_keep_latest": 1,
+            }
+        }
+        with patch("backend.services.discord_notifier.add_event"):
+            res = await run_auto_discord_purge(
+                on_startup=True,
+                config_provider=lambda: cfg,
+                bot_http_fn=fake_bot_http,
+                clock=lambda: now_sec,
+                sleep_fn=no_sleep,
+            )
+            self.assertIsNotNone(res)
+            self.assertEqual(res["deleted_count"], 2)
+            self.assertNotIn(brand_new, deleted_ids)
+            self.assertIn(older_1, deleted_ids)
+            self.assertIn(older_2, deleted_ids)
+
+            deleted_ids.clear()
+            res_periodic = await run_auto_discord_purge(
+                on_startup=False,
+                config_provider=lambda: cfg,
+                bot_http_fn=fake_bot_http,
+                clock=lambda: now_sec,
+                sleep_fn=no_sleep,
+            )
+            self.assertIsNotNone(res_periodic)
+            self.assertEqual(res_periodic["deleted_count"], 2)
+            self.assertNotIn(brand_new, deleted_ids)
 
 
 if __name__ == "__main__":

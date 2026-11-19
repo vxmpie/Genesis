@@ -14,7 +14,11 @@ import psutil
 
 from backend.core.config import CONFIG, GROWTH_PATH
 from backend.core.events import add_event, broadcast_payload_threadsafe
-from backend.services.discord_notifier import NotificationEvent, notifier
+from backend.services.discord_notifier import (
+    NotificationEvent,
+    notifier,
+    run_auto_discord_purge,
+)
 from backend.services.mumu_monitor import find_mumu_adb, set_vm_disk_snapshot
 from backend.services.telemetry import (
     get_session_summary,
@@ -934,6 +938,7 @@ async def maintenance_loop() -> None:
     last_defender_check = 0.0
     last_downloads_sweep = 0.0
     last_watchdog_check = 0.0
+    last_discord_purge = time.time()
     last_seen_recovered_line: str | None = None
     watchdog_baseline_set = False
 
@@ -1077,6 +1082,14 @@ async def maintenance_loop() -> None:
                 except Exception:
                     pass
                 last_downloads_sweep = now
+
+            purge_interval = max(1, int(CONFIG.get("alerts", {}).get("auto_purge_interval_hours", 6))) * 3600
+            if now - last_discord_purge >= purge_interval:
+                try:
+                    await run_auto_discord_purge(on_startup=False)
+                except Exception:
+                    pass
+                last_discord_purge = now
 
             await asyncio.sleep(10)
         except asyncio.CancelledError:

@@ -25,6 +25,10 @@ DEFAULT_ALERTS_CONFIG: dict = {
     "discord_webhook_url": "",
     "discord_bot_token": "",
     "discord_channel_id": "",
+    "auto_purge_enabled": True,
+    "auto_purge_on_startup": True,
+    "auto_purge_keep_latest": 15,
+    "auto_purge_interval_hours": 6,
     "heartbeat_url": "",
     "heartbeat_interval_minutes": 5,
     "min_alert_interval_seconds": 60,
@@ -200,6 +204,10 @@ def get_masked_alerts_status(cfg: dict | None = None) -> dict:
             "discord_bot_configured": bool(raw_bot_token),
             "discord_bot_masked": mask_bot_token(raw_bot_token),
             "discord_channel_id": channel_id,
+            "auto_purge_enabled": bool(alerts.get("auto_purge_enabled", True)),
+            "auto_purge_on_startup": bool(alerts.get("auto_purge_on_startup", True)),
+            "auto_purge_keep_latest": int(alerts.get("auto_purge_keep_latest", 15)),
+            "auto_purge_interval_hours": int(alerts.get("auto_purge_interval_hours", 6)),
             "heartbeat_configured": bool(raw_heartbeat),
             "heartbeat_masked": mask_secret_url(raw_heartbeat),
             "heartbeat_interval_minutes": int(alerts.get("heartbeat_interval_minutes", 5)),
@@ -291,6 +299,15 @@ def update_alerts_config(updates: dict) -> dict:
         for key in ALERT_TOGGLE_KEYS:
             if key in updates:
                 alerts[key] = bool(updates[key])
+
+        if "auto_purge_enabled" in updates:
+            alerts["auto_purge_enabled"] = bool(updates["auto_purge_enabled"])
+        if "auto_purge_on_startup" in updates:
+            alerts["auto_purge_on_startup"] = bool(updates["auto_purge_on_startup"])
+        if "auto_purge_keep_latest" in updates:
+            alerts["auto_purge_keep_latest"] = max(0, min(100, int(updates["auto_purge_keep_latest"])))
+        if "auto_purge_interval_hours" in updates:
+            alerts["auto_purge_interval_hours"] = max(1, min(168, int(updates["auto_purge_interval_hours"])))
 
         save_config(CONFIG)
         return get_masked_alerts_status(CONFIG)

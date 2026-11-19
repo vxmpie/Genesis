@@ -8,7 +8,7 @@ from backend.api.routes import FRONTEND_DIST_DIR, router
 from backend.api.ws import broadcast_event, websocket_endpoint
 from backend.core.config import CONFIG
 from backend.core.events import add_event, set_event_broadcaster
-from backend.services.discord_notifier import heartbeat_loop, notifier
+from backend.services.discord_notifier import heartbeat_loop, notifier, run_auto_discord_purge
 from backend.services.maintenance import (
     auto_boost_loop,
     autonomous_standby_loop,
@@ -59,6 +59,7 @@ async def lifespan(fastapi_app: FastAPI):
         pass
 
     asyncio.create_task(asyncio.to_thread(get_defender_status))
+    asyncio.create_task(run_auto_discord_purge(on_startup=True))
     add_event("system", "Genesis Autonomous Core started (0.5ms Timer & P-Core Lock Active)")
 
     try:
