@@ -23,6 +23,8 @@ CONFIG_LOCK = threading.RLock()
 # --- Default Schemas ---
 DEFAULT_ALERTS_CONFIG: dict = {
     "discord_webhook_url": "",
+    "discord_bot_token": "",
+    "discord_channel_id": "",
     "heartbeat_url": "",
     "heartbeat_interval_minutes": 5,
     "min_alert_interval_seconds": 60,
@@ -176,15 +178,28 @@ def mask_secret_url(url: str) -> str:
     return f"****{tail}"
 
 
+def mask_bot_token(token: str) -> str:
+    clean = (token or "").strip()
+    if not clean:
+        return ""
+    tail = clean[-4:] if len(clean) > 4 else ""
+    return f"****{tail}"
+
+
 def get_masked_alerts_status(cfg: dict | None = None) -> dict:
     with CONFIG_LOCK:
         source = cfg if cfg is not None else CONFIG
         alerts = source.get("alerts", {})
         raw_webhook = str(alerts.get("discord_webhook_url", "") or "").strip()
+        raw_bot_token = str(alerts.get("discord_bot_token", "") or "").strip()
+        channel_id = str(alerts.get("discord_channel_id", "") or "").strip()
         raw_heartbeat = str(alerts.get("heartbeat_url", "") or "").strip()
         result = {
             "discord_webhook_configured": bool(raw_webhook),
             "discord_webhook_masked": mask_secret_url(raw_webhook),
+            "discord_bot_configured": bool(raw_bot_token),
+            "discord_bot_masked": mask_bot_token(raw_bot_token),
+            "discord_channel_id": channel_id,
             "heartbeat_configured": bool(raw_heartbeat),
             "heartbeat_masked": mask_secret_url(raw_heartbeat),
             "heartbeat_interval_minutes": int(alerts.get("heartbeat_interval_minutes", 5)),
@@ -207,10 +222,14 @@ def mask_config_for_client(cfg: dict | None = None) -> dict:
 
         alerts_cfg = safe_cfg.setdefault("alerts", {})
         raw_webhook = str(alerts_cfg.get("discord_webhook_url", "") or "").strip()
+        raw_bot_token = str(alerts_cfg.get("discord_bot_token", "") or "").strip()
         raw_heartbeat = str(alerts_cfg.get("heartbeat_url", "") or "").strip()
         alerts_cfg["discord_webhook_url"] = ""
         alerts_cfg["discord_webhook_configured"] = bool(raw_webhook)
         alerts_cfg["discord_webhook_masked"] = mask_secret_url(raw_webhook)
+        alerts_cfg["discord_bot_token"] = ""
+        alerts_cfg["discord_bot_configured"] = bool(raw_bot_token)
+        alerts_cfg["discord_bot_masked"] = mask_bot_token(raw_bot_token)
         alerts_cfg["heartbeat_url"] = ""
         alerts_cfg["heartbeat_configured"] = bool(raw_heartbeat)
         alerts_cfg["heartbeat_masked"] = mask_secret_url(raw_heartbeat)
@@ -240,6 +259,19 @@ def update_alerts_config(updates: dict) -> dict:
             raw = updates["discord_webhook_url"].strip()
             if raw and "****" not in raw:
                 alerts["discord_webhook_url"] = _validate_http_url(raw, "discord_webhook_url")
+
+        if updates.get("clear_bot_token") is True:
+            alerts["discord_bot_token"] = ""
+        elif "discord_bot_token" in updates and isinstance(updates["discord_bot_token"], str):
+            raw_bot = updates["discord_bot_token"].strip()
+            if raw_bot and "****" not in raw_bot:
+                alerts["discord_bot_token"] = raw_bot
+
+        if "discord_channel_id" in updates:
+            raw_chan = str(updates["discord_channel_id"] or "").strip()
+            if raw_chan and not raw_chan.isdigit():
+                raise ValueError("discord_channel_id must be a numeric Discord channel ID")
+            alerts["discord_channel_id"] = raw_chan
 
         if updates.get("clear_heartbeat") is True:
             alerts["heartbeat_url"] = ""

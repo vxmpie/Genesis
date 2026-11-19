@@ -11,7 +11,7 @@ from backend.core.config import (
     update_alerts_config,
 )
 from backend.core.events import get_recent_events
-from backend.services.discord_notifier import notifier
+from backend.services.discord_notifier import notifier, purge_discord_channel_messages
 from backend.services.maintenance import (
     check_hardening_drift,
     deep_clean_execute,
@@ -493,3 +493,12 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
     elif cmd == "test_discord_alert":
         res = await notifier.send_test_alert()
         await manager.send_to(ws, {"type": "alerts_test_result", **res})
+
+    elif cmd == "purge_discord_alerts":
+        try:
+            limit = int(data.get("limit", 100))
+        except (TypeError, ValueError):
+            limit = 100
+        bot_only = bool(data.get("bot_only", False))
+        res = await purge_discord_channel_messages(limit=limit, bot_only=bot_only)
+        await manager.send_to(ws, {"type": "alerts_purge_result", **res})

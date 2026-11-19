@@ -53,6 +53,8 @@
   },
   "alerts": {
     "discord_webhook_url": "",
+    "discord_bot_token": "",
+    "discord_channel_id": "",
     "heartbeat_url": "",
     "heartbeat_interval_minutes": 5,
     "min_alert_interval_seconds": 60,

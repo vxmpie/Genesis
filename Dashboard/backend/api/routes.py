@@ -28,7 +28,7 @@ from backend.core.config import (
     update_alerts_config,
 )
 from backend.core.events import add_event, get_recent_events
-from backend.services.discord_notifier import notifier
+from backend.services.discord_notifier import notifier, purge_discord_channel_messages
 from backend.services.maintenance import (
     check_hardening_drift,
     deep_clean_execute,
@@ -323,6 +323,25 @@ async def api_alerts_test(request: Request):
     if auth_err:
         return auth_err
     result = await notifier.send_test_alert()
+    status_code = 200 if result.get("ok") else 400
+    return JSONResponse(result, status_code=status_code)
+
+
+@router.post("/api/alerts/purge")
+async def api_alerts_purge(request: Request):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    limit = 100
+    bot_only = False
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            limit = int(body.get("limit", 100))
+            bot_only = bool(body.get("bot_only", False))
+    except Exception:
+        pass
+    result = await purge_discord_channel_messages(limit=limit, bot_only=bot_only)
     status_code = 200 if result.get("ok") else 400
     return JSONResponse(result, status_code=status_code)
 

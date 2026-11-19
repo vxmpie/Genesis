@@ -90,6 +90,8 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         cfg["auth"] = {"enabled": True, "pin": "123456", "pin_hash": "abc", "salt": "xyz"}
         cfg["alerts"]["discord_webhook_url"] = "https://discord.com/api/webhooks/111222/SUPERSECRETTOKEN"
+        cfg["alerts"]["discord_bot_token"] = "BOT_SECRET_TOKEN_XYZ9"
+        cfg["alerts"]["discord_channel_id"] = "1541091932657426521"
         cfg["alerts"]["heartbeat_url"] = "https://hc-ping.com/secret-uuid-1234"
         cfg["tunnel"]["ngrok_authtoken"] = "2N_NGROK_RAW_SECRET"
 
@@ -97,6 +99,7 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps(masked)
 
         self.assertNotIn("SUPERSECRETTOKEN", serialized)
+        self.assertNotIn("BOT_SECRET_TOKEN_XYZ9", serialized)
         self.assertNotIn("secret-uuid-1234", serialized)
         self.assertNotIn("2N_NGROK_RAW_SECRET", serialized)
         self.assertNotIn("pin_hash", serialized)
@@ -105,6 +108,9 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(masked["alerts"]["discord_webhook_configured"])
         self.assertTrue(masked["alerts"]["discord_webhook_masked"].endswith("****OKEN"))
+        self.assertTrue(masked["alerts"]["discord_bot_configured"])
+        self.assertEqual(masked["alerts"]["discord_bot_masked"], "****XYZ9")
+        self.assertEqual(masked["alerts"]["discord_bot_token"], "")
         self.assertTrue(masked["tunnel"]["ngrok_authtoken_configured"])
         self.assertEqual(mask_secret_url(""), "")
 
@@ -152,6 +158,7 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                 ("POST", "/api/mumu/set_username", {"instance": 1, "username": "abc"}),
                 ("PUT", "/api/alerts/config", {"notify_on_drift": False}),
                 ("POST", "/api/alerts/test", {}),
+                ("POST", "/api/alerts/purge", {"limit": 50}),
             ]:
                 st, _ = await _call_asgi(method, path, payload)
                 self.assertEqual(st, 401, f"Expected 401 for {method} {path}")
@@ -204,6 +211,7 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                     "toggle_pcore_affinity",
                     "update_alerts_config",
                     "test_discord_alert",
+                    "purge_discord_alerts",
                 ]:
                     ws.sent.clear()
                     await handle_ws_command(ws, {"command": cmd})

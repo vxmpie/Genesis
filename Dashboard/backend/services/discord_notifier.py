@@ -418,3 +418,177 @@ async def heartbeat_loop() -> None:
             break
         except Exception:
             await asyncio.sleep(60)
+
+
+# --- Discord Bot Channel Purge (REST API v10) ---
+DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_EPOCH_MS = 1420070400000
+BULK_DELETE_MAX_AGE_SEC = (14 * 86400) - 60
+
+
+def snowflake_timestamp_sec(snowflake_id: str) -> float:
+    return ((int(snowflake_id) >> 22) + DISCORD_EPOCH_MS) / 1000.0
+
+
+def _default_bot_http_request(
+    method: str,
+    url: str,
+    bot_token: str,
+    payload: dict | None = None,
+) -> tuple[int, dict[str, str], str]:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {
+        "Authorization": f"Bot {bot_token}",
+        "User-Agent": "Genesis-Operations-Core/3.0",
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+            body = resp.read().decode("utf-8", errors="ignore")
+            return resp.status, resp_headers, body
+    except urllib.error.HTTPError as http_err:
+        resp_headers = {k.lower(): v for k, v in http_err.headers.items()} if http_err.headers else {}
+        body = http_err.read().decode("utf-8", errors="ignore") if http_err.fp else ""
+        return http_err.code, resp_headers, body
+    except Exception as exc:
+        return 0, {}, str(exc)
+
+
+async def _bot_request_with_429(
+    method: str,
+    url: str,
+    bot_token: str,
+    payload: dict | None,
+    bot_http_fn: Callable[[str, str, str, dict | None], tuple[int, dict[str, str], str]],
+    sleep_fn: Callable[[float], Awaitable[None]],
+    max_retries: int = 3,
+) -> tuple[int, dict[str, str], str]:
+    for attempt in range(max_retries):
+        status, headers, body = await asyncio.to_thread(bot_http_fn, method, url, bot_token, payload)
+        if status == 429 and attempt < max_retries - 1:
+            wait_sec = _extract_retry_after(headers, body, 1.5)
+            await sleep_fn(wait_sec)
+            continue
+        return status, headers, body
+    return 0, {}, "Max retries exceeded"
+
+
+async def purge_discord_channel_messages(
+    limit: int = 100,
+    bot_only: bool = False,
+    config_provider: Callable[[], dict] | None = None,
+    bot_http_fn: Callable[[str, str, str, dict | None], tuple[int, dict[str, str], str]] | None = None,
+    clock: Callable[[], float] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] | None = None,
+) -> dict:
+    cfg = (config_provider or (lambda: CONFIG))()
+    alerts_cfg = cfg.get("alerts", {})
+    bot_token = str(alerts_cfg.get("discord_bot_token", "") or "").strip()
+    channel_id = str(alerts_cfg.get("discord_channel_id", "") or "").strip()
+
+    if not bot_token or not channel_id:
+        return {
+            "ok": False,
+            "error": "Discord Bot Token and Channel ID must be configured",
+            "deleted_count": 0,
+        }
+
+    req_fn = bot_http_fn or _default_bot_http_request
+    now_fn = clock or time.time
+    sleeper = sleep_fn or asyncio.sleep
+    target_limit = max(1, min(1000, int(limit)))
+
+    collected: list[dict] = []
+    before_id: str | None = None
+
+    while len(collected) < target_limit:
+        batch_size = min(100, target_limit - len(collected))
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages?limit={batch_size}"
+        if before_id:
+            url += f"&before={before_id}"
+
+        status, _headers, body = await _bot_request_with_429("GET", url, bot_token, None, req_fn, sleeper)
+        if status != 200:
+            return {
+                "ok": False,
+                "http_status": status,
+                "error": sanitize_error_text(body) or f"Failed to fetch messages (HTTP {status})",
+                "deleted_count": 0,
+            }
+
+        try:
+            page = json.loads(body) if body else []
+        except json.JSONDecodeError:
+            page = []
+        if not isinstance(page, list) or not page:
+            break
+
+        collected.extend(page)
+        before_id = str(page[-1].get("id", ""))
+        if len(page) < batch_size or not before_id:
+            break
+
+    if bot_only:
+        candidates = [
+            m for m in collected if m.get("webhook_id") or m.get("author", {}).get("bot")
+        ]
+    else:
+        candidates = collected
+
+    now_sec = now_fn()
+    recent_ids: list[str] = []
+    old_ids: list[str] = []
+
+    for msg in candidates:
+        mid = str(msg.get("id", ""))
+        if not mid.isdigit():
+            continue
+        age_sec = now_sec - snowflake_timestamp_sec(mid)
+        if age_sec < BULK_DELETE_MAX_AGE_SEC:
+            recent_ids.append(mid)
+        else:
+            old_ids.append(mid)
+
+    bulk_deleted = 0
+    single_deleted = 0
+    errors = 0
+
+    for i in range(0, len(recent_ids), 100):
+        chunk = recent_ids[i : i + 100]
+        if len(chunk) >= 2:
+            bulk_url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/bulk-delete"
+            st, _h, _b = await _bot_request_with_429(
+                "POST", bulk_url, bot_token, {"messages": chunk}, req_fn, sleeper
+            )
+            if 200 <= st < 300:
+                bulk_deleted += len(chunk)
+            else:
+                errors += len(chunk)
+        else:
+            old_ids.extend(chunk)
+
+    for mid in old_ids:
+        del_url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{mid}"
+        st, _h, _b = await _bot_request_with_429("DELETE", del_url, bot_token, None, req_fn, sleeper)
+        if 200 <= st < 300:
+            single_deleted += 1
+        else:
+            errors += 1
+
+    total_deleted = bulk_deleted + single_deleted
+    add_event(
+        "system",
+        f"Discord Purge: deleted {total_deleted} message(s) in channel {channel_id} (bulk={bulk_deleted}, single={single_deleted}, errors={errors})",
+    )
+    return {
+        "ok": errors == 0 or total_deleted > 0,
+        "deleted_count": total_deleted,
+        "bulk_deleted": bulk_deleted,
+        "single_deleted": single_deleted,
+        "errors": errors,
+        "scanned": len(collected),
+    }

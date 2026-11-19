@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import re
 import sys
 import unittest
@@ -12,9 +13,11 @@ if DASHBOARD_DIR not in sys.path:
 
 from backend.core.config import DEFAULT_ALERTS_CONFIG  # noqa: E402
 from backend.services.discord_notifier import (  # noqa: E402
+    DISCORD_EPOCH_MS,
     DiscordNotifier,
     NotificationEvent,
     build_embed_payload,
+    purge_discord_channel_messages,
 )
 from backend.services.maintenance import check_and_alert_ram_critical  # noqa: E402
 
@@ -282,6 +285,65 @@ class TestDiscordNotifier(unittest.IsolatedAsyncioTestCase):
             self.assertIn("****9999", failed_entry["error"])
         finally:
             await n.stop()
+
+    async def test_purge_discord_channel_splits_bulk_and_old_messages_with_429(self) -> None:
+        now_sec = 1_795_000_000.0
+
+        def make_snowflake(age_sec: float) -> str:
+            ts_ms = int((now_sec - age_sec) * 1000)
+            return str((ts_ms - DISCORD_EPOCH_MS) << 22)
+
+        recent_1 = make_snowflake(60)
+        recent_2 = make_snowflake(3600)
+        old_1 = make_snowflake(20 * 86400)
+        calls: list[tuple[str, str]] = []
+        bulk_attempts = 0
+
+        def fake_bot_http(method: str, url: str, _token: str, payload: dict | None):
+            nonlocal bulk_attempts
+            calls.append((method, url))
+            if method == "GET":
+                msgs = [
+                    {"id": recent_1, "webhook_id": "111", "author": {"bot": True}},
+                    {"id": recent_2, "author": {"bot": False}},
+                    {"id": old_1, "webhook_id": "111", "author": {"bot": True}},
+                ]
+                return 200, {}, json.dumps(msgs)
+            if method == "POST" and url.endswith("/bulk-delete"):
+                bulk_attempts += 1
+                if bulk_attempts == 1:
+                    return 429, {"Retry-After": "0.01"}, '{"retry_after": 0.01}'
+                return 204, {}, ""
+            if method == "DELETE":
+                return 204, {}, ""
+            return 404, {}, ""
+
+        async def no_sleep(_sec: float):
+            return None
+
+        cfg = {
+            "alerts": {
+                **copy.deepcopy(DEFAULT_ALERTS_CONFIG),
+                "discord_bot_token": "FAKE_BOT_TOKEN_FOR_TEST",
+                "discord_channel_id": "1541091932657426521",
+            }
+        }
+        with patch("backend.services.discord_notifier.add_event"):
+            res = await purge_discord_channel_messages(
+                limit=50,
+                bot_only=False,
+                config_provider=lambda: cfg,
+                bot_http_fn=fake_bot_http,
+                clock=lambda: now_sec,
+                sleep_fn=no_sleep,
+            )
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["bulk_deleted"], 2)
+        self.assertEqual(res["single_deleted"], 1)
+        self.assertEqual(res["deleted_count"], 3)
+        self.assertEqual(bulk_attempts, 2)
+        self.assertTrue(any(m == "DELETE" and old_1 in u for m, u in calls))
 
 
 if __name__ == "__main__":
