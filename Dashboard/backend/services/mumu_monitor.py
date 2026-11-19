@@ -1,0 +1,1066 @@
+import asyncio
+import copy
+import json
+import re
+import subprocess
+import threading
+import time
+import urllib.request
+from pathlib import Path
+from typing import Callable
+
+import psutil
+
+from backend.core.config import CONFIG, CONFIG_LOCK, save_config
+from backend.core.events import add_event
+from backend.services.discord_notifier import NotificationEvent, notifier
+from backend.services.telemetry import increment_watchdog_recovery, set_cached_top_processes
+from backend.services.win32_ops import disable_ecoqos_for_mumu
+
+# --- Process Classification Sets (Exact Match, Zero Substring Guessing) ---
+HELPER_DENYLIST: frozenset[str] = frozenset(
+    {
+        "mumunxdevicecleaner.exe",
+        "mumunxcrashreporter.exe",
+        "mumuchecker.exe",
+        "mumunxupdater.exe",
+        "mumupermission.exe",
+        "mumudeviceengineinstaller.exe",
+        "mumustatisticsreporter.exe",
+        "mumunxservice.exe",
+        "mumuplayerremotebackend.exe",
+        "mumuplayerremotehealthd.exe",
+        "mumuplayerremoteservice.exe",
+    }
+)
+
+LAUNCHER_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "mumunxmain.exe",
+        "mumunxlauncher.exe",
+    }
+)
+
+BASE_EMULATOR_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "mumunxdevice.exe",
+        "mumuplayer.exe",
+        "nemuheadless.exe",
+    }
+)
+
+CLEANER_EXE = "mumunxdevicecleaner.exe"
+CRASH_REPORTER_EXE = "mumunxcrashreporter.exe"
+
+_VM_INDEX_RE = re.compile(r"(?:^|\s)(?:-v|--index)\s+(\d+)")
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def get_emulator_allowlist(configured_names: list[str] | None = None) -> set[str]:
+    names = set(BASE_EMULATOR_ALLOWLIST)
+    raw = configured_names if configured_names is not None else CONFIG.get("mumu", {}).get("process_names", [])
+    for item in raw:
+        low = str(item or "").strip().lower()
+        if low and low not in HELPER_DENYLIST and low not in LAUNCHER_ALLOWLIST:
+            names.add(low)
+    return names
+
+
+def classify_process_role(proc_name: str, emulator_allowlist: set[str] | None = None) -> str:
+    low = (proc_name or "").strip().lower()
+    if not low or low in HELPER_DENYLIST:
+        return "helper"
+    if low in LAUNCHER_ALLOWLIST:
+        return "launcher"
+    allow = emulator_allowlist if emulator_allowlist is not None else get_emulator_allowlist()
+    if low in allow:
+        return "emulator"
+    return "other"
+
+
+# --- Settle Window & Crash vs Clean Shutdown Tracker ---
+class MuMuStateTracker:
+    def __init__(
+        self,
+        settle_seconds: float = 4.0,
+        max_settle_seconds: float = 10.0,
+        context_grace_seconds: float = 15.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self.settle_seconds = settle_seconds
+        self.max_settle_seconds = max_settle_seconds
+        self.context_grace_seconds = context_grace_seconds
+        self._clock = clock or time.time
+
+        self._initialized = False
+        self._active_ids: set[str] = set()
+        self._prev_launcher_running = False
+        self._pending_drop: dict | None = None
+        self._last_cleaner_ts: float | None = None
+        self._last_crash_reporter_ts: float | None = None
+        self._last_governor_ts: float | None = None
+
+    @property
+    def has_pending_settle(self) -> bool:
+        return self._pending_drop is not None
+
+    def mark_governor_action(self, now: float | None = None) -> None:
+        self._last_governor_ts = now if now is not None else self._clock()
+
+    def _within_grace(self, last_ts: float | None, now: float) -> bool:
+        return last_ts is not None and (now - last_ts) <= self.context_grace_seconds
+
+    def observe(
+        self,
+        device_ids: set[str],
+        launcher_running: bool,
+        cleaner_active: bool = False,
+        crash_reporter_active: bool = False,
+        now: float | None = None,
+    ) -> list[dict]:
+        ts = now if now is not None else self._clock()
+        if cleaner_active:
+            self._last_cleaner_ts = ts
+        if crash_reporter_active:
+            self._last_crash_reporter_ts = ts
+
+        in_cleaner_ctx = cleaner_active or self._within_grace(self._last_cleaner_ts, ts)
+        in_governor_ctx = self._within_grace(self._last_governor_ts, ts)
+        in_crash_ctx = crash_reporter_active or self._within_grace(self._last_crash_reporter_ts, ts)
+
+        current_ids = set(device_ids)
+
+        if not self._initialized:
+            self._initialized = True
+            self._active_ids = current_ids
+            self._prev_launcher_running = launcher_running
+            return []
+
+        dropped = self._active_ids - current_ids
+        if dropped:
+            if self._pending_drop is None:
+                self._pending_drop = {
+                    "started_at": ts,
+                    "last_change_at": ts,
+                    "initial_count": len(self._active_ids),
+                    "lost_ids": set(dropped),
+                    "saw_cleaner": in_cleaner_ctx,
+                    "saw_governor": in_governor_ctx,
+                    "saw_crash_reporter": in_crash_ctx,
+                    "saw_launcher_exit": (not launcher_running) or (self._prev_launcher_running and not launcher_running),
+                }
+            else:
+                self._pending_drop["last_change_at"] = ts
+                self._pending_drop["lost_ids"].update(dropped)
+                self._pending_drop["saw_cleaner"] |= in_cleaner_ctx
+                self._pending_drop["saw_governor"] |= in_governor_ctx
+                self._pending_drop["saw_crash_reporter"] |= in_crash_ctx
+                self._pending_drop["saw_launcher_exit"] |= not launcher_running
+        elif self._pending_drop is not None:
+            self._pending_drop["saw_cleaner"] |= in_cleaner_ctx
+            self._pending_drop["saw_governor"] |= in_governor_ctx
+            self._pending_drop["saw_crash_reporter"] |= in_crash_ctx
+            self._pending_drop["saw_launcher_exit"] |= not launcher_running
+            if len(current_ids) >= self._pending_drop["initial_count"]:
+                self._pending_drop = None
+
+        self._active_ids = current_ids
+        self._prev_launcher_running = launcher_running
+
+        if self._pending_drop is None:
+            return []
+
+        elapsed_since_change = ts - self._pending_drop["last_change_at"]
+        elapsed_total = ts - self._pending_drop["started_at"]
+        if elapsed_since_change < self.settle_seconds and elapsed_total < self.max_settle_seconds:
+            return []
+
+        pending = self._pending_drop
+        self._pending_drop = None
+
+        remaining = len(current_ids)
+        net_lost = max(0, pending["initial_count"] - remaining)
+        if net_lost == 0:
+            return []
+
+        if pending["saw_crash_reporter"]:
+            classification = "crash"
+        elif pending["saw_cleaner"] or pending["saw_governor"] or pending["saw_launcher_exit"]:
+            classification = "intentional_close"
+        else:
+            classification = "crash"
+
+        return [
+            {
+                "classification": classification,
+                "initial_count": pending["initial_count"],
+                "remaining_count": remaining,
+                "lost_count": net_lost,
+                "lost_ids": sorted(pending["lost_ids"]),
+                "saw_cleaner": pending["saw_cleaner"],
+                "saw_crash_reporter": pending["saw_crash_reporter"],
+                "saw_launcher_exit": pending["saw_launcher_exit"],
+                "saw_governor": pending["saw_governor"],
+            }
+        ]
+
+
+# --- Hybrid MuMuManager CLI Discovery ---
+_mgr_backoff_until = 0.0
+_mgr_last_cache: dict[int, dict] = {}
+
+
+def parse_mumu_manager_json(raw_stdout: str) -> dict[int, dict]:
+    parsed: dict[int, dict] = {}
+    if not raw_stdout or not raw_stdout.strip():
+        return parsed
+    data = json.loads(raw_stdout.strip())
+    items: list[dict] = []
+    if isinstance(data, dict):
+        if "index" in data or "pid" in data:
+            items = [data]
+        else:
+            for k, v in data.items():
+                if isinstance(v, dict):
+                    entry = dict(v)
+                    entry.setdefault("index", k)
+                    items.append(entry)
+    elif isinstance(data, list):
+        items = [x for x in data if isinstance(x, dict)]
+
+    for item in items:
+        pid = item.get("pid")
+        try:
+            pid_int = int(pid) if pid else 0
+        except (TypeError, ValueError):
+            pid_int = 0
+        if pid_int > 0:
+            parsed[pid_int] = item
+    return parsed
+
+
+def query_mumu_manager_sync(install_path: str | None = None) -> dict[int, dict]:
+    global _mgr_backoff_until, _mgr_last_cache
+    now = time.time()
+    if now < _mgr_backoff_until:
+        return _mgr_last_cache
+
+    base = Path(install_path or CONFIG.get("mumu", {}).get("install_path", r"C:\Program Files\Netease\MuMuPlayer"))
+    mgr_path = base / "nx_main" / "MuMuManager.exe"
+    if not mgr_path.exists():
+        _mgr_backoff_until = now + 60.0
+        return {}
+
+    try:
+        r = subprocess.run(
+            [str(mgr_path), "info", "-v", "all"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            _mgr_last_cache = parse_mumu_manager_json(r.stdout)
+            return _mgr_last_cache
+    except Exception:
+        pass
+
+    _mgr_backoff_until = now + 60.0
+    return {}
+
+
+# --- Persistent Process Cache & Single-Pass Sampler ---
+_process_sampler_lock = threading.Lock()
+_proc_cache: dict[int, psutil.Process] = {}
+_pid_slot_map: dict[int, int] = {}
+_state_tracker = MuMuStateTracker(settle_seconds=4.0)
+
+_cached_mumu_instances: list[dict] = []
+_cached_mumu_health: dict = {
+    "devices": [],
+    "launchers": [],
+    "total_instances": 0,
+    "running": False,
+    "count": 0,
+    "launcher_running": False,
+    "cleaner_active": False,
+    "pending_settle": False,
+    "vm_disk": [],
+    "vm_disk_last_check": None,
+    "instance_places": {},
+    "game_presets": [],
+}
+
+_vm_disk_cache_ref: list = []
+_vm_disk_last_check_ref: str | None = None
+
+
+def set_vm_disk_snapshot(vm_disk: list, last_check: str | None) -> None:
+    global _vm_disk_cache_ref, _vm_disk_last_check_ref
+    _vm_disk_cache_ref = vm_disk
+    _vm_disk_last_check_ref = last_check
+    with _process_sampler_lock:
+        _cached_mumu_health["vm_disk"] = vm_disk
+        _cached_mumu_health["vm_disk_last_check"] = last_check
+
+
+def _extract_vm_slot_from_cmdline(proc: psutil.Process) -> int | None:
+    try:
+        cmd = " ".join(proc.cmdline())
+        m = _VM_INDEX_RE.search(cmd)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _assign_instance_index(pid: int, mgr_info: dict | None, proc: psutil.Process) -> int:
+    if mgr_info and "index" in mgr_info:
+        try:
+            idx = int(mgr_info["index"]) + 1
+            _pid_slot_map[pid] = idx
+            return idx
+        except (TypeError, ValueError):
+            pass
+
+    cmd_slot = _extract_vm_slot_from_cmdline(proc)
+    if cmd_slot is not None:
+        idx = cmd_slot + 1
+        _pid_slot_map[pid] = idx
+        return idx
+
+    if pid in _pid_slot_map:
+        return _pid_slot_map[pid]
+
+    used = set(_pid_slot_map.values())
+    candidate = 1
+    while candidate in used:
+        candidate += 1
+    _pid_slot_map[pid] = candidate
+    return candidate
+
+
+def _emit_settled_transition(event: dict) -> None:
+    remaining = event["remaining_count"]
+    lost = event["lost_count"]
+    initial = event["initial_count"]
+    classification = event["classification"]
+
+    if classification == "crash":
+        msg = f"MuMu Instance crash detected -- {lost} instance(s) disappeared (remaining: {remaining})"
+        add_event("crash", msg)
+        reason_detail = (
+            "Crash reporter process detected."
+            if event["saw_crash_reporter"]
+            else "Emulator process exited while MuMu launcher remained active."
+        )
+        notifier.notify_sync(
+            NotificationEvent(
+                event_type="mumu_crash",
+                severity="critical",
+                title="MuMu Instance Crash Detected",
+                description=(
+                    f"{lost} instance(s) terminated unexpectedly.\n"
+                    f"Active devices: {remaining} (was {initial})\n"
+                    f"Detection: {reason_detail}"
+                ),
+                dedupe_key=f"mumu_crash:{remaining}:{lost}",
+                fields=[
+                    {"name": "Remaining Instances", "value": f"{remaining} running", "inline": True},
+                    {"name": "Impact", "value": f"-{lost} instance(s) offline", "inline": True},
+                    {"name": "Previous Count", "value": str(initial), "inline": True},
+                ],
+            )
+        )
+    else:
+        ctx_parts = []
+        if event["saw_cleaner"]:
+            ctx_parts.append("Clean Disk")
+        if event["saw_launcher_exit"]:
+            ctx_parts.append("Launcher Exit")
+        if event["saw_governor"]:
+            ctx_parts.append("Governor Action")
+        ctx_label = ", ".join(ctx_parts) if ctx_parts else "Intentional Shutdown"
+        add_event(
+            "mumu",
+            f"MuMu shutdown settled ({ctx_label}): -{lost} instance(s), {remaining} remaining",
+        )
+
+
+def _sample_all_processes_sync() -> None:
+    global _cached_mumu_instances, _cached_mumu_health
+
+    try:
+        disable_ecoqos_for_mumu()
+    except Exception:
+        pass
+
+    emulator_allowlist = get_emulator_allowlist()
+    mgr_by_pid = query_mumu_manager_sync()
+
+    all_procs: list[dict] = []
+    mumu_instances: list[dict] = []
+    seen_pids: set[int] = set()
+    cleaner_active = False
+    crash_reporter_active = False
+
+    for proc in psutil.process_iter(["pid", "name", "memory_info", "create_time"]):
+        try:
+            pid = int(proc.info["pid"])
+            seen_pids.add(pid)
+            raw_name = proc.info["name"] or "Unknown"
+            low_name = raw_name.lower()
+
+            if low_name == CLEANER_EXE:
+                cleaner_active = True
+            elif low_name == CRASH_REPORTER_EXE:
+                crash_reporter_active = True
+
+            mem = proc.info["memory_info"]
+            rss = mem.rss if mem else 0
+            ram_mb = round(rss / (1024 ** 2), 1)
+
+            all_procs.append(
+                {
+                    "pid": pid,
+                    "name": raw_name,
+                    "ram_mb": ram_mb,
+                    "cpu_percent": 0.0,
+                }
+            )
+
+            role = classify_process_role(low_name, emulator_allowlist)
+            if role not in ("emulator", "launcher"):
+                continue
+
+            cached_proc = _proc_cache.get(pid)
+            if cached_proc is None:
+                cached_proc = psutil.Process(pid)
+                cached_proc.cpu_percent(interval=None)
+                _proc_cache[pid] = cached_proc
+                cpu_pct = 0.0
+            else:
+                try:
+                    cpu_pct = round(cached_proc.cpu_percent(interval=None), 1)
+                except Exception:
+                    cpu_pct = 0.0
+
+            uptime_sec = max(0.0, time.time() - float(proc.info["create_time"] or time.time()))
+            hours = int(uptime_sec // 3600)
+            minutes = int((uptime_sec % 3600) // 60)
+            is_bloated = ram_mb >= 4000.0
+            is_device = role == "emulator"
+
+            device_idx = 0
+            target_place_id = None
+            target_game_name = None
+            saved_username = ""
+            live_game = None
+            live_place = None
+            presence_status = "Unknown"
+
+            if is_device:
+                device_idx = _assign_instance_index(pid, mgr_by_pid.get(pid), cached_proc)
+                saved_username = CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(device_idx), "")
+                live_pres = _instance_live_presence.get(str(device_idx)) or {}
+                live_game = live_pres.get("game_name")
+                live_place = live_pres.get("place_id")
+                presence_status = live_pres.get(
+                    "presence_status", "Offline" if saved_username else "Manual"
+                )
+                target_place_id = get_instance_place_id(device_idx)
+                target_game_name = get_game_name_for_place_id(target_place_id)
+
+            active_game_display = live_game or target_game_name or "Storage Hunters"
+
+            mumu_instances.append(
+                {
+                    "pid": pid,
+                    "name": raw_name,
+                    "cpu_percent": cpu_pct,
+                    "ram_mb": ram_mb,
+                    "uptime": f"{hours}h{minutes:02d}m",
+                    "uptime_seconds": int(uptime_sec),
+                    "status": "running",
+                    "is_bloated": is_bloated,
+                    "index": device_idx if is_device else 0,
+                    "instance_index": device_idx if is_device else 0,
+                    "type": "Emulator" if is_device else "Launcher",
+                    "username": saved_username,
+                    "active_game": active_game_display,
+                    "active_place_id": live_place or target_place_id,
+                    "presence_status": presence_status,
+                    "place_id": live_place or target_place_id or 98800969324557,
+                    "target_place_id": live_place or target_place_id or 98800969324557,
+                    "target_game": active_game_display,
+                    "target_game_name": active_game_display,
+                }
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    for dead_pid in list(_proc_cache.keys()):
+        if dead_pid not in seen_pids:
+            _proc_cache.pop(dead_pid, None)
+    for dead_pid in list(_pid_slot_map.keys()):
+        if dead_pid not in seen_pids:
+            _pid_slot_map.pop(dead_pid, None)
+
+    all_procs.sort(key=lambda x: x["ram_mb"], reverse=True)
+    set_cached_top_processes(all_procs[:30])
+
+    devices = sorted(
+        [i for i in mumu_instances if i["type"] == "Emulator"],
+        key=lambda x: (x["instance_index"], x["pid"]),
+    )
+    launchers = [i for i in mumu_instances if i["type"] == "Launcher"]
+    current_device_count = len(devices)
+    launcher_running = len(launchers) > 0
+
+    device_ids = {f"{d['instance_index']}:{d['pid']}" for d in devices}
+    settled_events = _state_tracker.observe(
+        device_ids=device_ids,
+        launcher_running=launcher_running,
+        cleaner_active=cleaner_active,
+        crash_reporter_active=crash_reporter_active,
+    )
+    for ev in settled_events:
+        _emit_settled_transition(ev)
+
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.get("mumu", {})
+        instance_places_snap = copy.deepcopy(mumu_cfg.get("instance_places", {}))
+        game_presets_snap = copy.deepcopy(mumu_cfg.get("game_presets", []))
+
+    with _process_sampler_lock:
+        _cached_mumu_instances = mumu_instances
+        _cached_mumu_health = {
+            "devices": devices,
+            "launchers": launchers,
+            "total_instances": current_device_count,
+            "running": current_device_count > 0,
+            "count": current_device_count,
+            "launcher_running": launcher_running,
+            "cleaner_active": cleaner_active,
+            "pending_settle": _state_tracker.has_pending_settle,
+            "vm_disk": list(_vm_disk_cache_ref),
+            "vm_disk_last_check": _vm_disk_last_check_ref,
+            "instance_places": instance_places_snap,
+            "game_presets": game_presets_snap,
+        }
+
+
+def get_mumu_instances() -> list[dict]:
+    with _process_sampler_lock:
+        return copy.deepcopy(_cached_mumu_instances)
+
+
+def check_mumu_health() -> dict:
+    with _process_sampler_lock:
+        return copy.deepcopy(_cached_mumu_health)
+
+
+async def process_sampler_loop() -> None:
+    await asyncio.to_thread(_sample_all_processes_sync)
+    while True:
+        try:
+            await asyncio.to_thread(_sample_all_processes_sync)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
+
+
+# --- MuMu ADB, Roblox Presence & Watchdog Recovery ---
+def find_mumu_adb() -> Path | None:
+    install_path = Path(CONFIG.get("mumu", {}).get("install_path", "C:/Program Files/Netease/MuMuPlayer"))
+    candidates = [
+        install_path / "nx_main" / "adb.exe",
+        install_path / "nx_device" / "12.0" / "shell" / "adb.exe",
+        install_path / "nx_device" / "15.0" / "shell" / "adb.exe",
+        Path(r"C:\Program Files\Netease\MuMuPlayer\nx_device\12.0\shell\adb.exe"),
+        Path(r"C:\Program Files\Netease\MuMuPlayer\nx_device\15.0\shell\adb.exe"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    if install_path.exists():
+        for found in install_path.rglob("adb.exe"):
+            return found
+    try:
+        result = subprocess.run(["where", "adb"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip().splitlines()[0].strip())
+    except Exception:
+        pass
+    return None
+
+
+def get_mumu_adb_devices() -> list[str]:
+    adb = find_mumu_adb()
+    if not adb:
+        return []
+    try:
+        r = subprocess.run([str(adb), "devices"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            devices = []
+            for line in r.stdout.strip().splitlines()[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[1] == "device":
+                    devices.append(parts[0])
+            return devices
+    except Exception:
+        pass
+    return []
+
+
+_instance_auto_learned_place: dict[str, int] = {}
+_place_name_cache: dict[int, str] = {
+    98800969324557: "Storage Hunters",
+    9640154: "Storage Hunters",
+    17450551531: "Gym League",
+    17017769292: "Anime Defenders",
+    2753915549: "Blox Fruits",
+}
+_user_id_cache: dict[str, int] = {}
+_instance_live_presence: dict[str, dict] = {}
+_bot_heartbeats: dict[str, dict] = {}
+_mumu_consecutive_idle: dict[str, int] = {}
+
+
+def resolve_roblox_game_name_sync(place_id: int) -> str:
+    if not place_id or place_id <= 0:
+        return "Storage Hunters"
+    if place_id in _place_name_cache:
+        return _place_name_cache[place_id]
+
+    for p in CONFIG.get("mumu", {}).get("game_presets", []):
+        if p.get("place_id") == place_id:
+            _place_name_cache[place_id] = p.get("name", f"Place {place_id}")
+            return _place_name_cache[place_id]
+
+    try:
+        u_url = f"https://apis.roblox.com/universes/v1/places/{place_id}/universe"
+        req = urllib.request.Request(u_url, headers={"User-Agent": "Mozilla/5.0 Genesis/3.0"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            u_data = json.loads(resp.read().decode("utf-8"))
+            universe_id = u_data.get("universeId")
+        if not universe_id:
+            return f"Place {place_id}"
+
+        g_url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
+        req2 = urllib.request.Request(g_url, headers={"User-Agent": "Mozilla/5.0 Genesis/3.0"})
+        with urllib.request.urlopen(req2, timeout=3.5) as resp2:
+            g_data = json.loads(resp2.read().decode("utf-8"))
+            items = g_data.get("data", [])
+            if items and items[0].get("name"):
+                raw_name = items[0].get("name", "").strip()
+                _place_name_cache[place_id] = raw_name
+                return raw_name
+    except Exception:
+        pass
+
+    return f"Place {place_id}"
+
+
+def get_roblox_user_id_sync(username: str) -> int | None:
+    if not username:
+        return None
+    uname_lower = username.strip().lower()
+    if uname_lower in _user_id_cache:
+        return _user_id_cache[uname_lower]
+    try:
+        payload = json.dumps({"usernames": [username.strip()], "excludeBannedUsers": True}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://users.roblox.com/v1/usernames/users",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Genesis/3.0"},
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            u_data = json.loads(resp.read().decode("utf-8"))
+            data_list = u_data.get("data", [])
+            if data_list:
+                uid = int(data_list[0].get("id"))
+                _user_id_cache[uname_lower] = uid
+                return uid
+    except Exception:
+        pass
+    return None
+
+
+def get_roblox_user_presence_sync(user_id: int) -> dict | None:
+    if not user_id or user_id <= 0:
+        return None
+    try:
+        payload = json.dumps({"userIds": [user_id]}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://presence.roblox.com/v1/presence/users",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Genesis/3.0"},
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            p_data = json.loads(resp.read().decode("utf-8"))
+            presences = p_data.get("userPresences", [])
+            if presences:
+                p = presences[0]
+                ptype = p.get("userPresenceType", 0)
+                status_map = {0: "Offline", 1: "Online", 2: "InGame", 3: "InStudio"}
+                place_id = p.get("placeId") or p.get("rootPlaceId")
+                last_loc = p.get("lastLocation") or ""
+                return {
+                    "presence_type": ptype,
+                    "presence_status": status_map.get(ptype, "Unknown"),
+                    "place_id": int(place_id) if place_id else None,
+                    "game_name": last_loc,
+                    "game_id": p.get("gameId"),
+                }
+    except Exception:
+        pass
+    return None
+
+
+def set_instance_username(instance_idx: int | str, username: str) -> dict:
+    inst_id = str(instance_idx)
+    clean_username = str(username or "").strip()
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.setdefault("mumu", {})
+        usernames = mumu_cfg.setdefault("instance_usernames", {})
+        usernames[inst_id] = clean_username
+        save_config(CONFIG)
+
+    add_event("system", f"Instance #{inst_id} Roblox username set to '{clean_username}'")
+    if clean_username:
+        uid = get_roblox_user_id_sync(clean_username)
+        if uid:
+            pres = get_roblox_user_presence_sync(uid)
+            if pres:
+                pid = pres.get("place_id")
+                gname = pres.get("game_name")
+                if pid:
+                    record_instance_active_place(inst_id, pid)
+                    if not gname or gname.lower() in ("experience", "roblox"):
+                        gname = resolve_roblox_game_name_sync(pid)
+                _instance_live_presence[inst_id] = {
+                    "username": clean_username,
+                    "presence_type": pres.get("presence_type", 0),
+                    "presence_status": pres.get("presence_status", "Offline"),
+                    "place_id": pid,
+                    "game_name": gname or (resolve_roblox_game_name_sync(pid) if pid else "Roblox"),
+                    "last_updated": time.time(),
+                }
+    return _instance_live_presence.get(inst_id, {})
+
+
+def record_instance_active_place(instance_idx: int | str, place_id: int, serial: str = "") -> None:
+    if not place_id or place_id <= 0:
+        return
+    _instance_auto_learned_place[str(instance_idx)] = int(place_id)
+    if serial:
+        _instance_auto_learned_place[serial] = int(place_id)
+
+
+def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
+    live = _instance_live_presence.get(str(instance_idx))
+    if live and live.get("place_id"):
+        return int(live["place_id"])
+
+    if str(instance_idx) in _instance_auto_learned_place:
+        return _instance_auto_learned_place[str(instance_idx)]
+    if serial and serial in _instance_auto_learned_place:
+        return _instance_auto_learned_place[serial]
+
+    mumu_cfg = CONFIG.get("mumu", {})
+    instance_places = mumu_cfg.get("instance_places", {})
+    if str(instance_idx) in instance_places:
+        try:
+            return int(instance_places[str(instance_idx)])
+        except (ValueError, TypeError):
+            pass
+    if serial and serial in instance_places:
+        try:
+            return int(instance_places[serial])
+        except (ValueError, TypeError):
+            pass
+
+    return int(mumu_cfg.get("default_place_id", 98800969324557))
+
+
+def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
+    try:
+        with CONFIG_LOCK:
+            mumu_cfg = CONFIG.setdefault("mumu", {})
+            places = mumu_cfg.setdefault("instance_places", {})
+            places[str(instance_idx)] = int(place_id)
+            _instance_auto_learned_place[str(instance_idx)] = int(place_id)
+            save_config(CONFIG)
+        gname = get_game_name_for_place_id(place_id)
+        add_event("system", f"Instance {instance_idx} target game set to {gname} ({place_id})")
+        return True
+    except Exception as exc:
+        print(f"[SET INSTANCE GAME ERROR] {exc}")
+        return False
+
+
+def get_game_name_for_place_id(place_id: int) -> str:
+    if not place_id or place_id <= 0:
+        return "Storage Hunters"
+    if place_id in _place_name_cache:
+        return _place_name_cache[place_id]
+    return resolve_roblox_game_name_sync(place_id)
+
+
+def record_bot_heartbeat(
+    place_id: int | None,
+    inst_id: int | str,
+    player: str,
+    status: str,
+    extra: dict,
+) -> dict:
+    now = time.time()
+    adb = find_mumu_adb()
+    devices = get_mumu_adb_devices() if adb else []
+    serial = devices[0] if devices else "127.0.0.1:16384"
+
+    place_num: int | None = None
+    if place_id is not None:
+        try:
+            place_num = int(place_id)
+            record_instance_active_place(inst_id, place_num, serial)
+        except (ValueError, TypeError):
+            place_num = None
+    if place_num is None:
+        place_num = get_instance_place_id(inst_id, serial)
+
+    _bot_heartbeats[serial] = {
+        "last_seen": now,
+        "status": status,
+        "place_id": place_num,
+        "player": player,
+        "extra": extra,
+    }
+
+    return {
+        "instance": inst_id,
+        "serial": serial,
+        "place_id": place_num,
+        "game_name": get_game_name_for_place_id(place_num) if place_num else "Roblox",
+        "status": status,
+        "ack": now,
+    }
+
+
+def _run_cmd(cmd: list[str], timeout: int = 10) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="timeout")
+    except Exception as exc:
+        return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr=str(exc))
+
+
+def governor_instance_action(instance_idx: int, action: str) -> dict:
+    adb_path = find_mumu_adb()
+    if not adb_path:
+        return {"success": False, "error": "ADB not found"}
+
+    _state_tracker.mark_governor_action()
+    port = 16384 + ((instance_idx - 1) * 32)
+    device_id = f"127.0.0.1:{port}"
+
+    if action == "restart_game":
+        place_id = get_instance_place_id(instance_idx)
+        launch_cmd = f'am start -a android.intent.action.VIEW -d "roblox://placeId={place_id}"'
+        _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
+        time.sleep(0.5)
+        _run_cmd([str(adb_path), "-s", device_id, "shell", launch_cmd])
+        add_event("system", f"Governor: Restarted Roblox on Instance #{instance_idx} (Place {place_id})")
+        return {"success": True, "instance": instance_idx, "action": "restart_game"}
+    if action == "trim_ram":
+        _run_cmd([str(adb_path), "-s", device_id, "shell", "echo", "3", ">", "/proc/sys/vm/drop_caches"])
+        _run_cmd([str(adb_path), "-s", device_id, "shell", "fstrim", "-v", "/data"])
+        add_event("system", f"Governor: Memory & Storage trimmed for Instance #{instance_idx}")
+        return {"success": True, "instance": instance_idx, "action": "trim_ram"}
+    if action == "kill_game":
+        _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
+        add_event("warning", f"Governor: Stopped Roblox on Instance #{instance_idx}")
+        return {"success": True, "instance": instance_idx, "action": "kill_game"}
+
+    return {"success": False, "error": f"Unknown action {action}"}
+
+
+def recover_roblox_instance(
+    serial: str,
+    place_id: int | None = None,
+    instance_idx: int | str = 1,
+) -> bool:
+    adb = find_mumu_adb()
+    if not adb:
+        return False
+    if not place_id or place_id <= 0:
+        place_id = get_instance_place_id(instance_idx, serial)
+
+    game_name = get_game_name_for_place_id(place_id)
+
+    try:
+        r_wm = subprocess.run(
+            [str(adb), "-s", serial, "shell", "wm", "size"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        w, h = 1600, 900
+        if "Physical size:" in r_wm.stdout:
+            dim_str = r_wm.stdout.split("Physical size:")[1].strip().split("x")
+            if len(dim_str) == 2:
+                dim_a, dim_b = int(dim_str[0]), int(dim_str[1])
+                w, h = max(dim_a, dim_b), min(dim_a, dim_b)
+
+        tap_x = int(w * 0.575)
+        tap_y = int(h * 0.622)
+
+        subprocess.run(
+            [str(adb), "-s", serial, "shell", "input", "tap", str(tap_x), str(tap_y)],
+            capture_output=True,
+            timeout=4,
+        )
+        time.sleep(3)
+
+        r_win = subprocess.run(
+            [str(adb), "-s", serial, "shell", "dumpsys", "window", "displays"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        is_roblox_focused = "ActivityNativeMain" in r_win.stdout and "Lawnchair" not in r_win.stdout
+
+        if not is_roblox_focused:
+            subprocess.run(
+                [str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"],
+                capture_output=True,
+                timeout=5,
+            )
+            time.sleep(0.5)
+            deep_link = f"roblox://placeId={place_id}"
+            subprocess.run(
+                [str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link],
+                capture_output=True,
+                timeout=5,
+            )
+
+        increment_watchdog_recovery()
+        add_event(
+            "system",
+            f"MuMu Watchdog: Auto-recovered Roblox on Instance {instance_idx} ({serial}) -> {game_name}",
+        )
+        notifier.notify_sync(
+            NotificationEvent(
+                event_type="watchdog_recovery",
+                severity="recovery",
+                title="Roblox Game Auto-Recovered",
+                description=(
+                    f"MuMu Autonomous Watchdog detected disconnect/freeze on Instance {instance_idx} ({serial}).\n"
+                    f"Roblox rejoined into {game_name} ({place_id})."
+                ),
+                dedupe_key=f"watchdog_recovery:{instance_idx}",
+                fields=[
+                    {"name": "Instance", "value": f"Instance {instance_idx} ({serial})", "inline": True},
+                    {"name": "Target Game", "value": f"{game_name} ({place_id})", "inline": True},
+                    {"name": "Status", "value": "Rejoined", "inline": True},
+                ],
+            )
+        )
+        return True
+    except Exception as exc:
+        print(f"[MUMU RECOVERY ERROR] {exc}")
+        return False
+
+
+async def roblox_presence_tracker_loop() -> None:
+    while True:
+        try:
+            with CONFIG_LOCK:
+                instance_users = dict(CONFIG.get("mumu", {}).get("instance_usernames", {}))
+            for inst_key, username in instance_users.items():
+                if not username:
+                    continue
+                uid = await asyncio.to_thread(get_roblox_user_id_sync, username)
+                if not uid:
+                    continue
+                pres = await asyncio.to_thread(get_roblox_user_presence_sync, uid)
+                if pres:
+                    pid = pres.get("place_id")
+                    gname = pres.get("game_name")
+                    if pid:
+                        record_instance_active_place(inst_key, pid)
+                        if not gname or gname.lower() in ("experience", "roblox"):
+                            gname = await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+
+                    _instance_live_presence[str(inst_key)] = {
+                        "username": username,
+                        "presence_type": pres.get("presence_type", 0),
+                        "presence_status": pres.get("presence_status", "Offline"),
+                        "place_id": pid,
+                        "game_name": gname or (
+                            await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+                            if pid
+                            else "Roblox"
+                        ),
+                        "last_updated": time.time(),
+                    }
+
+            for serial, hb in list(_bot_heartbeats.items()):
+                pid = hb.get("place_id")
+                if pid and time.time() - hb.get("last_seen", 0) < 60:
+                    hb["game_name"] = await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(6)
+
+
+async def mumu_game_watchdog_loop() -> None:
+    await asyncio.sleep(20)
+    while True:
+        try:
+            mumu_cfg = CONFIG.get("mumu", {})
+            if mumu_cfg.get("auto_reconnect", True):
+                now = time.time()
+                adb = await asyncio.to_thread(find_mumu_adb)
+                if adb:
+                    devices = await asyncio.to_thread(get_mumu_adb_devices)
+                    for idx, serial in enumerate(devices, 1):
+                        hb = _bot_heartbeats.get(serial)
+                        if hb:
+                            last_seen = hb.get("last_seen", 0)
+                            if now - last_seen > 45:
+                                place_id = get_instance_place_id(idx, serial)
+                                await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
+                                _bot_heartbeats[serial]["last_seen"] = now
+                        else:
+                            r_pid = await asyncio.to_thread(
+                                lambda s=serial, a=adb: subprocess.run(
+                                    [str(a), "-s", s, "shell", "pidof", "com.roblox.client"],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5,
+                                )
+                            )
+                            pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
+                            if not pid_out:
+                                _mumu_consecutive_idle[serial] = _mumu_consecutive_idle.get(serial, 0) + 1
+                                if _mumu_consecutive_idle[serial] >= 3:
+                                    place_id = get_instance_place_id(idx, serial)
+                                    await asyncio.to_thread(recover_roblox_instance, serial, place_id, idx)
+                                    _mumu_consecutive_idle[serial] = 0
+                            else:
+                                _mumu_consecutive_idle[serial] = 0
+            interval = int(mumu_cfg.get("check_interval_seconds", 20))
+            await asyncio.sleep(max(15, interval))
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            print(f"[MUMU WATCHDOG ERROR] {exc}")
+            await asyncio.sleep(20)
