@@ -515,10 +515,12 @@ async def purge_discord_channel_messages(
 
         status, _headers, body = await _bot_request_with_429("GET", url, bot_token, None, req_fn, sleeper)
         if status != 200:
+            err_msg = sanitize_error_text(body) or f"Failed to fetch messages (HTTP {status})"
+            add_event("error", f"Discord Purge failed (HTTP {status}): {err_msg}")
             return {
                 "ok": False,
                 "http_status": status,
-                "error": sanitize_error_text(body) or f"Failed to fetch messages (HTTP {status})",
+                "error": err_msg,
                 "deleted_count": 0,
             }
 
