@@ -508,7 +508,7 @@ async def api_system_restart(request: Request):
 
     def _delayed_exit() -> None:
         time.sleep(1)
-        os._exit(0)
+        os._exit(42)
 
     threading.Thread(target=_delayed_exit, daemon=True).start()
     return JSONResponse({"success": True, "message": "Server restarting..."})

@@ -167,47 +167,53 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
         async def _metrics_sender() -> None:
             obs_counter = 0
-            while True:
-                metrics, summary, timer_res, pcore_aff = await asyncio.gather(
-                    asyncio.to_thread(get_metrics_with_rates),
-                    asyncio.to_thread(get_session_summary),
-                    asyncio.to_thread(get_timer_resolution_status),
-                    asyncio.to_thread(get_affinity_status),
-                )
-                obs_counter += 1
-                payload: dict = {
-                    "type": "metrics",
-                    "metrics": metrics,
-                    "mumu": check_mumu_health(),
-                    "top_processes": get_top_processes(10),
-                    "summary": summary,
-                    "timer_resolution": timer_res,
-                    "pcore_affinity": pcore_aff,
-                    "auto_boost": get_auto_boost_payload(),
-                    "tunnel": get_tunnel_status(),
-                }
-                if obs_counter % 2 == 0:
-                    payload["observatory"] = await asyncio.to_thread(get_network_observatory)
+            try:
+                while True:
+                    metrics, summary, timer_res, pcore_aff = await asyncio.gather(
+                        asyncio.to_thread(get_metrics_with_rates),
+                        asyncio.to_thread(get_session_summary),
+                        asyncio.to_thread(get_timer_resolution_status),
+                        asyncio.to_thread(get_affinity_status),
+                    )
+                    obs_counter += 1
+                    payload: dict = {
+                        "type": "metrics",
+                        "metrics": metrics,
+                        "mumu": check_mumu_health(),
+                        "top_processes": get_top_processes(10),
+                        "summary": summary,
+                        "timer_resolution": timer_res,
+                        "pcore_affinity": pcore_aff,
+                        "auto_boost": get_auto_boost_payload(),
+                        "tunnel": get_tunnel_status(),
+                    }
+                    if obs_counter % 2 == 0:
+                        payload["observatory"] = await asyncio.to_thread(get_network_observatory)
 
-                await manager.send_to(ws, payload)
-                interval_ms = int(CONFIG.get("metrics", {}).get("update_interval_ms", 1000))
-                await asyncio.sleep(max(0.25, interval_ms / 1000.0))
+                    await manager.send_to(ws, payload)
+                    interval_ms = int(CONFIG.get("metrics", {}).get("update_interval_ms", 1000))
+                    await asyncio.sleep(max(0.25, interval_ms / 1000.0))
+            except WebSocketDisconnect:
+                return
 
         async def _receiver() -> None:
-            while True:
-                msg = await ws.receive_text()
-                try:
-                    data = json.loads(msg)
-                except json.JSONDecodeError:
-                    await manager.send_to(ws, {"type": "error", "error": "Invalid JSON payload"})
-                    continue
-                if isinstance(data, dict):
-                    await handle_ws_command(ws, data)
+            try:
+                while True:
+                    msg = await ws.receive_text()
+                    try:
+                        data = json.loads(msg)
+                    except json.JSONDecodeError:
+                        await manager.send_to(ws, {"type": "error", "error": "Invalid JSON payload"})
+                        continue
+                    if isinstance(data, dict):
+                        await handle_ws_command(ws, data)
+            except WebSocketDisconnect:
+                return
 
         sender_task = asyncio.create_task(_metrics_sender())
         receiver_task = asyncio.create_task(_receiver())
         try:
-            _done, pending = await asyncio.wait(
+            done, pending = await asyncio.wait(
                 {sender_task, receiver_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -216,11 +222,23 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             for task in pending:
                 try:
                     await task
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, WebSocketDisconnect, Exception):
                     pass
+            for task in done:
+                if not task.cancelled():
+                    try:
+                        task.result()
+                    except (WebSocketDisconnect, asyncio.CancelledError, Exception):
+                        pass
         except asyncio.CancelledError:
-            sender_task.cancel()
-            receiver_task.cancel()
+            for task in (sender_task, receiver_task):
+                if not task.done():
+                    task.cancel()
+            for task in (sender_task, receiver_task):
+                try:
+                    await task
+                except (asyncio.CancelledError, WebSocketDisconnect, Exception):
+                    pass
             raise
     except WebSocketDisconnect:
         pass

@@ -429,5 +429,110 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
             ws_mod.manager.disconnect(ws)
 
 
+class ConfigAndWebSocketRegressionTests(unittest.IsolatedAsyncioTestCase):
+    def test_load_config_handles_utf8_bom(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from backend.core import config as config_mod
+
+        payload = {
+            "server": {"host": "127.0.0.1", "port": 7700},
+            "tunnel": {"enabled": True, "provider": "tailscale"},
+        }
+        bom_bytes = b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = Path(tmp) / "config.json"
+            cfg_path.write_bytes(bom_bytes)
+            with mock.patch.object(config_mod, "CONFIG_PATH", cfg_path):
+                loaded = config_mod.load_config()
+            self.assertEqual(loaded["tunnel"]["provider"], "tailscale")
+            self.assertEqual(loaded["server"]["port"], 7700)
+
+            example_path = Path(tmp) / "config.example.json"
+            example_path.write_bytes(bom_bytes)
+            missing_path = Path(tmp) / "missing.json"
+            with (
+                mock.patch.object(config_mod, "CONFIG_PATH", missing_path),
+                mock.patch.object(config_mod, "CONFIG_EXAMPLE_PATH", example_path),
+            ):
+                loaded_example = config_mod.load_config()
+            self.assertEqual(loaded_example["tunnel"]["provider"], "tailscale")
+
+    async def test_ws_disconnect_leaves_no_unretrieved_task_exception(self) -> None:
+        import asyncio
+        import gc
+        from types import SimpleNamespace
+        from unittest import mock
+        from fastapi import WebSocketDisconnect
+        from backend.api import ws as ws_mod
+
+        loop = asyncio.get_running_loop()
+        loop_exceptions: list[dict] = []
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: loop_exceptions.append(context))
+
+        def _make_fake_ws(receive_side_effect) -> mock.MagicMock:
+            sock = mock.MagicMock()
+            sock.headers = {}
+            sock.query_params = {}
+            sock.cookies = {}
+            sock.client = SimpleNamespace(host="127.0.0.1", port=54321)
+            sock.accept = mock.AsyncMock()
+            sock.close = mock.AsyncMock()
+            sock.send_text = mock.AsyncMock()
+            sock.send_json = mock.AsyncMock()
+            sock.receive_text = mock.AsyncMock(side_effect=receive_side_effect)
+            return sock
+
+        ws_rx = _make_fake_ws(WebSocketDisconnect(code=1001))
+
+        hold_rx = asyncio.Event()
+
+        async def _slow_receive() -> str:
+            await hold_rx.wait()
+            return "{}"
+
+        ws_tx = _make_fake_ws(_slow_receive)
+
+        async def _send_then_disconnect(_ws, payload) -> None:
+            if payload.get("type") == "metrics":
+                raise WebSocketDisconnect(code=1001)
+
+        try:
+            with (
+                mock.patch.object(
+                    ws_mod, "_build_init_payload", new=mock.AsyncMock(return_value={"type": "init"})
+                ),
+                mock.patch.object(ws_mod, "get_metrics_with_rates", return_value={}),
+                mock.patch.object(ws_mod, "get_session_summary", return_value={}),
+                mock.patch.object(ws_mod, "get_timer_resolution_status", return_value={}),
+                mock.patch.object(ws_mod, "get_affinity_status", return_value={}),
+                mock.patch.object(ws_mod, "check_mumu_health", return_value={}),
+                mock.patch.object(ws_mod, "get_top_processes", return_value=[]),
+                mock.patch.object(ws_mod, "get_auto_boost_payload", return_value={}),
+                mock.patch.object(ws_mod, "get_tunnel_status", return_value={}),
+            ):
+                await ws_mod.websocket_endpoint(ws_rx)
+
+                with mock.patch.object(ws_mod.manager, "send_to", side_effect=_send_then_disconnect):
+                    await ws_mod.websocket_endpoint(ws_tx)
+
+            await asyncio.sleep(0)
+            gc.collect()
+            await asyncio.sleep(0)
+
+            self.assertGreaterEqual(ws_rx.receive_text.await_count, 1)
+            self.assertGreaterEqual(ws_tx.receive_text.await_count, 1)
+            self.assertEqual(loop_exceptions, [], f"Unexpected unretrieved task exceptions: {loop_exceptions}")
+        finally:
+            hold_rx.set()
+            ws_mod.manager.disconnect(ws_rx)
+            ws_mod.manager.disconnect(ws_tx)
+            loop.set_exception_handler(old_handler)
+
+
 if __name__ == "__main__":
     unittest.main()

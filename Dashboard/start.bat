@@ -106,6 +106,13 @@ if exist "%STOP_FLAG%" (
     goto :supervisor_exit
 )
 
+if "%SERVER_EXIT%"=="42" (
+    call :log_event "[RESTART] Genesis server.py requested restart (code 42). Restarting immediately..."
+    if "%SILENT_MODE%"=="0" echo [RESTART] Genesis server.py requested restart. Restarting...
+    timeout /t 2 /nobreak >nul
+    goto :supervisor_loop
+)
+
 if "%SERVER_EXIT%"=="0" (
     call :log_event "[EXIT] Genesis server.py exited cleanly (code 0). Stopping supervisor."
     if "%SILENT_MODE%"=="0" echo [EXIT] Genesis server.py exited cleanly (code 0).

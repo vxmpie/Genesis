@@ -61,6 +61,12 @@ class TestSilentExecution(unittest.TestCase):
         self.assertIn("-DontStopIfGoingOnBatteries", content)
         self.assertIn("-MultipleInstances IgnoreNew", content)
 
+    def test_restart_exit_code_contract(self) -> None:
+        routes_content = (DASHBOARD_DIR / "backend" / "api" / "routes.py").read_text(encoding="utf-8")
+        start_bat_content = (DASHBOARD_DIR / "start.bat").read_text(encoding="utf-8")
+        self.assertIn("os._exit(42)", routes_content)
+        self.assertIn('if "%SERVER_EXIT%"=="42"', start_bat_content)
+
 
 if __name__ == "__main__":
     unittest.main()

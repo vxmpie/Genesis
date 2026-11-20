@@ -146,11 +146,11 @@ def load_config() -> dict:
     with CONFIG_LOCK:
         cfg: dict | None = None
         if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                 cfg = json.load(f)
         elif CONFIG_EXAMPLE_PATH.exists():
             try:
-                with open(CONFIG_EXAMPLE_PATH, "r", encoding="utf-8") as f:
+                with open(CONFIG_EXAMPLE_PATH, "r", encoding="utf-8-sig") as f:
                     cfg = json.load(f)
             except Exception:
                 cfg = None
