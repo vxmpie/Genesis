@@ -16,6 +16,7 @@ from backend.core.config import CHART_HISTORY_PATH, CONFIG, DATA_DIR
 from backend.core.events import add_event, get_all_events_snapshot, purge_boost_events
 from backend.services.win32_ops import get_ram_breakdown
 
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 WATCHDOG_LOG_PATH = Path(r"C:\Genesis\watchdog.log")
 
 # --- Runtime Telemetry State ---
@@ -389,6 +390,7 @@ def get_wifi_telemetry() -> dict:
             capture_output=True,
             text=True,
             timeout=3,
+            creationflags=_CREATE_NO_WINDOW,
         )
         if r.returncode == 0:
             ssid = "Disconnected"
@@ -549,7 +551,13 @@ def get_network_observatory() -> dict:
 
 def flush_dns_cache() -> bool:
     try:
-        r = subprocess.run(["ipconfig", "/flushdns"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(
+            ["ipconfig", "/flushdns"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
+        )
         success = r.returncode == 0
         if success:
             add_event("system", "DNS Resolver Cache flushed successfully")

@@ -37,6 +37,8 @@ from backend.services.win32_ops import (
     trim_process_handle,
 )
 
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 # --- Deep Clean Targets & Engine ---
 DEEP_CLEAN_TARGETS: list[dict] = [
     {
@@ -191,7 +193,12 @@ def deep_clean_execute(targets: list[str] | None = None) -> dict:
 
         if service:
             try:
-                subprocess.run(["net", "stop", service], capture_output=True, timeout=15)
+                subprocess.run(
+                    ["net", "stop", service],
+                    capture_output=True,
+                    timeout=15,
+                    creationflags=_CREATE_NO_WINDOW,
+                )
                 service_was_running = True
             except Exception:
                 pass
@@ -232,7 +239,12 @@ def deep_clean_execute(targets: list[str] | None = None) -> dict:
         finally:
             if service and service_was_running:
                 try:
-                    subprocess.run(["net", "start", service], capture_output=True, timeout=15)
+                    subprocess.run(
+                        ["net", "start", service],
+                        capture_output=True,
+                        timeout=15,
+                        creationflags=_CREATE_NO_WINDOW,
+                    )
                 except Exception:
                     pass
 
@@ -252,6 +264,7 @@ def deep_clean_execute(targets: list[str] | None = None) -> dict:
             ["powershell", "-Command", "Delete-DeliveryOptimizationCache -Force"],
             capture_output=True,
             timeout=15,
+            creationflags=_CREATE_NO_WINDOW,
         )
         results.append({"name": "Delivery Optimization", "deleted": 0, "freed_mb": 0})
     except Exception:
@@ -425,6 +438,7 @@ def check_hardening_drift() -> dict:
             capture_output=True,
             text=True,
             timeout=8,
+            creationflags=_CREATE_NO_WINDOW,
         )
         if r_cim.returncode == 0 and r_cim.stdout.strip():
             hv_present = r_cim.stdout.strip().lower()
@@ -439,6 +453,7 @@ def check_hardening_drift() -> dict:
                 capture_output=True,
                 text=True,
                 timeout=8,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 output = result.stdout.lower()
@@ -464,6 +479,7 @@ def check_hardening_drift() -> dict:
             capture_output=True,
             text=True,
             timeout=8,
+            creationflags=_CREATE_NO_WINDOW,
         )
         if r.returncode == 0 and r.stdout.strip():
             raw_out = r.stdout.strip()
@@ -536,12 +552,18 @@ def get_vm_disk_status() -> list[dict]:
     for i in range(max_inst):
         port = base_port + (step * i)
         try:
-            subprocess.run([str(adb), "connect", f"127.0.0.1:{port}"], capture_output=True, timeout=2)
+            subprocess.run(
+                [str(adb), "connect", f"127.0.0.1:{port}"],
+                capture_output=True,
+                timeout=2,
+                creationflags=_CREATE_NO_WINDOW,
+            )
             r = subprocess.run(
                 [str(adb), "-s", f"127.0.0.1:{port}", "shell", "df", "/data"],
                 capture_output=True,
                 text=True,
                 timeout=5,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if r.returncode == 0 and "/data" in r.stdout:
                 lines = r.stdout.strip().split("\n")
@@ -587,12 +609,14 @@ def trim_vm_caches(port: int) -> bool:
             capture_output=True,
             text=True,
             timeout=12,
+            creationflags=_CREATE_NO_WINDOW,
         )
         subprocess.run(
             [str(adb), "-s", f"127.0.0.1:{port}", "shell", "rm", "-rf", "/data/local/tmp/*"],
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
         )
         if r.returncode == 0:
             add_event("system", f"VM (port {port}) /data filesystem trimmed safely")
@@ -714,6 +738,7 @@ def get_defender_status() -> dict:
             capture_output=True,
             text=True,
             timeout=15,
+            creationflags=_CREATE_NO_WINDOW,
         )
         if r.returncode == 0 and r.stdout.strip():
             data = json.loads(r.stdout.strip())
@@ -769,6 +794,7 @@ def run_quick_scan() -> bool:
             ["powershell", "-Command", "Start-MpScan -ScanType 1"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW,
         )
         _last_scan_date = date.today()
         add_event("system", "Defender Quick Scan started in background")
@@ -793,6 +819,7 @@ def scan_downloads_folder() -> int:
                     ["powershell", "-Command", f'Start-MpScan -ScanType 3 -ScanPath "{f}"'],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    creationflags=_CREATE_NO_WINDOW,
                 )
                 scanned += 1
             except Exception:

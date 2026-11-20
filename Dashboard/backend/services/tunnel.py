@@ -8,6 +8,8 @@ from backend.core.config import CONFIG, DASHBOARD_DIR, DATA_DIR
 from backend.core.events import add_event, broadcast_payload_threadsafe
 from backend.services.discord_notifier import NotificationEvent, notifier
 
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 _tunnel_lock = threading.RLock()
 _tunnel_proc: subprocess.Popen | None = None
 _restart_event: asyncio.Event | None = None
@@ -241,6 +243,7 @@ async def tunnel_supervisor_loop() -> None:
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
+                    creationflags=_CREATE_NO_WINDOW,
                 )
                 with _tunnel_lock:
                     _tunnel_proc = new_proc

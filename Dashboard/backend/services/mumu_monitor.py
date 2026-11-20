@@ -729,7 +729,13 @@ def find_mumu_adb() -> Path | None:
         for found in install_path.rglob("adb.exe"):
             return found
     try:
-        result = subprocess.run(["where", "adb"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(
+            ["where", "adb"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
+        )
         if result.returncode == 0 and result.stdout.strip():
             return Path(result.stdout.strip().splitlines()[0].strip())
     except Exception:
@@ -742,7 +748,13 @@ def get_mumu_adb_devices() -> list[str]:
     if not adb:
         return []
     try:
-        r = subprocess.run([str(adb), "devices"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(
+            [str(adb), "devices"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
+        )
         if r.returncode == 0:
             devices = []
             for line in r.stdout.strip().splitlines()[1:]:
@@ -1009,7 +1021,13 @@ def record_bot_heartbeat(
 
 def _run_cmd(cmd: list[str], timeout: int = 10) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=_CREATE_NO_WINDOW,
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="timeout")
     except Exception as exc:
@@ -1065,6 +1083,7 @@ def recover_roblox_instance(
             capture_output=True,
             text=True,
             timeout=4,
+            creationflags=_CREATE_NO_WINDOW,
         )
         w, h = 1600, 900
         if "Physical size:" in r_wm.stdout:
@@ -1080,6 +1099,7 @@ def recover_roblox_instance(
             [str(adb), "-s", serial, "shell", "input", "tap", str(tap_x), str(tap_y)],
             capture_output=True,
             timeout=4,
+            creationflags=_CREATE_NO_WINDOW,
         )
         time.sleep(3)
 
@@ -1088,6 +1108,7 @@ def recover_roblox_instance(
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
         )
         is_roblox_focused = "ActivityNativeMain" in r_win.stdout and "Lawnchair" not in r_win.stdout
 
@@ -1096,6 +1117,7 @@ def recover_roblox_instance(
                 [str(adb), "-s", serial, "shell", "am", "force-stop", "com.roblox.client"],
                 capture_output=True,
                 timeout=5,
+                creationflags=_CREATE_NO_WINDOW,
             )
             time.sleep(0.5)
             deep_link = f"roblox://placeId={place_id}"
@@ -1103,6 +1125,7 @@ def recover_roblox_instance(
                 [str(adb), "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deep_link],
                 capture_output=True,
                 timeout=5,
+                creationflags=_CREATE_NO_WINDOW,
             )
 
         increment_watchdog_recovery()
@@ -1204,6 +1227,7 @@ def evaluate_watchdog_device_sync(
         capture_output=True,
         text=True,
         timeout=5,
+        creationflags=_CREATE_NO_WINDOW,
     )
     pid_out = r_pid.stdout.strip() if r_pid.returncode == 0 else ""
     if not pid_out:
