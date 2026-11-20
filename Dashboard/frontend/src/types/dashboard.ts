@@ -507,7 +507,7 @@ export type TunnelStatusCode =
   | 'local_only';
 
 export interface TunnelStatus {
-  provider: 'none' | 'ngrok' | 'cloudflared' | 'local_only' | string;
+  provider: 'none' | 'ngrok' | 'cloudflared' | 'tailscale' | 'local_only' | string;
   status: TunnelStatusCode;
   tunnel_url: string | null;
   local_url: string;
@@ -600,6 +600,7 @@ export interface ClientConfig {
     ngrok_authtoken: string;
     ngrok_authtoken_configured: boolean;
     ngrok_domain: string;
+    tailscale_url?: string;
   };
 }
 

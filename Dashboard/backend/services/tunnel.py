@@ -55,15 +55,44 @@ def stop_tunnel_process() -> None:
             pass
 
 
+def _detect_tailscale_serve_url(configured_url: str = "") -> str | None:
+    clean = (configured_url or "").strip().rstrip("/")
+    if clean.startswith(("https://", "http://")):
+        return clean
+    try:
+        r = subprocess.run(
+            ["tailscale", "serve", "status"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        if r.returncode == 0 and r.stdout:
+            m = re.search(r"https://[a-zA-Z0-9.-]+\.ts\.net", r.stdout)
+            if m:
+                return m.group(0)
+    except Exception:
+        pass
+    return None
+
+
 # --- Tunnel Restart Control ---
 def request_tunnel_restart() -> dict:
     tunnel_cfg = CONFIG.get("tunnel", {})
-    provider = str(tunnel_cfg.get("provider", "ngrok")).lower()
+    provider = str(tunnel_cfg.get("provider", "ngrok")).lower().strip()
+    if provider in ("local_only", "none", "disabled"):
+        return {
+            "ok": False,
+            "error": "Tunnel is running in local-only mode",
+            "tunnel": get_tunnel_status(),
+        }
+
     ngrok_token = str(tunnel_cfg.get("ngrok_authtoken", "") or "").strip()
     has_ngrok = provider == "ngrok" and bool(ngrok_token)
+    has_tailscale = provider == "tailscale"
     has_cloudflared = (DASHBOARD_DIR / "cloudflared.exe").exists()
 
-    if not has_ngrok and not has_cloudflared:
+    if not has_ngrok and not has_tailscale and not has_cloudflared:
         return {
             "ok": False,
             "error": "Tunnel is running in local-only mode",
@@ -112,12 +141,116 @@ async def tunnel_supervisor_loop() -> None:
 
     while True:
         tunnel_cfg = CONFIG.get("tunnel", {})
-        provider = str(tunnel_cfg.get("provider", "ngrok")).lower()
+        provider = str(tunnel_cfg.get("provider", "ngrok")).lower().strip()
         ngrok_token = str(tunnel_cfg.get("ngrok_authtoken", "") or "").strip()
         ngrok_domain = str(tunnel_cfg.get("ngrok_domain", "") or "").strip()
+        tailscale_cfg_url = str(tunnel_cfg.get("tailscale_url", "") or "").strip()
         port = int(CONFIG.get("server", {}).get("port", 7700))
 
         _update_tunnel_state(provider=provider)
+
+        if provider in ("local_only", "none", "disabled"):
+            _update_tunnel_state(
+                broadcast=True,
+                provider="local_only",
+                status="local_only",
+                tunnel_url=None,
+                started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                last_error=None,
+            )
+            if not startup_alert_sent:
+                startup_alert_sent = True
+                notifier.enqueue(
+                    NotificationEvent(
+                        event_type="startup",
+                        severity="info",
+                        title="Genesis Autonomous Core Online (Local Only)",
+                        description="System supervisor initialized without public tunnel.",
+                        dedupe_key="startup_online",
+                        fields=[
+                            {"name": "Local Host", "value": f"http://127.0.0.1:{port}", "inline": True},
+                            {"name": "Watchdog", "value": "Armed", "inline": True},
+                            {"name": "Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
+                        ],
+                    )
+                )
+            try:
+                await _restart_event.wait()
+                _restart_event.clear()
+                continue
+            except asyncio.CancelledError:
+                _update_tunnel_state(broadcast=True, status="offline")
+                return
+
+        if provider == "tailscale":
+            _update_tunnel_state(broadcast=True, provider="tailscale", status="connecting")
+            ts_url = await asyncio.to_thread(_detect_tailscale_serve_url, tailscale_cfg_url)
+            if ts_url:
+                with _tunnel_lock:
+                    prev_url = _tunnel_state.get("tunnel_url")
+                _update_tunnel_state(
+                    broadcast=True,
+                    provider="tailscale",
+                    tunnel_url=ts_url,
+                    status="online",
+                    started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    last_error=None,
+                )
+                try:
+                    (DATA_DIR / "tunnel_url.txt").write_text(ts_url, encoding="utf-8")
+                except Exception:
+                    pass
+                add_event("system", f"Tailscale Private HTTPS Tunnel active: {ts_url}")
+                if not startup_alert_sent:
+                    startup_alert_sent = True
+                    notifier.enqueue(
+                        NotificationEvent(
+                            event_type="startup",
+                            severity="info",
+                            title="Genesis Autonomous Core Online (Tailscale Serve)",
+                            description="System supervisor initialized with private Tailscale HTTPS ingress.",
+                            dedupe_key="startup_online",
+                            fields=[
+                                {"name": "Tailscale URL", "value": f"[Open Dashboard]({ts_url})\n`{ts_url}`", "inline": False},
+                                {"name": "Local Host", "value": f"http://127.0.0.1:{port}", "inline": True},
+                                {"name": "Watchdog", "value": "Armed", "inline": True},
+                                {"name": "Started At", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "inline": True},
+                            ],
+                        )
+                    )
+                elif prev_url != ts_url:
+                    notifier.enqueue(
+                        NotificationEvent(
+                            event_type="tunnel_change",
+                            severity="recovery",
+                            title="Tailscale Tunnel Updated",
+                            description=f"Tailscale Serve HTTPS active at:\n`{ts_url}`",
+                            dedupe_key=f"tunnel_change:{ts_url}",
+                        )
+                    )
+                try:
+                    await _restart_event.wait()
+                    _restart_event.clear()
+                    _update_tunnel_state(broadcast=True, status="restarting", tunnel_url=None)
+                    continue
+                except asyncio.CancelledError:
+                    _update_tunnel_state(broadcast=True, status="offline")
+                    return
+
+            _update_tunnel_state(
+                broadcast=True,
+                provider="tailscale",
+                status="offline",
+                tunnel_url=None,
+                last_error="Tailscale Serve URL not detected (run: tailscale serve --bg http://127.0.0.1:7700)",
+            )
+            try:
+                if await _sleep_or_restart(_restart_event, 30.0):
+                    _restart_event.clear()
+                continue
+            except asyncio.CancelledError:
+                _update_tunnel_state(broadcast=True, status="offline")
+                return
 
         if provider == "ngrok" and ngrok_token:
             listener = None

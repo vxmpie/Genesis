@@ -276,6 +276,59 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                 tunnel_mod._tunnel_state.clear()
                 tunnel_mod._tunnel_state.update(orig_state)
 
+    def test_tunnel_local_only_blocks_cloudflared_fallback_and_tailscale_mode(self) -> None:
+        from backend.services import tunnel as tunnel_mod
+
+        orig_state = dict(tunnel_mod._tunnel_state)
+        try:
+            with patch.dict(
+                tunnel_mod.CONFIG,
+                {"tunnel": {"provider": "local_only", "ngrok_authtoken": "", "ngrok_domain": "", "tailscale_url": ""}},
+                clear=False,
+            ):
+                res_local = tunnel_mod.request_tunnel_restart()
+                self.assertFalse(res_local["ok"])
+                self.assertIn("local-only", res_local["error"])
+
+            with patch.dict(
+                tunnel_mod.CONFIG,
+                {
+                    "tunnel": {
+                        "provider": "tailscale",
+                        "ngrok_authtoken": "",
+                        "ngrok_domain": "",
+                        "tailscale_url": "https://genesis.taile67ec7.ts.net/",
+                    }
+                },
+                clear=False,
+            ), patch.object(tunnel_mod, "add_event"), patch.object(
+                tunnel_mod, "broadcast_payload_threadsafe"
+            ):
+                tunnel_mod._update_tunnel_state(
+                    provider="tailscale", status="online", tunnel_url="https://genesis.taile67ec7.ts.net"
+                )
+                res_ts = tunnel_mod.request_tunnel_restart()
+                self.assertTrue(res_ts["ok"])
+                self.assertEqual(res_ts["tunnel"]["status"], "restarting")
+
+            self.assertEqual(
+                tunnel_mod._detect_tailscale_serve_url("https://genesis.taile67ec7.ts.net/"),
+                "https://genesis.taile67ec7.ts.net",
+            )
+            mock_proc = SimpleNamespace(
+                returncode=0,
+                stdout="https://genesis.taile67ec7.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:7700\n",
+            )
+            with patch.object(tunnel_mod.subprocess, "run", return_value=mock_proc):
+                self.assertEqual(
+                    tunnel_mod._detect_tailscale_serve_url(""),
+                    "https://genesis.taile67ec7.ts.net",
+                )
+        finally:
+            with tunnel_mod._tunnel_lock:
+                tunnel_mod._tunnel_state.clear()
+                tunnel_mod._tunnel_state.update(orig_state)
+
     async def test_ws_trim_and_kill_process_validation_and_protection(self) -> None:
         ws = _FakeWebSocket()
         from backend.api import ws as ws_mod

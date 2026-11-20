@@ -104,6 +104,7 @@ DEFAULT_CONFIG: dict = {
         "provider": "ngrok",
         "ngrok_authtoken": "",
         "ngrok_domain": "",
+        "tailscale_url": "",
     },
 }
 
