@@ -3,6 +3,13 @@
 # Execute with Administrator Privileges
 # ===========================================================================
 
+# --- Administrator Privilege Guard ---
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "[ERROR] Administrator privileges are required. Run PowerShell as Administrator." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host "  GENESIS NETWORK HARDENING AND SELF-HEALING WATCHDOG" -ForegroundColor Cyan
@@ -84,13 +91,12 @@ if (-not $targetKey) {
     Write-Host "  [OK] PnPCapabilities -> 24 (Prevent Device Power Down)" -ForegroundColor Green
 }
 
-# ---------------------------------------------------------------------------
-# 5. Install Standalone Scheduled Task Watchdog (Isolated in C:\Genesis)
-# ---------------------------------------------------------------------------
+# --- 5. Install Standalone Scheduled Task Watchdog (Isolated in C:\Genesis) ---
 Write-Host "[5/6] Deploying Watchdog Runtime to Local SSD (C:\Genesis)..." -ForegroundColor Yellow
 $sourceScript = Join-Path $PSScriptRoot "net_watchdog.ps1"
 $runtimeDir = "C:\Genesis"
 $destScript = Join-Path $runtimeDir "net_watchdog.ps1"
+$taskName = "Genesis-NetworkWatchdog"
 
 if (-not (Test-Path $sourceScript)) {
     $sourceScript = ".\net_watchdog.ps1"
@@ -99,25 +105,37 @@ if (-not (Test-Path $sourceScript)) {
 if (-not (Test-Path $sourceScript)) {
     Write-Host "  [ERROR] Source watchdog script not found at $sourceScript!" -ForegroundColor Red
 } else {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    $staleWatchdogs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        ($_.Name -eq "powershell.exe" -or $_.Name -eq "pwsh.exe") -and
+        $_.ProcessId -ne $PID -and
+        $_.CommandLine -and
+        $_.CommandLine -match "net_watchdog\.ps1"
+    }
+    foreach ($proc in $staleWatchdogs) {
+        Write-Host "  [CLEANUP] Stopping stale watchdog PID $($proc.ProcessId)..." -ForegroundColor DarkYellow
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($staleWatchdogs) {
+        Start-Sleep -Seconds 1
+    }
+
     if (-not (Test-Path $runtimeDir)) {
         New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
     }
     Copy-Item -Path $sourceScript -Destination $destScript -Force
     Write-Host "  [OK] Deployed net_watchdog.ps1 to $destScript (Independent of OneDrive)" -ForegroundColor Green
 
-    $taskName = "Genesis-NetworkWatchdog"
-    
-    # Unregister previous task if exists
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    
+
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destScript`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 0)
-    
+
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Genesis Autonomous Network Watchdog and Self-Healing Engine" | Out-Null
-    
-    # Start the task immediately
+
     Start-ScheduledTask -TaskName $taskName
     Write-Host "  [OK] Scheduled Task '$taskName' registered and active under SYSTEM" -ForegroundColor Green
 }
