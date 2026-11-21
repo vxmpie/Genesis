@@ -13,7 +13,7 @@ import { AlertsTunnelView } from './components/alerts/AlertsTunnelView';
 
 import { CommandPalette, type PaletteActionId } from './components/CommandPalette';
 import { AuthModal } from './components/AuthModal';
-import { EditGameModal } from './components/EditGameModal';
+import { EditGameModal, type GameTargetUpdates } from './components/EditGameModal';
 import { ToastContainer } from './components/ToastContainer';
 
 const VIEW_SHORTCUTS: Record<string, WorkspaceView> = {
@@ -214,14 +214,26 @@ export function App() {
   }, [requireAuthGuard, sendCommand]);
 
   const handleRestartServer = useCallback(() => {
-    requireAuthGuard(async () => {
-      const { token, addToast } = useDashboardStore.getState();
+    const executeRestart = async () => {
+      const { token, addToast, clearSession, openAuthModalWithAction } =
+        useDashboardStore.getState();
       const res = await postRestartServer(token);
+      if (res.status === 401) {
+        clearSession();
+        openAuthModalWithAction(() => {
+          void executeRestart();
+        });
+        return;
+      }
       if (res.ok) {
         addToast('warning', 'Core server restarting...');
       } else {
         addToast('error', res.error || 'Failed to restart server');
       }
+    };
+
+    requireAuthGuard(() => {
+      void executeRestart();
     });
   }, [requireAuthGuard]);
 
@@ -283,13 +295,16 @@ export function App() {
   );
 
   const handleSaveGameTarget = useCallback(
-    (
-      instance: number,
-      updates: { placeId?: number; username?: string; autoRejoin?: boolean }
-    ) => {
+    (instance: number, updates: GameTargetUpdates) => {
       requireAuthGuard(() => {
         if (typeof updates.placeId === 'number') {
-          sendCommand('set_mumu_game', { instance, place_id: updates.placeId });
+          useDashboardStore.getState().setPendingOp(`mumuGame:${instance}`);
+          sendCommand('set_mumu_game', {
+            instance,
+            place_id: updates.placeId,
+            save_as_preset: updates.saveAsPreset,
+            preset_name: updates.presetName,
+          });
         }
         if (updates.username !== undefined) {
           sendCommand('set_mumu_username', { instance, username: updates.username });
@@ -298,6 +313,40 @@ export function App() {
           useDashboardStore.getState().setPendingOp(`rejoin:${instance}`);
           sendCommand('set_auto_rejoin', { instance, enabled: updates.autoRejoin });
         }
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleAddPreset = useCallback(
+    (placeId: number, name: string) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp('preset:add');
+        sendCommand('add_game_preset', { place_id: placeId, name });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleUpdatePreset = useCallback(
+    (originalPlaceId: number, placeId: number, name: string) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp(`preset:edit:${originalPlaceId}`);
+        sendCommand('update_game_preset', {
+          original_place_id: originalPlaceId,
+          place_id: placeId,
+          name,
+        });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
+  const handleDeletePreset = useCallback(
+    (placeId: number) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp(`preset:delete:${placeId}`);
+        sendCommand('delete_game_preset', { place_id: placeId });
       });
     },
     [requireAuthGuard, sendCommand]
@@ -333,6 +382,9 @@ export function App() {
                 sendCommand('set_auto_rejoin', { instance, enabled });
               })
             }
+            onAddPreset={handleAddPreset}
+            onUpdatePreset={handleUpdatePreset}
+            onDeletePreset={handleDeletePreset}
             onRefreshVmDisk={() => {
               useDashboardStore.getState().setPendingOp('vmdisk:refresh');
               sendCommand('vm_disk_refresh');
@@ -444,7 +496,12 @@ export function App() {
 
       <CommandPalette onExecute={handleCommandPaletteAction} />
       <AuthModal />
-      <EditGameModal onSave={handleSaveGameTarget} />
+      <EditGameModal
+        onSave={handleSaveGameTarget}
+        onAddPreset={handleAddPreset}
+        onUpdatePreset={handleUpdatePreset}
+        onDeletePreset={handleDeletePreset}
+      />
       <ToastContainer />
     </>
   );

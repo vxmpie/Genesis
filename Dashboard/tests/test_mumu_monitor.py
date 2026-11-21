@@ -13,14 +13,23 @@ from backend.services import mumu_monitor as mm  # noqa: E402
 from backend.services.mumu_monitor import (  # noqa: E402
     HELPER_DENYLIST,
     MuMuStateTracker,
+    _build_device_game_fields,
+    add_game_preset,
     classify_process_role,
+    delete_game_preset,
     evaluate_watchdog_device_sync,
     get_emulator_allowlist,
+    get_game_name_for_place_id,
+    get_game_presets,
+    get_instance_place_id,
     governor_instance_action,
     is_auto_rejoin_enabled,
     parse_mumu_manager_json,
     resolve_instance_index_from_serial,
     set_auto_rejoin,
+    set_instance_place_id,
+    set_instance_username,
+    update_game_preset,
 )
 
 
@@ -176,6 +185,8 @@ class TestAutoRejoinControl(unittest.TestCase):
         self._orig_mumu = copy.deepcopy(mm.CONFIG.get("mumu", {}))
         self._orig_idle = dict(mm._mumu_consecutive_idle)
         self._orig_hb = copy.deepcopy(mm._bot_heartbeats)
+        self._orig_live = copy.deepcopy(mm._instance_live_presence)
+        self._orig_learned = dict(mm._instance_auto_learned_place)
         mm.CONFIG["mumu"] = {
             "install_path": "C:/Program Files/Netease/MuMuPlayer",
             "process_names": ["MuMuNxDevice.exe", "MuMuNxMain.exe"],
@@ -186,6 +197,8 @@ class TestAutoRejoinControl(unittest.TestCase):
         }
         mm._mumu_consecutive_idle.clear()
         mm._bot_heartbeats.clear()
+        mm._instance_live_presence.clear()
+        mm._instance_auto_learned_place.clear()
 
     def tearDown(self) -> None:
         mm.CONFIG["mumu"] = self._orig_mumu
@@ -193,6 +206,10 @@ class TestAutoRejoinControl(unittest.TestCase):
         mm._mumu_consecutive_idle.update(self._orig_idle)
         mm._bot_heartbeats.clear()
         mm._bot_heartbeats.update(self._orig_hb)
+        mm._instance_live_presence.clear()
+        mm._instance_live_presence.update(self._orig_live)
+        mm._instance_auto_learned_place.clear()
+        mm._instance_auto_learned_place.update(self._orig_learned)
 
     def test_absent_key_defaults_to_enabled_and_serial_resolves_slot(self) -> None:
         self.assertEqual(resolve_instance_index_from_serial("127.0.0.1:16384", 1), 1)
@@ -272,6 +289,7 @@ class TestAutoRejoinControl(unittest.TestCase):
             mock_rec.assert_called_once()
 
     def test_manual_governor_restart_works_when_auto_rejoin_off(self) -> None:
+        mm.CONFIG["mumu"]["instance_places"] = {"1": 98800969324557}
         with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
             set_auto_rejoin(1, False)
         with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
@@ -280,6 +298,129 @@ class TestAutoRejoinControl(unittest.TestCase):
             res = governor_instance_action(1, "restart_game")
         self.assertTrue(res["success"])
         self.assertEqual(mock_cmd.call_count, 2)
+
+    def test_governor_restart_rejects_unconfigured_place_and_adb_failure(self) -> None:
+        with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
+            mm, "_run_cmd", return_value=MagicMock(returncode=0)
+        ) as mock_cmd:
+            res_empty = governor_instance_action(1, "restart_game")
+        self.assertFalse(res_empty["success"])
+        self.assertIn("No target Place ID", res_empty["error"])
+        mock_cmd.assert_not_called()
+
+        mm.CONFIG["mumu"]["instance_places"] = {"1": 98800969324557}
+        with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
+            mm,
+            "_run_cmd",
+            side_effect=[
+                MagicMock(returncode=0, stdout="", stderr=""),
+                MagicMock(returncode=1, stdout="", stderr="device offline"),
+            ],
+        ), patch.object(mm, "add_event"):
+            res_fail = governor_instance_action(1, "restart_game")
+        self.assertFalse(res_fail["success"])
+        self.assertIn("device offline", res_fail["error"])
+
+
+class TestGamePresetsAndPlacePriority(unittest.TestCase):
+    def setUp(self) -> None:
+        self._orig_mumu = copy.deepcopy(mm.CONFIG.get("mumu", {}))
+        self._orig_cache = dict(mm._place_name_cache)
+        self._orig_fail = dict(mm._place_name_fail_until)
+        self._orig_live = copy.deepcopy(mm._instance_live_presence)
+        self._orig_learned = dict(mm._instance_auto_learned_place)
+        mm.CONFIG["mumu"] = {
+            "install_path": "C:/Program Files/Netease/MuMuPlayer",
+            "process_names": ["MuMuNxDevice.exe", "MuMuNxMain.exe"],
+            "adb_base_port": 16384,
+            "adb_port_step": 32,
+            "max_instances": 10,
+            "auto_reconnect": True,
+            "instance_places": {},
+            "instance_usernames": {},
+            "game_presets": [],
+        }
+        mm._instance_live_presence.clear()
+        mm._instance_auto_learned_place.clear()
+
+    def tearDown(self) -> None:
+        mm.CONFIG["mumu"] = self._orig_mumu
+        mm._place_name_cache.clear()
+        mm._place_name_cache.update(self._orig_cache)
+        mm._place_name_fail_until.clear()
+        mm._place_name_fail_until.update(self._orig_fail)
+        mm._instance_live_presence.clear()
+        mm._instance_live_presence.update(self._orig_live)
+        mm._instance_auto_learned_place.clear()
+        mm._instance_auto_learned_place.update(self._orig_learned)
+
+    def test_preset_crud_validation_and_name_override(self) -> None:
+        with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+            added = add_game_preset(93898234979111, "Net a Fish")
+            self.assertEqual(added["preset"], {"place_id": 93898234979111, "name": "Net a Fish"})
+            self.assertEqual(len(get_game_presets()), 1)
+
+            with self.assertRaises(ValueError):
+                add_game_preset(93898234979111, "Duplicate")
+            for bad_id in (0, -5, True, "abc", None):
+                with self.assertRaises(ValueError):
+                    add_game_preset(bad_id, "Bad")
+
+            updated = update_game_preset(93898234979111, 93898234979111, "Net a Fish V2")
+            self.assertEqual(updated["preset"]["name"], "Net a Fish V2")
+            self.assertEqual(get_game_name_for_place_id(93898234979111), "Net a Fish V2")
+
+            with self.assertRaises(KeyError):
+                update_game_preset(111111, 222222, "Missing")
+
+            add_game_preset(98800969324557, "Storage Hunters")
+            with self.assertRaises(ValueError):
+                update_game_preset(93898234979111, 98800969324557, "Collision")
+
+            deleted = delete_game_preset(93898234979111)
+            self.assertEqual(deleted["deleted_place_id"], 93898234979111)
+            self.assertEqual(len(get_game_presets()), 1)
+            with self.assertRaises(KeyError):
+                delete_game_preset(93898234979111)
+
+    def test_configured_place_beats_live_presence_and_clear_works(self) -> None:
+        mm._instance_live_presence["1"] = {
+            "presence_status": "InGame",
+            "place_id": 93898234979111,
+            "game_name": "Net a Fish",
+        }
+        self.assertEqual(get_instance_place_id(1), 93898234979111)
+
+        with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+            set_instance_place_id(1, 98800969324557)
+        self.assertEqual(get_instance_place_id(1), 98800969324557)
+
+        fields = _build_device_game_fields(1, "1_Marple")
+        self.assertEqual(fields["configured_place_id"], 98800969324557)
+        self.assertEqual(fields["target_place_id"], 98800969324557)
+        self.assertEqual(fields["active_place_id"], 93898234979111)
+        self.assertEqual(fields["live_game_name"], "Net a Fish")
+        self.assertEqual(fields["target_game"], "Storage Hunters")
+
+        with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+            set_instance_place_id(1, 0)
+        self.assertNotIn("1", mm.CONFIG["mumu"]["instance_places"])
+        self.assertNotIn("1", mm._instance_auto_learned_place)
+        self.assertEqual(get_instance_place_id(1), 93898234979111)
+
+    def test_clear_username_clears_stale_live_presence(self) -> None:
+        mm.CONFIG["mumu"]["instance_usernames"]["1"] = "1_Marple"
+        mm._instance_live_presence["1"] = {
+            "username": "1_Marple",
+            "presence_status": "InGame",
+            "place_id": 93898234979111,
+            "game_name": "Net a Fish",
+        }
+        with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+            pres = set_instance_username(1, "")
+        self.assertEqual(pres, {})
+        self.assertNotIn("1", mm._instance_live_presence)
+        self.assertNotIn("1", mm.CONFIG["mumu"]["instance_usernames"])
 
 
 if __name__ == "__main__":

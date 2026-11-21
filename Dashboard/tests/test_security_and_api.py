@@ -156,6 +156,9 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
             for method, path, payload in [
                 ("POST", "/api/mumu/set_game", {"instance": 1, "place_id": 123}),
                 ("POST", "/api/mumu/set_username", {"instance": 1, "username": "abc"}),
+                ("POST", "/api/mumu/presets", {"place_id": 123, "name": "Test"}),
+                ("PUT", "/api/mumu/presets/123", {"place_id": 123, "name": "Renamed"}),
+                ("DELETE", "/api/mumu/presets/123", None),
                 ("PUT", "/api/alerts/config", {"notify_on_drift": False}),
                 ("POST", "/api/alerts/test", {}),
                 ("POST", "/api/alerts/purge", {"limit": 50}),
@@ -230,6 +233,9 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                     "governor_action",
                     "set_mumu_game",
                     "set_mumu_username",
+                    "add_game_preset",
+                    "update_game_preset",
+                    "delete_game_preset",
                     "set_auto_rejoin",
                     "trim_process",
                     "kill_process",
@@ -426,6 +432,139 @@ class TestSecurityAndApi(unittest.IsolatedAsyncioTestCase):
                         mock_rec.assert_not_called()
         finally:
             mm.CONFIG["mumu"] = orig_mumu
+            ws_mod.manager.disconnect(ws)
+
+    async def test_rest_and_ws_game_preset_crud_and_save_as_preset(self) -> None:
+        ws = _FakeWebSocket()
+        from backend.api import ws as ws_mod
+        from backend.services import mumu_monitor as mm
+
+        orig_mumu = copy.deepcopy(mm.CONFIG.get("mumu", {}))
+        orig_cache = dict(mm._place_name_cache)
+        orig_learned = dict(mm._instance_auto_learned_place)
+        mm.CONFIG["mumu"] = {
+            "install_path": "C:/Program Files/Netease/MuMuPlayer",
+            "process_names": ["MuMuNxDevice.exe", "MuMuNxMain.exe"],
+            "adb_base_port": 16384,
+            "adb_port_step": 32,
+            "max_instances": 10,
+            "auto_reconnect": True,
+            "instance_places": {},
+            "instance_usernames": {},
+            "game_presets": [],
+        }
+
+        await ws_mod.manager.connect(ws, True)
+        try:
+            with patch.object(auth_mod, "is_auth_enabled", return_value=True), patch.object(
+                auth_mod, "verify_session_token", return_value=True
+            ), patch.object(ws_mod, "is_auth_enabled", return_value=True), patch.object(
+                mm, "save_config"
+            ), patch.object(mm, "add_event"):
+                headers = {"X-Auth-Token": "valid-test-token"}
+
+                st_add, body_add = await _call_asgi(
+                    "POST",
+                    "/api/mumu/presets",
+                    {"place_id": 93898234979111, "name": "Net a Fish"},
+                    headers=headers,
+                )
+                self.assertEqual(st_add, 200)
+                self.assertTrue(body_add["ok"])
+                self.assertEqual(ws.sent[-1]["type"], "game_presets_updated")
+                self.assertEqual(ws.sent[-1]["action"], "added")
+
+                st_get, body_get = await _call_asgi("GET", "/api/mumu/presets")
+                self.assertEqual(st_get, 200)
+                self.assertEqual(
+                    body_get["presets"],
+                    [{"place_id": 93898234979111, "name": "Net a Fish"}],
+                )
+
+                st_dup, _ = await _call_asgi(
+                    "POST",
+                    "/api/mumu/presets",
+                    {"place_id": 93898234979111, "name": "Dup"},
+                    headers=headers,
+                )
+                self.assertEqual(st_dup, 400)
+
+                st_upd, body_upd = await _call_asgi(
+                    "PUT",
+                    "/api/mumu/presets/93898234979111",
+                    {"place_id": 93898234979111, "name": "Net a Fish Pro"},
+                    headers=headers,
+                )
+                self.assertEqual(st_upd, 200)
+                self.assertEqual(body_upd["preset"]["name"], "Net a Fish Pro")
+                self.assertEqual(ws.sent[-1]["action"], "updated")
+
+                st_del, body_del = await _call_asgi(
+                    "DELETE",
+                    "/api/mumu/presets/93898234979111",
+                    headers=headers,
+                )
+                self.assertEqual(st_del, 200)
+                self.assertEqual(body_del["deleted_place_id"], 93898234979111)
+                self.assertEqual(ws.sent[-1]["action"], "deleted")
+
+                st_missing, _ = await _call_asgi(
+                    "DELETE",
+                    "/api/mumu/presets/93898234979111",
+                    headers=headers,
+                )
+                self.assertEqual(st_missing, 404)
+
+                ws.sent.clear()
+                await handle_ws_command(
+                    ws,
+                    {
+                        "command": "set_mumu_game",
+                        "instance": 1,
+                        "place_id": 93898234979111,
+                        "save_as_preset": True,
+                        "preset_name": "Net a Fish!",
+                    },
+                )
+                msg_types = [m["type"] for m in ws.sent]
+                self.assertEqual(msg_types, ["game_presets_updated", "instance_game_updated"])
+                self.assertEqual(mm.CONFIG["mumu"]["instance_places"]["1"], 93898234979111)
+                self.assertEqual(
+                    mm.CONFIG["mumu"]["game_presets"],
+                    [{"place_id": 93898234979111, "name": "Net a Fish!"}],
+                )
+
+                ws.sent.clear()
+                await handle_ws_command(
+                    ws,
+                    {
+                        "command": "update_game_preset",
+                        "original_place_id": 93898234979111,
+                        "place_id": 77649408247578,
+                        "name": "Dungeon Quest",
+                    },
+                )
+                self.assertEqual(ws.sent[-1]["type"], "game_presets_updated")
+                self.assertEqual(ws.sent[-1]["action"], "updated")
+                self.assertEqual(
+                    mm.CONFIG["mumu"]["game_presets"],
+                    [{"place_id": 77649408247578, "name": "Dungeon Quest"}],
+                )
+
+                ws.sent.clear()
+                await handle_ws_command(
+                    ws,
+                    {"command": "delete_game_preset", "place_id": 77649408247578},
+                )
+                self.assertEqual(ws.sent[-1]["type"], "game_presets_updated")
+                self.assertEqual(ws.sent[-1]["action"], "deleted")
+                self.assertEqual(mm.CONFIG["mumu"]["game_presets"], [])
+        finally:
+            mm.CONFIG["mumu"] = orig_mumu
+            mm._place_name_cache.clear()
+            mm._place_name_cache.update(orig_cache)
+            mm._instance_auto_learned_place.clear()
+            mm._instance_auto_learned_place.update(orig_learned)
             ws_mod.manager.disconnect(ws)
 
 

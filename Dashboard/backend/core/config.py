@@ -84,6 +84,9 @@ DEFAULT_CONFIG: dict = {
         "max_instances": 10,
         "auto_reconnect": True,
         "instance_auto_rejoin": {},
+        "game_presets": [],
+        "instance_places": {},
+        "instance_usernames": {},
     },
     "metrics": {"update_interval_ms": 1000, "history_length": 60},
     "maintenance": {
@@ -248,6 +251,9 @@ def mask_config_for_client(cfg: dict | None = None) -> dict:
         mumu_cfg = safe_cfg.setdefault("mumu", {})
         mumu_cfg.setdefault("auto_reconnect", True)
         mumu_cfg.setdefault("instance_auto_rejoin", {})
+        mumu_cfg.setdefault("game_presets", [])
+        mumu_cfg.setdefault("instance_places", {})
+        mumu_cfg.setdefault("instance_usernames", {})
 
         tunnel_cfg = safe_cfg.setdefault("tunnel", {})
         raw_ngrok = str(tunnel_cfg.get("ngrok_authtoken", "") or "").strip()

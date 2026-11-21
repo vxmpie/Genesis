@@ -27,14 +27,16 @@ from backend.services.maintenance import (
     trim_vm_caches,
 )
 from backend.services.mumu_monitor import (
+    add_game_preset,
+    apply_instance_game_update,
     check_mumu_health,
+    delete_game_preset,
     get_adb_port_for_instance,
-    get_game_name_for_place_id,
     get_mumu_instances,
     governor_instance_action,
     set_auto_rejoin,
-    set_instance_place_id,
     set_instance_username,
+    update_game_preset,
 )
 from backend.services.telemetry import (
     flush_dns_cache,
@@ -371,35 +373,101 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
     elif cmd in ("set_instance_game", "set_mumu_game"):
         inst_id = data.get("instance", 1)
         try:
-            place_id = int(data.get("place_id", 98800969324557))
-        except (TypeError, ValueError):
-            await manager.send_to(ws, {"type": "error", "error": "Invalid place_id"})
+            res = await asyncio.to_thread(
+                apply_instance_game_update,
+                inst_id,
+                data.get("place_id"),
+                bool(data.get("save_as_preset")),
+                str(data.get("preset_name") or ""),
+            )
+        except ValueError as exc:
+            await manager.send_to(ws, {"type": "error", "error": str(exc)})
             return
-        ok = await asyncio.to_thread(set_instance_place_id, inst_id, place_id)
-        game_name = await asyncio.to_thread(get_game_name_for_place_id, place_id)
-        await manager.send_to(
-            ws,
-            {
-                "type": "instance_game_updated",
-                "instance": inst_id,
-                "place_id": place_id,
-                "game_name": game_name,
-                "ok": ok,
-            },
-        )
+
+        preset_res = res.pop("preset_res", None)
+        if preset_res is not None:
+            await broadcast_event(
+                {
+                    "type": "game_presets_updated",
+                    "action": "added" if preset_res["created"] else "updated",
+                    "preset": preset_res["preset"],
+                    "presets": preset_res["presets"],
+                    "config": mask_config_for_client(CONFIG),
+                }
+            )
+        await broadcast_event({"type": "instance_game_updated", **res})
 
     elif cmd in ("set_instance_username", "set_mumu_username"):
         inst_id = str(data.get("instance", 1))
         username = str(data.get("username", "")).strip()
         presence = await asyncio.to_thread(set_instance_username, inst_id, username)
-        await manager.send_to(
-            ws,
+        await broadcast_event(
             {
                 "type": "mumu_username_set",
                 "instance": inst_id,
                 "username": username,
                 "presence": presence,
-            },
+            }
+        )
+
+    elif cmd == "add_game_preset":
+        try:
+            res = await asyncio.to_thread(
+                add_game_preset,
+                data.get("place_id"),
+                str(data.get("name") or ""),
+                False,
+            )
+        except ValueError as exc:
+            await manager.send_to(ws, {"type": "error", "error": str(exc)})
+            return
+        await broadcast_event(
+            {
+                "type": "game_presets_updated",
+                "action": "added",
+                "preset": res["preset"],
+                "presets": res["presets"],
+                "config": mask_config_for_client(CONFIG),
+            }
+        )
+
+    elif cmd == "update_game_preset":
+        try:
+            res = await asyncio.to_thread(
+                update_game_preset,
+                data.get("original_place_id"),
+                data.get("place_id"),
+                str(data.get("name") or ""),
+            )
+        except (ValueError, KeyError) as exc:
+            msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
+            await manager.send_to(ws, {"type": "error", "error": msg})
+            return
+        await broadcast_event(
+            {
+                "type": "game_presets_updated",
+                "action": "updated",
+                "preset": res["preset"],
+                "presets": res["presets"],
+                "config": mask_config_for_client(CONFIG),
+            }
+        )
+
+    elif cmd == "delete_game_preset":
+        try:
+            res = await asyncio.to_thread(delete_game_preset, data.get("place_id"))
+        except (ValueError, KeyError) as exc:
+            msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
+            await manager.send_to(ws, {"type": "error", "error": msg})
+            return
+        await broadcast_event(
+            {
+                "type": "game_presets_updated",
+                "action": "deleted",
+                "deleted_place_id": res["deleted_place_id"],
+                "presets": res["presets"],
+                "config": mask_config_for_client(CONFIG),
+            }
         )
 
     elif cmd == "defender_status":

@@ -40,13 +40,17 @@ from backend.services.maintenance import (
     trim_vm_caches,
 )
 from backend.services.mumu_monitor import (
+    add_game_preset,
+    apply_instance_game_update,
+    delete_game_preset,
     get_game_name_for_place_id,
+    get_game_presets,
     get_mumu_instances,
     is_auto_rejoin_enabled,
     record_bot_heartbeat,
     recover_roblox_instance,
-    set_instance_place_id,
     set_instance_username,
+    update_game_preset,
 )
 from backend.services.telemetry import (
     flush_dns_cache,
@@ -152,6 +156,90 @@ async def api_auth_status(request: Request):
 
 
 # --- MuMu & Bot Endpoints ---
+@router.get("/api/mumu/presets")
+async def api_mumu_get_presets():
+    presets = await asyncio.to_thread(get_game_presets)
+    return JSONResponse({"presets": presets})
+
+
+@router.post("/api/mumu/presets")
+async def api_mumu_add_preset(request: Request, payload: dict):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    try:
+        res = await asyncio.to_thread(
+            add_game_preset,
+            payload.get("place_id"),
+            str(payload.get("name") or ""),
+            False,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    await broadcast_event(
+        {
+            "type": "game_presets_updated",
+            "action": "added",
+            "preset": res["preset"],
+            "presets": res["presets"],
+            "config": mask_config_for_client(CONFIG),
+        }
+    )
+    return JSONResponse({"ok": True, **res})
+
+
+@router.put("/api/mumu/presets/{original_place_id}")
+async def api_mumu_update_preset(request: Request, original_place_id: str, payload: dict):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    raw_new_pid = payload["place_id"] if "place_id" in payload else original_place_id
+    try:
+        res = await asyncio.to_thread(
+            update_game_preset,
+            original_place_id,
+            raw_new_pid,
+            str(payload.get("name") or ""),
+        )
+    except KeyError as exc:
+        return JSONResponse({"error": exc.args[0] if exc.args else "Game preset not found"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    await broadcast_event(
+        {
+            "type": "game_presets_updated",
+            "action": "updated",
+            "preset": res["preset"],
+            "presets": res["presets"],
+            "config": mask_config_for_client(CONFIG),
+        }
+    )
+    return JSONResponse({"ok": True, **res})
+
+
+@router.delete("/api/mumu/presets/{place_id}")
+async def api_mumu_delete_preset(request: Request, place_id: str):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    try:
+        res = await asyncio.to_thread(delete_game_preset, place_id)
+    except KeyError as exc:
+        return JSONResponse({"error": exc.args[0] if exc.args else "Game preset not found"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    await broadcast_event(
+        {
+            "type": "game_presets_updated",
+            "action": "deleted",
+            "deleted_place_id": res["deleted_place_id"],
+            "presets": res["presets"],
+            "config": mask_config_for_client(CONFIG),
+        }
+    )
+    return JSONResponse({"ok": True, **res})
+
+
 @router.post("/api/mumu/set_game")
 async def api_mumu_set_game(request: Request, payload: dict):
     auth_err = _require_auth(request)
@@ -159,19 +247,29 @@ async def api_mumu_set_game(request: Request, payload: dict):
         return auth_err
     inst_id = payload.get("instance", 1)
     try:
-        place_id = int(payload.get("place_id", 98800969324557))
-    except (TypeError, ValueError):
-        return JSONResponse({"error": "Invalid place_id"}, status_code=400)
-    ok = await asyncio.to_thread(set_instance_place_id, inst_id, place_id)
-    game_name = await asyncio.to_thread(get_game_name_for_place_id, place_id)
-    return JSONResponse(
-        {
-            "ok": ok,
-            "instance": inst_id,
-            "place_id": place_id,
-            "game_name": game_name,
-        }
-    )
+        res = await asyncio.to_thread(
+            apply_instance_game_update,
+            inst_id,
+            payload.get("place_id"),
+            bool(payload.get("save_as_preset")),
+            str(payload.get("preset_name") or ""),
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    preset_res = res.pop("preset_res", None)
+    if preset_res is not None:
+        await broadcast_event(
+            {
+                "type": "game_presets_updated",
+                "action": "added" if preset_res["created"] else "updated",
+                "preset": preset_res["preset"],
+                "presets": preset_res["presets"],
+                "config": mask_config_for_client(CONFIG),
+            }
+        )
+    await broadcast_event({"type": "instance_game_updated", **res})
+    return JSONResponse(res)
 
 
 @router.post("/api/mumu/set_username")
@@ -182,14 +280,13 @@ async def api_mumu_set_username(request: Request, payload: dict):
     inst_id = str(payload.get("instance", 1))
     username = str(payload.get("username", "")).strip()
     presence = await asyncio.to_thread(set_instance_username, inst_id, username)
-    return JSONResponse(
-        {
-            "ok": True,
-            "instance": inst_id,
-            "username": username,
-            "presence": presence,
-        }
-    )
+    event_payload = {
+        "instance": inst_id,
+        "username": username,
+        "presence": presence,
+    }
+    await broadcast_event({"type": "mumu_username_set", **event_payload})
+    return JSONResponse({"ok": True, **event_payload})
 
 
 @router.post("/api/mumu/trim-instance")

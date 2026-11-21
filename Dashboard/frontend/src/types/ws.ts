@@ -13,6 +13,7 @@ import type {
   DeepCleanPreviewItem,
   DefenderStatus,
   EventLogEntry,
+  GamePreset,
   GovernorAction,
   GovernorResult,
   GrowthSnapshot,
@@ -122,6 +123,15 @@ export type WsServerMessage =
       place_id: number;
       game_name: string;
       ok: boolean;
+      instance_places?: Record<string, number>;
+    }
+  | {
+      type: 'game_presets_updated';
+      action?: 'added' | 'updated' | 'deleted';
+      preset?: GamePreset;
+      deleted_place_id?: number;
+      presets: GamePreset[];
+      config?: ClientConfig;
     }
   | {
       type: 'mumu_username_set';
@@ -159,7 +169,15 @@ export interface WsCommandMap {
   vm_trim_cache: { port: number };
   check_hardening: Record<string, never>;
   refresh_hardening: Record<string, never>;
-  set_mumu_game: { instance: number | string; place_id: number };
+  set_mumu_game: {
+    instance: number | string;
+    place_id: number;
+    save_as_preset?: boolean;
+    preset_name?: string;
+  };
+  add_game_preset: { place_id: number; name?: string };
+  update_game_preset: { original_place_id: number; place_id: number; name: string };
+  delete_game_preset: { place_id: number };
   set_mumu_username: { instance: number | string; username: string };
   set_auto_rejoin: { instance: number | null; enabled: boolean };
   defender_status: Record<string, never>;
@@ -217,6 +235,7 @@ const KNOWN_WS_TYPES: ReadonlySet<string> = new Set([
   'vm_trim_result',
   'hardening_status',
   'instance_game_updated',
+  'game_presets_updated',
   'mumu_username_set',
   'auto_rejoin_updated',
   'defender_status',

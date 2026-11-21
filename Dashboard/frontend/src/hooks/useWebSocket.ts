@@ -194,14 +194,39 @@ export function useWebSocket() {
         store.setObservatory(msg.data);
         break;
       case 'instance_game_updated':
-        store.addToast(
-          msg.ok ? 'success' : 'error',
-          msg.ok
-            ? `Instance #${msg.instance} target set to ${msg.game_name}`
-            : `Failed to update Instance #${msg.instance} target`
-        );
+        store.clearPendingPrefix('mumuGame:');
+        if (msg.ok) {
+          store.applyInstanceGameUpdate(
+            msg.instance,
+            msg.place_id,
+            msg.game_name,
+            msg.instance_places
+          );
+          store.addToast(
+            'success',
+            msg.place_id === 0
+              ? `Cleared target Place ID for Instance #${msg.instance}`
+              : `Instance #${msg.instance} target set to ${msg.game_name}`
+          );
+        } else {
+          store.addToast('error', `Failed to update Instance #${msg.instance} target`);
+        }
+        break;
+      case 'game_presets_updated':
+        store.clearPendingPrefix('preset:');
+        store.applyGamePresetsUpdate(msg.presets, msg.config);
+        if (msg.action === 'added' && msg.preset) {
+          store.addToast('success', `Saved preset: ${msg.preset.name} (${msg.preset.place_id})`);
+        } else if (msg.action === 'updated' && msg.preset) {
+          store.addToast('success', `Updated preset: ${msg.preset.name} (${msg.preset.place_id})`);
+        } else if (msg.action === 'deleted') {
+          store.addToast('system', `Removed preset (ID: ${msg.deleted_place_id ?? ''})`);
+        } else {
+          store.addToast('system', 'Game presets updated');
+        }
         break;
       case 'mumu_username_set':
+        store.applyInstanceUsernameUpdate(msg.instance, msg.username, msg.presence);
         store.addToast(
           'system',
           msg.username

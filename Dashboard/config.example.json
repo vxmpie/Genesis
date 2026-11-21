@@ -34,7 +34,8 @@
     "adb_port_step": 32,
     "max_instances": 10,
     "auto_reconnect": true,
-    "instance_auto_rejoin": {}
+    "instance_auto_rejoin": {},
+    "game_presets": []
   },
   "metrics": {
     "update_interval_ms": 1000,

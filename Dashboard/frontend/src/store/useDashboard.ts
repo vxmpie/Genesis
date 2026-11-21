@@ -14,11 +14,13 @@ import type {
   DeepCleanPreviewItem,
   DefenderStatus,
   EventLogEntry,
+  GamePreset,
   GrowthSnapshot,
   HardeningStatus,
   MuMuDevice,
   MuMuHealth,
   NetworkObservatory,
+  RobloxLivePresence,
   SessionSummary,
   ShaderCacheInfo,
   SystemMetrics,
@@ -246,6 +248,18 @@ interface DashboardState {
   pruneStalePendingOps: (maxAgeMs?: number) => void;
   setLastDeepCleanResult: (res: DeepCleanExecuteResult | null) => void;
   applyAutoRejoinUpdate: (update: AutoRejoinUpdateResult) => void;
+  applyGamePresetsUpdate: (presets: GamePreset[], config?: ClientConfig) => void;
+  applyInstanceGameUpdate: (
+    instance: number | string,
+    placeId: number,
+    gameName: string,
+    instancePlaces?: Record<string, number>
+  ) => void;
+  applyInstanceUsernameUpdate: (
+    instance: string,
+    username: string,
+    presence?: RobloxLivePresence
+  ) => void;
   setLastAlertTestResult: (res: AlertTestResult | null) => void;
   setLastAlertPurgeResult: (res: AlertsPurgeResult | null) => void;
   markAlertsSaved: () => void;
@@ -492,6 +506,140 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         : s.mumu;
 
       return { config: nextConfig, mumu: nextMumu };
+    }),
+  applyGamePresetsUpdate: (presets, config) =>
+    set((s) => {
+      const nextPresets = [...presets];
+      const nextConfig = config
+        ? config
+        : s.config
+        ? {
+            ...s.config,
+            mumu: {
+              ...s.config.mumu,
+              game_presets: nextPresets,
+            },
+          }
+        : s.config;
+      const nextMumu = s.mumu
+        ? {
+            ...s.mumu,
+            game_presets: nextPresets,
+          }
+        : s.mumu;
+      return { config: nextConfig, mumu: nextMumu };
+    }),
+  applyInstanceGameUpdate: (instance, placeId, gameName, instancePlaces) =>
+    set((s) => {
+      const instKey = String(instance);
+      const basePlaces = {
+        ...(s.mumu?.instance_places ?? s.config?.mumu.instance_places ?? {}),
+      };
+      if (placeId > 0) {
+        basePlaces[instKey] = placeId;
+      } else {
+        delete basePlaces[instKey];
+      }
+      const nextPlaces = instancePlaces ? { ...instancePlaces } : basePlaces;
+
+      const nextConfig = s.config
+        ? {
+            ...s.config,
+            mumu: {
+              ...s.config.mumu,
+              instance_places: nextPlaces,
+            },
+          }
+        : s.config;
+
+      const mapDevice = (dev: MuMuDevice): MuMuDevice => {
+        if (String(dev.index) !== instKey) return dev;
+        const resolvedName = gameName || (placeId > 0 ? `Place ${placeId}` : 'Unassigned');
+        const nextActiveGame =
+          dev.presence_status === 'InGame' && dev.live_game_name
+            ? dev.live_game_name
+            : resolvedName;
+        return {
+          ...dev,
+          configured_place_id: placeId,
+          target_place_id: placeId,
+          place_id: placeId,
+          target_game: resolvedName,
+          target_game_name: resolvedName,
+          active_game: nextActiveGame,
+        };
+      };
+
+      const nextMumu = s.mumu
+        ? {
+            ...s.mumu,
+            instance_places: nextPlaces,
+            devices: s.mumu.devices.map(mapDevice),
+          }
+        : s.mumu;
+
+      const nextEditing = s.editingDevice ? mapDevice(s.editingDevice) : null;
+      return { config: nextConfig, mumu: nextMumu, editingDevice: nextEditing };
+    }),
+  applyInstanceUsernameUpdate: (instance, username, presence) =>
+    set((s) => {
+      const instKey = String(instance);
+      const nextUsernames = { ...(s.config?.mumu.instance_usernames ?? {}) };
+      if (username) {
+        nextUsernames[instKey] = username;
+      } else {
+        delete nextUsernames[instKey];
+      }
+
+      const nextConfig = s.config
+        ? {
+            ...s.config,
+            mumu: {
+              ...s.config.mumu,
+              instance_usernames: nextUsernames,
+            },
+          }
+        : s.config;
+
+      const mapDevice = (dev: MuMuDevice): MuMuDevice => {
+        if (String(dev.index) !== instKey) return dev;
+        if (!username) {
+          return {
+            ...dev,
+            username: '',
+            presence_status: 'Manual',
+            active_place_id: null,
+            live_game_name: null,
+            active_game: dev.target_game || 'Unassigned',
+          };
+        }
+        const status = presence?.presence_status || 'Offline';
+        const isInGame = status === 'InGame';
+        const livePid = isInGame && presence?.place_id ? presence.place_id : null;
+        const rawLiveGame = (presence?.game_name || '').trim();
+        const liveGameName =
+          isInGame && rawLiveGame && !['roblox', 'website', 'experience'].includes(rawLiveGame.toLowerCase())
+            ? rawLiveGame
+            : null;
+        return {
+          ...dev,
+          username,
+          presence_status: status,
+          active_place_id: livePid,
+          live_game_name: liveGameName,
+          active_game: liveGameName || dev.target_game || 'Unassigned',
+        };
+      };
+
+      const nextMumu = s.mumu
+        ? {
+            ...s.mumu,
+            devices: s.mumu.devices.map(mapDevice),
+          }
+        : s.mumu;
+
+      const nextEditing = s.editingDevice ? mapDevice(s.editingDevice) : null;
+      return { config: nextConfig, mumu: nextMumu, editingDevice: nextEditing };
     }),
   setLastAlertTestResult: (lastAlertTestResult) => set({ lastAlertTestResult }),
   setLastAlertPurgeResult: (lastAlertPurgeResult) => set({ lastAlertPurgeResult }),

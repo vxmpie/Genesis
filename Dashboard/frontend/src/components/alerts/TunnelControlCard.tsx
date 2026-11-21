@@ -179,27 +179,38 @@ export const TunnelControlCard: React.FC<TunnelControlCardProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-ops-border pt-2">
-            <span className="text-ops-secondary">ngrok Authtoken</span>
-            <span
-              className={`font-mono ${
-                config?.tunnel.ngrok_authtoken_configured ? 'text-ops-ok' : 'text-ops-muted'
-              }`}
-            >
-              {config
-                ? config.tunnel.ngrok_authtoken_configured
-                  ? 'Configured (Masked)'
-                  : 'Not Set'
-                : '—'}
-            </span>
-          </div>
+          {config?.tunnel.provider === 'tailscale' ? (
+            <div className="flex items-center justify-between gap-2 border-t border-ops-border pt-2">
+              <span className="text-ops-secondary">Tailscale URL</span>
+              <span className="font-mono text-ops-text truncate max-w-[200px]">
+                {config.tunnel.tailscale_url || tunnel?.tunnel_url || 'Auto-detect (tailscale serve)'}
+              </span>
+            </div>
+          ) : config?.tunnel.provider === 'cloudflared' || config?.tunnel.provider === 'local_only' ? null : (
+            <>
+              <div className="flex items-center justify-between gap-2 border-t border-ops-border pt-2">
+                <span className="text-ops-secondary">ngrok Authtoken</span>
+                <span
+                  className={`font-mono ${
+                    config?.tunnel.ngrok_authtoken_configured ? 'text-ops-ok' : 'text-ops-muted'
+                  }`}
+                >
+                  {config
+                    ? config.tunnel.ngrok_authtoken_configured
+                      ? 'Configured (Masked)'
+                      : 'Not Set'
+                    : '—'}
+                </span>
+              </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-ops-border pt-2">
-            <span className="text-ops-secondary">ngrok Domain</span>
-            <span className="font-mono text-ops-text truncate max-w-[180px]">
-              {config?.tunnel.ngrok_domain || '—'}
-            </span>
-          </div>
+              <div className="flex items-center justify-between gap-2 border-t border-ops-border pt-2">
+                <span className="text-ops-secondary">ngrok Domain</span>
+                <span className="font-mono text-ops-text truncate max-w-[180px]">
+                  {config?.tunnel.ngrok_domain || '—'}
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Last Error Banner */}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BellRing,
@@ -63,11 +63,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => 
   const [search, setSearch] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
 
-  const closePalette = () => {
+  const closePalette = useCallback(() => {
     setOpen(false);
     setSearch('');
     setSelectedIdx(0);
-  };
+  }, [setOpen]);
 
   const commands: CommandItem[] = useMemo(
     () => [
@@ -210,23 +210,26 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => 
     );
   }, [commands, search]);
 
-  const executeItem = (item: CommandItem) => {
-    setOpen(false);
-    setSearch('');
-    const navMap: Partial<Record<PaletteActionId, WorkspaceView>> = {
-      nav_overview: 'overview',
-      nav_instances: 'instances',
-      nav_system: 'system',
-      nav_telemetry: 'telemetry',
-      nav_alerts: 'alerts',
-    };
-    const targetView = navMap[item.id];
-    if (targetView) {
-      setActiveView(targetView);
-      return;
-    }
-    onExecute(item.id);
-  };
+  const executeItem = useCallback(
+    (item: CommandItem) => {
+      setOpen(false);
+      setSearch('');
+      const navMap: Partial<Record<PaletteActionId, WorkspaceView>> = {
+        nav_overview: 'overview',
+        nav_instances: 'instances',
+        nav_system: 'system',
+        nav_telemetry: 'telemetry',
+        nav_alerts: 'alerts',
+      };
+      const targetView = navMap[item.id];
+      if (targetView) {
+        setActiveView(targetView);
+        return;
+      }
+      onExecute(item.id);
+    },
+    [onExecute, setActiveView, setOpen]
+  );
 
   const clampedIdx = filtered.length > 0 ? Math.min(selectedIdx, filtered.length - 1) : 0;
 
@@ -264,7 +267,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onExecute }) => 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+  }, [isOpen, filtered, clampedIdx, closePalette, executeItem, setOpen]);
 
   if (!isOpen) return null;
 

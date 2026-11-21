@@ -59,7 +59,15 @@ export const MuMuFleetTable: React.FC<MuMuFleetTableProps> = ({
 
   const renderTargetCell = (dev: MuMuDevice, rejoinOff: boolean) => {
     const tone = getPresenceTone(dev.presence_status);
-    const targetName = dev.active_game || dev.target_game || 'Unassigned';
+    const liveName =
+      dev.presence_status === 'InGame' && dev.live_game_name ? dev.live_game_name : null;
+    const targetName = liveName || dev.target_game || dev.active_game || 'Unassigned';
+    const configuredId = dev.configured_place_id ?? 0;
+    const displayTargetId = configuredId > 0 ? configuredId : dev.target_place_id;
+    const hasLiveDifferentFromTarget =
+      typeof dev.active_place_id === 'number' &&
+      dev.active_place_id > 0 &&
+      dev.active_place_id !== displayTargetId;
 
     return (
       <div className="flex flex-col items-start gap-1 min-w-0">
@@ -92,14 +100,21 @@ export const MuMuFleetTable: React.FC<MuMuFleetTableProps> = ({
               </StatusBadge>
               {rejoinOff && <StatusBadge tone="muted">Rejoin off</StatusBadge>}
             </div>
-            <div className="flex items-center gap-2 text-[10px] font-mono text-ops-muted mt-0.5">
+            <div className="flex items-center flex-wrap gap-2 text-[10px] font-mono text-ops-muted mt-0.5">
               {rejoinOff && <span>Target (inactive)</span>}
               {dev.username ? (
                 <span className="truncate">@{dev.username}</span>
               ) : (
                 <span>No user bound</span>
               )}
-              {dev.target_place_id > 0 && <span className="num">ID:{dev.target_place_id}</span>}
+              {configuredId > 0 ? (
+                <span className="num">Target:{configuredId}</span>
+              ) : dev.target_place_id > 0 ? (
+                <span className="num">ID:{dev.target_place_id}</span>
+              ) : null}
+              {hasLiveDifferentFromTarget && (
+                <span className="num text-ops-telemetry">Live:{dev.active_place_id}</span>
+              )}
             </div>
           </div>
           <Edit3 className="w-3 h-3 text-ops-muted group-hover:text-ops-text shrink-0 ml-1" />

@@ -141,25 +141,32 @@ export const AutoBoostCard: React.FC<AutoBoostCardProps> = ({
             </div>
 
             {/* Interval Selector */}
-            {autoBoost.mode === 'scheduled' && (
-              <div className="px-3 py-2.5 flex items-center justify-between gap-2">
-                <label htmlFor="autoboost-interval-select" className="font-medium text-ops-text">
-                  Schedule Interval
-                </label>
-                <select
-                  id="autoboost-interval-select"
-                  disabled={intervalPending}
-                  value={autoBoost.interval_minutes}
-                  onChange={(e) => onSetInterval(Number(e.target.value))}
-                  className="ops-input num h-8 px-2.5 text-xs font-mono"
-                >
-                  <option value={15}>15 min</option>
-                  <option value={30}>30 min</option>
-                  <option value={60}>60 min</option>
-                  <option value={120}>120 min</option>
-                </select>
-              </div>
-            )}
+            {autoBoost.mode === 'scheduled' && (() => {
+              const baseIntervals = [10, 15, 30, 60, 120];
+              const intervalOptions = baseIntervals.includes(autoBoost.interval_minutes)
+                ? baseIntervals
+                : [...baseIntervals, autoBoost.interval_minutes].sort((a, b) => a - b);
+              return (
+                <div className="px-3 py-2.5 flex items-center justify-between gap-2">
+                  <label htmlFor="autoboost-interval-select" className="font-medium text-ops-text">
+                    Schedule Interval
+                  </label>
+                  <select
+                    id="autoboost-interval-select"
+                    disabled={intervalPending}
+                    value={autoBoost.interval_minutes}
+                    onChange={(e) => onSetInterval(Number(e.target.value))}
+                    className="ops-input num h-8 px-2.5 text-xs font-mono"
+                  >
+                    {intervalOptions.map((mins) => (
+                      <option key={mins} value={mins}>
+                        {mins} min
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
           </div>
         )}
 

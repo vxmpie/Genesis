@@ -4,12 +4,16 @@ import { useDashboardStore } from '../../store/useDashboard';
 import { formatGb, formatMb } from '../../lib/format';
 import type { GovernorAction } from '../../types/dashboard';
 import { StatusBadge } from '../ui';
+import { GamePresetsCard } from './GamePresetsCard';
 import { MuMuFleetTable } from './MuMuFleetTable';
 import { VmDiskSentinelCard } from './VmDiskSentinelCard';
 
 export interface InstancesViewProps {
   onGovernorAction: (instance: number, action: GovernorAction) => void;
   onToggleAutoRejoin: (instance: number | null, enabled: boolean) => void;
+  onAddPreset: (placeId: number, name: string) => void;
+  onUpdatePreset: (originalPlaceId: number, placeId: number, name: string) => void;
+  onDeletePreset: (placeId: number) => void;
   onRefreshVmDisk: () => void;
   onTrimVmCache: (port: number) => void;
 }
@@ -17,6 +21,9 @@ export interface InstancesViewProps {
 export const InstancesView: React.FC<InstancesViewProps> = ({
   onGovernorAction,
   onToggleAutoRejoin,
+  onAddPreset,
+  onUpdatePreset,
+  onDeletePreset,
   onRefreshVmDisk,
   onTrimVmCache,
 }) => {
@@ -172,6 +179,12 @@ export const InstancesView: React.FC<InstancesViewProps> = ({
       <MuMuFleetTable
         onGovernorAction={onGovernorAction}
         onToggleAutoRejoin={onToggleAutoRejoin}
+      />
+
+      <GamePresetsCard
+        onAddPreset={onAddPreset}
+        onUpdatePreset={onUpdatePreset}
+        onDeletePreset={onDeletePreset}
       />
 
       <VmDiskSentinelCard

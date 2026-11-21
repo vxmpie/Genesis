@@ -570,12 +570,7 @@ def _sample_all_processes_sync() -> None:
             device_idx = 0
             adb_port: int | None = None
             auto_rejoin_val = True
-            target_place_id = None
-            target_game_name = None
             saved_username = ""
-            live_game = None
-            live_place = None
-            presence_status = "Unknown"
 
             if is_device:
                 mgr_info = mgr_by_pid.get(pid)
@@ -591,18 +586,22 @@ def _sample_all_processes_sync() -> None:
                     step_p = int(mumu_snap.get("adb_port_step", 32))
                     adb_port = base_p + ((max(1, device_idx) - 1) * step_p)
                 auto_rejoin_val = is_auto_rejoin_enabled(device_idx, f"127.0.0.1:{adb_port}")
-                saved_username = CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(device_idx), "")
-                live_pres = _instance_live_presence.get(str(device_idx)) or {}
-                live_game = live_pres.get("game_name")
-                live_place = live_pres.get("place_id")
-                presence_status = live_pres.get(
-                    "presence_status", "Offline" if saved_username else "Manual"
+                saved_username = str(
+                    CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(device_idx), "") or ""
                 )
-                target_place_id = get_instance_place_id(device_idx)
-                target_game_name = get_game_name_for_place_id(target_place_id)
-
-            active_game_display = live_game or target_game_name or "Unassigned"
-            resolved_place = live_place or target_place_id or 0
+                game_fields = _build_device_game_fields(device_idx, saved_username)
+            else:
+                game_fields = {
+                    "presence_status": "Unknown",
+                    "active_game": "Unassigned",
+                    "active_place_id": None,
+                    "live_game_name": None,
+                    "place_id": 0,
+                    "target_place_id": 0,
+                    "configured_place_id": 0,
+                    "target_game": "Unassigned",
+                    "target_game_name": "Unassigned",
+                }
 
             entry: dict = {
                 "pid": pid,
@@ -617,13 +616,7 @@ def _sample_all_processes_sync() -> None:
                 "instance_index": device_idx if is_device else 0,
                 "type": "Emulator" if is_device else "Launcher",
                 "username": saved_username,
-                "active_game": active_game_display,
-                "active_place_id": resolved_place or None,
-                "presence_status": presence_status,
-                "place_id": resolved_place,
-                "target_place_id": resolved_place,
-                "target_game": active_game_display,
-                "target_game_name": active_game_display,
+                **game_fields,
             }
             if is_device:
                 entry["adb_port"] = adb_port
@@ -663,7 +656,7 @@ def _sample_all_processes_sync() -> None:
     with CONFIG_LOCK:
         mumu_cfg = CONFIG.get("mumu", {})
         instance_places_snap = copy.deepcopy(mumu_cfg.get("instance_places", {}))
-        game_presets_snap = copy.deepcopy(mumu_cfg.get("game_presets", []))
+        game_presets_snap = _normalize_game_presets(mumu_cfg.get("game_presets", []))
         auto_rejoin_global = bool(mumu_cfg.get("auto_reconnect", True))
         raw_rejoin_flags = mumu_cfg.get("instance_auto_rejoin", {})
         instance_auto_rejoin_snap = (
@@ -775,22 +768,100 @@ _place_name_cache: dict[int, str] = {
     17017769292: "Anime Defenders",
     2753915549: "Blox Fruits",
 }
+_place_name_fail_until: dict[int, float] = {}
 _user_id_cache: dict[str, int] = {}
 _instance_live_presence: dict[str, dict] = {}
 _bot_heartbeats: dict[str, dict] = {}
 _mumu_consecutive_idle: dict[str, int] = {}
 
 
-def resolve_roblox_game_name_sync(place_id: int) -> str:
+def validate_place_id(raw: object, allow_zero: bool = False) -> int:
+    msg = (
+        "place_id must be a non-negative integer"
+        if allow_zero
+        else "place_id must be a positive integer"
+    )
+    if raw is None or isinstance(raw, bool):
+        raise ValueError(msg)
+    if isinstance(raw, float):
+        if not raw.is_integer():
+            raise ValueError(msg)
+        num = int(raw)
+    elif isinstance(raw, int):
+        num = raw
+    else:
+        text = str(raw).strip()
+        if not re.fullmatch(r"-?\d+", text):
+            raise ValueError(msg)
+        num = int(text)
+
+    if allow_zero:
+        if num < 0:
+            raise ValueError(msg)
+    elif num <= 0:
+        raise ValueError(msg)
+    return num
+
+
+_validate_place_id = validate_place_id
+
+
+def _normalize_game_presets(raw_presets: object) -> list[dict]:
+    if not isinstance(raw_presets, list):
+        return []
+    normalized: list[dict] = []
+    seen_ids: set[int] = set()
+    for item in raw_presets:
+        if not isinstance(item, dict):
+            continue
+        try:
+            pid = validate_place_id(item.get("place_id"), allow_zero=False)
+        except ValueError:
+            continue
+        if pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+        clean_name = str(item.get("name") or "").strip()[:100]
+        normalized.append({"place_id": pid, "name": clean_name or f"Place {pid}"})
+    return normalized
+
+
+def _find_preset_name(place_id: int) -> str | None:
+    if not place_id or place_id <= 0:
+        return None
+    with CONFIG_LOCK:
+        raw_presets = CONFIG.get("mumu", {}).get("game_presets", [])
+        if not isinstance(raw_presets, list):
+            return None
+        for item in raw_presets:
+            if not isinstance(item, dict):
+                continue
+            try:
+                pid = int(item.get("place_id", 0))
+            except (TypeError, ValueError):
+                continue
+            if pid == place_id:
+                name = str(item.get("name") or "").strip()
+                if name:
+                    return name
+    return None
+
+
+def resolve_roblox_game_name_sync(
+    place_id: int,
+    use_presets: bool = True,
+    use_cache: bool = True,
+) -> str:
     if not place_id or place_id <= 0:
         return "Unassigned"
-    if place_id in _place_name_cache:
+    if use_presets:
+        preset_name = _find_preset_name(place_id)
+        if preset_name:
+            return preset_name
+    if use_cache and place_id in _place_name_cache:
         return _place_name_cache[place_id]
-
-    for p in CONFIG.get("mumu", {}).get("game_presets", []):
-        if p.get("place_id") == place_id:
-            _place_name_cache[place_id] = p.get("name", f"Place {place_id}")
-            return _place_name_cache[place_id]
+    if time.time() < _place_name_fail_until.get(place_id, 0.0):
+        return f"Place {place_id}"
 
     try:
         u_url = f"https://apis.roblox.com/universes/v1/places/{place_id}/universe"
@@ -799,6 +870,7 @@ def resolve_roblox_game_name_sync(place_id: int) -> str:
             u_data = json.loads(resp.read().decode("utf-8"))
             universe_id = u_data.get("universeId")
         if not universe_id:
+            _place_name_fail_until[place_id] = time.time() + 60.0
             return f"Place {place_id}"
 
         g_url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
@@ -808,11 +880,14 @@ def resolve_roblox_game_name_sync(place_id: int) -> str:
             items = g_data.get("data", [])
             if items and items[0].get("name"):
                 raw_name = items[0].get("name", "").strip()
-                _place_name_cache[place_id] = raw_name
-                return raw_name
+                if raw_name:
+                    _place_name_fail_until.pop(place_id, None)
+                    _place_name_cache[place_id] = raw_name
+                    return raw_name
     except Exception:
         pass
 
+    _place_name_fail_until[place_id] = time.time() + 60.0
     return f"Place {place_id}"
 
 
@@ -872,17 +947,220 @@ def get_roblox_user_presence_sync(user_id: int) -> dict | None:
     return None
 
 
+def _build_device_game_fields(device_idx: int, saved_username: str) -> dict:
+    configured_place_id = get_configured_instance_place_id(device_idx)
+    target_place_id = get_instance_place_id(device_idx)
+    target_game_name = get_game_name_for_place_id(target_place_id)
+    live_pres = _instance_live_presence.get(str(device_idx)) or {}
+    presence_status = live_pres.get("presence_status", "Offline" if saved_username else "Manual")
+    live_is_in_game = presence_status == "InGame"
+    raw_live_place = live_pres.get("place_id")
+    try:
+        parsed_live_place = int(raw_live_place) if raw_live_place else 0
+    except (TypeError, ValueError):
+        parsed_live_place = 0
+    live_place_id = parsed_live_place if (live_is_in_game and parsed_live_place > 0) else None
+    raw_live_game = str(live_pres.get("game_name") or "").strip()
+    live_game_name = (
+        raw_live_game
+        if (
+            live_is_in_game
+            and raw_live_game
+            and raw_live_game.lower() not in ("roblox", "website", "experience")
+        )
+        else (get_game_name_for_place_id(live_place_id) if live_place_id else None)
+    )
+    return {
+        "presence_status": presence_status,
+        "active_game": live_game_name or target_game_name or "Unassigned",
+        "active_place_id": live_place_id,
+        "live_game_name": live_game_name,
+        "place_id": target_place_id,
+        "target_place_id": target_place_id,
+        "configured_place_id": configured_place_id,
+        "target_game": target_game_name,
+        "target_game_name": target_game_name,
+    }
+
+
+def _sync_mumu_cache_from_config() -> None:
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.get("mumu", {})
+        instance_places_snap = copy.deepcopy(mumu_cfg.get("instance_places", {}))
+        game_presets_snap = _normalize_game_presets(mumu_cfg.get("game_presets", []))
+        raw_usernames = mumu_cfg.get("instance_usernames", {})
+        usernames_snap = copy.deepcopy(raw_usernames) if isinstance(raw_usernames, dict) else {}
+        auto_rejoin_global = bool(mumu_cfg.get("auto_reconnect", True))
+        raw_rejoin_flags = mumu_cfg.get("instance_auto_rejoin", {})
+        instance_auto_rejoin_snap = (
+            copy.deepcopy(raw_rejoin_flags) if isinstance(raw_rejoin_flags, dict) else {}
+        )
+
+    with _process_sampler_lock:
+        indices: set[int] = set()
+        for dev in _cached_mumu_health.get("devices", []):
+            raw_idx = dev.get("index") or dev.get("instance_index")
+            if isinstance(raw_idx, int) and raw_idx > 0:
+                indices.add(raw_idx)
+        for inst in _cached_mumu_instances:
+            if inst.get("type") == "Emulator":
+                raw_idx = inst.get("index") or inst.get("instance_index")
+                if isinstance(raw_idx, int) and raw_idx > 0:
+                    indices.add(raw_idx)
+
+    fields_by_idx = {
+        idx: _build_device_game_fields(idx, str(usernames_snap.get(str(idx), "") or ""))
+        for idx in indices
+    }
+
+    with _process_sampler_lock:
+        _cached_mumu_health["instance_places"] = copy.deepcopy(instance_places_snap)
+        _cached_mumu_health["game_presets"] = copy.deepcopy(game_presets_snap)
+        _cached_mumu_health["auto_rejoin_global"] = auto_rejoin_global
+        _cached_mumu_health["instance_auto_rejoin"] = copy.deepcopy(instance_auto_rejoin_snap)
+
+        for dev in _cached_mumu_health.get("devices", []):
+            dev_idx = dev.get("index") or dev.get("instance_index")
+            if isinstance(dev_idx, int) and dev_idx in fields_by_idx:
+                dev["username"] = str(usernames_snap.get(str(dev_idx), "") or "")
+                dev["auto_rejoin"] = auto_rejoin_global and bool(
+                    instance_auto_rejoin_snap.get(str(dev_idx), True)
+                )
+                dev.update(fields_by_idx[dev_idx])
+
+        for inst in _cached_mumu_instances:
+            if inst.get("type") == "Emulator":
+                inst_idx = inst.get("index") or inst.get("instance_index")
+                if isinstance(inst_idx, int) and inst_idx in fields_by_idx:
+                    inst["username"] = str(usernames_snap.get(str(inst_idx), "") or "")
+                    inst["auto_rejoin"] = auto_rejoin_global and bool(
+                        instance_auto_rejoin_snap.get(str(inst_idx), True)
+                    )
+                    inst.update(fields_by_idx[inst_idx])
+
+
+# --- Game Presets CRUD ---
+def get_game_presets() -> list[dict]:
+    with CONFIG_LOCK:
+        return copy.deepcopy(
+            _normalize_game_presets(CONFIG.get("mumu", {}).get("game_presets", []))
+        )
+
+
+def add_game_preset(place_id: object, name: str = "", upsert: bool = False) -> dict:
+    pid = validate_place_id(place_id, allow_zero=False)
+    clean_name = str(name or "").strip()[:100]
+
+    with CONFIG_LOCK:
+        existing_presets = _normalize_game_presets(CONFIG.get("mumu", {}).get("game_presets", []))
+        already_exists = any(p["place_id"] == pid for p in existing_presets)
+    if already_exists and not upsert:
+        raise ValueError(f"Preset for Place ID {pid} already exists")
+
+    if not clean_name:
+        clean_name = resolve_roblox_game_name_sync(pid, use_presets=False)[:100]
+
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.setdefault("mumu", {})
+        presets = _normalize_game_presets(mumu_cfg.get("game_presets", []))
+        existing = next((p for p in presets if p["place_id"] == pid), None)
+        created = existing is None
+        if existing is not None:
+            if not upsert:
+                raise ValueError(f"Preset for Place ID {pid} already exists")
+            existing["name"] = clean_name
+            entry = dict(existing)
+        else:
+            entry = {"place_id": pid, "name": clean_name}
+            presets.append(entry)
+        mumu_cfg["game_presets"] = presets
+        save_config(CONFIG)
+        presets_snap = copy.deepcopy(presets)
+
+    _place_name_cache[pid] = clean_name
+    _place_name_fail_until.pop(pid, None)
+    _sync_mumu_cache_from_config()
+    add_event("system", f"Game preset {'saved' if created else 'updated'}: {clean_name} ({pid})")
+    return {"preset": entry, "presets": presets_snap, "created": created}
+
+
+def update_game_preset(original_place_id: object, new_place_id: object, name: str = "") -> dict:
+    orig_pid = validate_place_id(original_place_id, allow_zero=False)
+    next_pid = validate_place_id(new_place_id, allow_zero=False)
+    clean_name = str(name or "").strip()[:100]
+
+    with CONFIG_LOCK:
+        existing_presets = _normalize_game_presets(CONFIG.get("mumu", {}).get("game_presets", []))
+        if not any(p["place_id"] == orig_pid for p in existing_presets):
+            raise KeyError("Game preset not found")
+        if next_pid != orig_pid and any(p["place_id"] == next_pid for p in existing_presets):
+            raise ValueError(f"Preset for Place ID {next_pid} already exists")
+
+    if not clean_name:
+        clean_name = resolve_roblox_game_name_sync(
+            next_pid,
+            use_presets=False,
+            use_cache=(orig_pid != next_pid),
+        )[:100]
+
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.setdefault("mumu", {})
+        presets = _normalize_game_presets(mumu_cfg.get("game_presets", []))
+        target = next((p for p in presets if p["place_id"] == orig_pid), None)
+        if target is None:
+            raise KeyError("Game preset not found")
+        if next_pid != orig_pid and any(p["place_id"] == next_pid for p in presets):
+            raise ValueError(f"Preset for Place ID {next_pid} already exists")
+        target["place_id"] = next_pid
+        target["name"] = clean_name
+        entry = dict(target)
+        mumu_cfg["game_presets"] = presets
+        save_config(CONFIG)
+        presets_snap = copy.deepcopy(presets)
+
+    if orig_pid != next_pid:
+        _place_name_cache.pop(orig_pid, None)
+    _place_name_cache[next_pid] = clean_name
+    _place_name_fail_until.pop(next_pid, None)
+    _sync_mumu_cache_from_config()
+    add_event("system", f"Game preset updated: {clean_name} ({next_pid})")
+    return {"preset": entry, "presets": presets_snap}
+
+
+def delete_game_preset(place_id: object) -> dict:
+    pid = validate_place_id(place_id, allow_zero=False)
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.setdefault("mumu", {})
+        presets = _normalize_game_presets(mumu_cfg.get("game_presets", []))
+        idx = next((i for i, p in enumerate(presets) if p["place_id"] == pid), None)
+        if idx is None:
+            raise KeyError("Game preset not found")
+        removed = presets.pop(idx)
+        mumu_cfg["game_presets"] = presets
+        save_config(CONFIG)
+        presets_snap = copy.deepcopy(presets)
+
+    _place_name_cache.pop(pid, None)
+    _sync_mumu_cache_from_config()
+    add_event("system", f"Game preset removed: {removed['name']} ({pid})")
+    return {"deleted_place_id": pid, "presets": presets_snap}
+
+
 def set_instance_username(instance_idx: int | str, username: str) -> dict:
     inst_id = str(instance_idx)
     clean_username = str(username or "").strip()
+    _instance_live_presence.pop(inst_id, None)
     with CONFIG_LOCK:
         mumu_cfg = CONFIG.setdefault("mumu", {})
         usernames = mumu_cfg.setdefault("instance_usernames", {})
-        usernames[inst_id] = clean_username
+        if clean_username:
+            usernames[inst_id] = clean_username
+        else:
+            usernames.pop(inst_id, None)
         save_config(CONFIG)
 
-    add_event("system", f"Instance #{inst_id} Roblox username set to '{clean_username}'")
     if clean_username:
+        add_event("system", f"Instance #{inst_id} Roblox username set to '{clean_username}'")
         uid = get_roblox_user_id_sync(clean_username)
         if uid:
             pres = get_roblox_user_presence_sync(uid)
@@ -901,6 +1179,10 @@ def set_instance_username(instance_idx: int | str, username: str) -> dict:
                     "game_name": gname or (resolve_roblox_game_name_sync(pid) if pid else "Roblox"),
                     "last_updated": time.time(),
                 }
+    else:
+        add_event("system", f"Instance #{inst_id} Roblox username cleared")
+
+    _sync_mumu_cache_from_config()
     return _instance_live_presence.get(inst_id, {})
 
 
@@ -912,42 +1194,70 @@ def record_instance_active_place(instance_idx: int | str, place_id: int, serial:
         _instance_auto_learned_place[serial] = int(place_id)
 
 
+def get_configured_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
+    with CONFIG_LOCK:
+        mumu_cfg = CONFIG.get("mumu", {})
+        instance_places = mumu_cfg.get("instance_places", {})
+        if not isinstance(instance_places, dict):
+            return 0
+        for key in (str(instance_idx), serial):
+            if key and key in instance_places:
+                try:
+                    val = int(instance_places[key])
+                    if val > 0:
+                        return val
+                except (ValueError, TypeError):
+                    continue
+    return 0
+
+
 def get_instance_place_id(instance_idx: int | str, serial: str = "") -> int:
+    configured = get_configured_instance_place_id(instance_idx, serial)
+    if configured > 0:
+        return configured
+
     live = _instance_live_presence.get(str(instance_idx))
     if live and live.get("place_id"):
-        return int(live["place_id"])
+        try:
+            live_pid = int(live["place_id"])
+            if live_pid > 0:
+                return live_pid
+        except (ValueError, TypeError):
+            pass
 
     if str(instance_idx) in _instance_auto_learned_place:
         return _instance_auto_learned_place[str(instance_idx)]
     if serial and serial in _instance_auto_learned_place:
         return _instance_auto_learned_place[serial]
 
-    mumu_cfg = CONFIG.get("mumu", {})
-    instance_places = mumu_cfg.get("instance_places", {})
-    if str(instance_idx) in instance_places:
-        try:
-            return int(instance_places[str(instance_idx)])
-        except (ValueError, TypeError):
-            pass
-    if serial and serial in instance_places:
-        try:
-            return int(instance_places[serial])
-        except (ValueError, TypeError):
-            pass
-
-    return int(mumu_cfg.get("default_place_id", 0) or 0)
+    with CONFIG_LOCK:
+        default_pid = CONFIG.get("mumu", {}).get("default_place_id", 0) or 0
+    try:
+        parsed_default = int(default_pid)
+        return parsed_default if parsed_default > 0 else 0
+    except (ValueError, TypeError):
+        return 0
 
 
 def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
     try:
+        pid = validate_place_id(place_id, allow_zero=True)
         with CONFIG_LOCK:
             mumu_cfg = CONFIG.setdefault("mumu", {})
             places = mumu_cfg.setdefault("instance_places", {})
-            places[str(instance_idx)] = int(place_id)
-            _instance_auto_learned_place[str(instance_idx)] = int(place_id)
+            if pid == 0:
+                places.pop(str(instance_idx), None)
+                _instance_auto_learned_place.pop(str(instance_idx), None)
+            else:
+                places[str(instance_idx)] = pid
+                _instance_auto_learned_place[str(instance_idx)] = pid
             save_config(CONFIG)
-        gname = get_game_name_for_place_id(place_id)
-        add_event("system", f"Instance {instance_idx} target game set to {gname} ({place_id})")
+        _sync_mumu_cache_from_config()
+        if pid == 0:
+            add_event("system", f"Instance {instance_idx} target game cleared")
+        else:
+            gname = get_game_name_for_place_id(pid)
+            add_event("system", f"Instance {instance_idx} target game set to {gname} ({pid})")
         return True
     except Exception as exc:
         print(f"[SET INSTANCE GAME ERROR] {exc}")
@@ -957,9 +1267,43 @@ def set_instance_place_id(instance_idx: int | str, place_id: int) -> bool:
 def get_game_name_for_place_id(place_id: int) -> str:
     if not place_id or place_id <= 0:
         return "Unassigned"
+    preset_name = _find_preset_name(place_id)
+    if preset_name:
+        return preset_name
     if place_id in _place_name_cache:
         return _place_name_cache[place_id]
     return resolve_roblox_game_name_sync(place_id)
+
+
+def apply_instance_game_update(
+    instance_idx: int | str,
+    raw_place_id: object,
+    save_as_preset: bool = False,
+    preset_name: str = "",
+) -> dict:
+    place_id = validate_place_id(raw_place_id, allow_zero=True)
+    ok = set_instance_place_id(instance_idx, place_id)
+    preset_res: dict | None = None
+
+    clean_preset_name = str(preset_name or "").strip()
+    if ok and save_as_preset and place_id > 0:
+        already_present = any(p["place_id"] == place_id for p in get_game_presets())
+        if clean_preset_name or not already_present:
+            preset_res = add_game_preset(place_id, clean_preset_name, upsert=True)
+
+    game_name = get_game_name_for_place_id(place_id)
+    with CONFIG_LOCK:
+        raw_places = CONFIG.get("mumu", {}).get("instance_places", {})
+        instance_places_snap = copy.deepcopy(raw_places) if isinstance(raw_places, dict) else {}
+
+    return {
+        "ok": ok,
+        "instance": instance_idx,
+        "place_id": place_id,
+        "game_name": game_name,
+        "instance_places": instance_places_snap,
+        "preset_res": preset_res,
+    }
 
 
 def record_bot_heartbeat(
@@ -1045,19 +1389,30 @@ def governor_instance_action(instance_idx: int, action: str) -> dict:
 
     if action == "restart_game":
         place_id = get_instance_place_id(instance_idx)
+        if place_id <= 0:
+            return {"success": False, "error": "No target Place ID configured for this instance"}
         launch_cmd = f'am start -a android.intent.action.VIEW -d "roblox://placeId={place_id}"'
         _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
         time.sleep(0.5)
-        _run_cmd([str(adb_path), "-s", device_id, "shell", launch_cmd])
+        r_launch = _run_cmd([str(adb_path), "-s", device_id, "shell", launch_cmd])
+        if r_launch.returncode != 0:
+            err = (r_launch.stderr or r_launch.stdout or "").strip() or f"ADB restart failed for {device_id}"
+            return {"success": False, "error": err}
         add_event("system", f"Governor: Restarted Roblox on Instance #{instance_idx} (Place {place_id})")
         return {"success": True, "instance": instance_idx, "action": "restart_game"}
     if action == "trim_ram":
-        _run_cmd([str(adb_path), "-s", device_id, "shell", "echo", "3", ">", "/proc/sys/vm/drop_caches"])
-        _run_cmd([str(adb_path), "-s", device_id, "shell", "fstrim", "-v", "/data"])
+        r1 = _run_cmd([str(adb_path), "-s", device_id, "shell", "echo", "3", ">", "/proc/sys/vm/drop_caches"])
+        r2 = _run_cmd([str(adb_path), "-s", device_id, "shell", "fstrim", "-v", "/data"])
+        if r1.returncode != 0 and r2.returncode != 0:
+            err = (r2.stderr or r1.stderr or "").strip() or f"ADB trim failed for {device_id}"
+            return {"success": False, "error": err}
         add_event("system", f"Governor: Memory & Storage trimmed for Instance #{instance_idx}")
         return {"success": True, "instance": instance_idx, "action": "trim_ram"}
     if action == "kill_game":
-        _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
+        r_kill = _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
+        if r_kill.returncode != 0:
+            err = (r_kill.stderr or r_kill.stdout or "").strip() or f"ADB stop failed for {device_id}"
+            return {"success": False, "error": err}
         add_event("warning", f"Governor: Stopped Roblox on Instance #{instance_idx}")
         return {"success": True, "instance": instance_idx, "action": "kill_game"}
 
@@ -1074,6 +1429,12 @@ def recover_roblox_instance(
         return False
     if not place_id or place_id <= 0:
         place_id = get_instance_place_id(instance_idx, serial)
+    if not place_id or place_id <= 0:
+        add_event(
+            "warning",
+            f"MuMu Watchdog: Skipped recovery on Instance {instance_idx} ({serial}) -- no target Place ID",
+        )
+        return False
 
     game_name = get_game_name_for_place_id(place_id)
 
@@ -1176,18 +1537,21 @@ async def roblox_presence_tracker_loop() -> None:
                         if not gname or gname.lower() in ("experience", "roblox"):
                             gname = await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
 
-                    _instance_live_presence[str(inst_key)] = {
-                        "username": username,
-                        "presence_type": pres.get("presence_type", 0),
-                        "presence_status": pres.get("presence_status", "Offline"),
-                        "place_id": pid,
-                        "game_name": gname or (
-                            await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
-                            if pid
-                            else "Roblox"
-                        ),
-                        "last_updated": time.time(),
-                    }
+                    with CONFIG_LOCK:
+                        current_user = CONFIG.get("mumu", {}).get("instance_usernames", {}).get(str(inst_key), "")
+                    if current_user == username:
+                        _instance_live_presence[str(inst_key)] = {
+                            "username": username,
+                            "presence_type": pres.get("presence_type", 0),
+                            "presence_status": pres.get("presence_status", "Offline"),
+                            "place_id": pid,
+                            "game_name": gname or (
+                                await asyncio.to_thread(resolve_roblox_game_name_sync, pid)
+                                if pid
+                                else "Roblox"
+                            ),
+                            "last_updated": time.time(),
+                        }
 
             for serial, hb in list(_bot_heartbeats.items()):
                 pid = hb.get("place_id")

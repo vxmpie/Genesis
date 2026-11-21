@@ -130,6 +130,8 @@ export interface MuMuDevice {
   presence_status: 'Offline' | 'Online' | 'InGame' | 'InStudio' | 'Manual' | 'Unknown' | string;
   place_id: number;
   target_place_id: number;
+  configured_place_id?: number;
+  live_game_name?: string | null;
   target_game: string;
   target_game_name: string;
 }
