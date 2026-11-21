@@ -1,25 +1,100 @@
+import copy
 import html
 import json
+import os
 import re
 import socket
 import threading
 import time
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-# --- Constants & Regex Guards ---
-USER_AGENT = "Genesis-Mothership-Core/4.0"
+from backend.core.config import DATA_DIR
+
+# --- Constants, Paths & Regex Guards ---
+DISCORD_DATA_DIR = DATA_DIR / "discord"
+FEEDS_REGISTRY_PATH = DISCORD_DATA_DIR / "feeds.json"
+
+USER_AGENT = "Genesis-Motherboard-Core/4.1"
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 _SENSOR_LOCK = threading.Lock()
+_REGISTRY_LOCK = threading.RLock()
 _SENSOR_CACHE: dict = {"updated_at": 0.0, "weather": None, "markets": None}
 
 GITHUB_ACCOUNTS = ("vxmpie", "swnst")
+VALID_FEED_CATEGORIES = ("ai", "tech", "world", "loot")
+
+DEFAULT_FEEDS_REGISTRY: dict = {
+    "ai": [
+        {
+            "name": "HuggingFace Daily Papers",
+            "kind": "json_hf",
+            "url": "https://huggingface.co/api/daily_papers?limit=5",
+            "enabled": True,
+        },
+        {
+            "name": "TechCrunch AI",
+            "kind": "rss",
+            "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+            "enabled": True,
+        },
+        {
+            "name": "OpenAI News",
+            "kind": "rss",
+            "url": "https://openai.com/news/rss.xml",
+            "enabled": True,
+        },
+    ],
+    "tech": [
+        {
+            "name": "Hacker News Front Page",
+            "kind": "json_hn",
+            "url": "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=6",
+            "enabled": True,
+        },
+        {
+            "name": "The Verge Tech Wire",
+            "kind": "rss",
+            "url": "https://www.theverge.com/rss/index.xml",
+            "enabled": True,
+        },
+        {
+            "name": "Lobsters Engineering",
+            "kind": "json_lobsters",
+            "url": "https://lobste.rs/hottest.json",
+            "enabled": True,
+        },
+    ],
+    "world": [
+        {
+            "name": "BBC World News",
+            "kind": "rss",
+            "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+            "enabled": True,
+        },
+    ],
+    "loot": [
+        {
+            "name": "Epic Games Freebies",
+            "kind": "json_epic",
+            "url": "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=TH&allowCountries=TH",
+            "enabled": True,
+        },
+        {
+            "name": "CheapShark 100% Off Deals",
+            "kind": "json_cheapshark",
+            "url": "https://www.cheapshark.com/api/1.0/deals?upperPrice=0&pageSize=6",
+            "enabled": True,
+        },
+    ],
+}
 
 
-# --- Sanitization & HTTP Fetchers ---
+# --- Sanitization & Registry Storage ---
 def strip_emojis(text: str) -> str:
     cleaned = _EMOJI_RE.sub("", str(text or ""))
     return _WHITESPACE_RE.sub(" ", html.unescape(cleaned)).strip()
@@ -29,13 +104,109 @@ def _utc_iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _truncate(text: str, max_len: int = 88) -> str:
+def _truncate(text: str, max_len: int = 84) -> str:
     clean = strip_emojis(text)
     if len(clean) <= max_len:
         return clean
     return clean[: max_len - 3].rstrip() + "..."
 
 
+def _clip_field(lines: list[str], fallback: str = "Signal temporarily unavailable.") -> str:
+    if not lines:
+        return fallback
+    text = "\n".join(lines)
+    if len(text) <= 1020:
+        return text
+    clipped: list[str] = []
+    total = 0
+    for line in lines:
+        if total + len(line) + 1 > 1015:
+            break
+        clipped.append(line)
+        total += len(line) + 1
+    return "\n".join(clipped) if clipped else text[:1020]
+
+
+def load_feeds_registry() -> dict:
+    with _REGISTRY_LOCK:
+        DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if FEEDS_REGISTRY_PATH.exists():
+            try:
+                data = json.loads(FEEDS_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+                if isinstance(data, dict):
+                    changed = False
+                    for cat in VALID_FEED_CATEGORIES:
+                        if cat not in data or not isinstance(data[cat], list):
+                            data[cat] = copy.deepcopy(DEFAULT_FEEDS_REGISTRY[cat])
+                            changed = True
+                    if changed:
+                        save_feeds_registry(data)
+                    return data
+            except Exception:
+                pass
+        seeded = copy.deepcopy(DEFAULT_FEEDS_REGISTRY)
+        save_feeds_registry(seeded)
+        return seeded
+
+
+def save_feeds_registry(registry: dict) -> None:
+    with _REGISTRY_LOCK:
+        DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = FEEDS_REGISTRY_PATH.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
+        os.replace(tmp_path, FEEDS_REGISTRY_PATH)
+
+
+def add_custom_rss_feed(category: str, name: str, url: str) -> dict:
+    cat = str(category or "").strip().lower()
+    if cat not in VALID_FEED_CATEGORIES:
+        raise ValueError(f"Category must be one of: {', '.join(VALID_FEED_CATEGORIES)}")
+    clean_name = strip_emojis(name)[:48]
+    if not clean_name:
+        raise ValueError("Feed name cannot be empty")
+    clean_url = str(url or "").strip()
+    parsed = urllib.parse.urlsplit(clean_url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise ValueError("Feed URL must be a valid http(s) URL")
+
+    with _REGISTRY_LOCK:
+        reg = load_feeds_registry()
+        items = reg.setdefault(cat, [])
+        for item in items:
+            if str(item.get("name", "")).lower() == clean_name.lower():
+                item["url"] = clean_url
+                item["kind"] = "rss"
+                item["enabled"] = True
+                save_feeds_registry(reg)
+                return {"action": "updated", "category": cat, "feed": item}
+        entry = {"name": clean_name, "kind": "rss", "url": clean_url, "enabled": True}
+        items.append(entry)
+        save_feeds_registry(reg)
+        return {"action": "added", "category": cat, "feed": entry}
+
+
+def remove_feed_source(category: str, name: str) -> dict:
+    cat = str(category or "").strip().lower()
+    if cat not in VALID_FEED_CATEGORIES:
+        raise ValueError(f"Category must be one of: {', '.join(VALID_FEED_CATEGORIES)}")
+    target_low = strip_emojis(name).lower()
+    with _REGISTRY_LOCK:
+        reg = load_feeds_registry()
+        items = reg.get(cat, [])
+        kept = [it for it in items if str(it.get("name", "")).lower() != target_low]
+        removed = len(items) - len(kept)
+        if removed == 0:
+            raise KeyError(f"Feed '{name}' not found in category '{cat}'")
+        reg[cat] = kept
+        save_feeds_registry(reg)
+        return {"removed": removed, "category": cat, "name": name}
+
+
+def list_feed_sources() -> dict:
+    return load_feeds_registry()
+
+
+# --- HTTP & XML Fetchers ---
 def _fetch_text(url: str, timeout: float = 8.0) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -79,6 +250,93 @@ def parse_rss_or_atom_xml(xml_text: str, limit: int = 5) -> list[dict]:
     return items
 
 
+def _collect_feed_lines(source: dict, limit: int = 5) -> list[str]:
+    kind = str(source.get("kind", "rss"))
+    url = str(source.get("url", "")).strip()
+    if not url or not bool(source.get("enabled", True)):
+        return []
+
+    lines: list[str] = []
+    try:
+        if kind == "json_hf":
+            papers = _fetch_json(url, timeout=8.0)
+            if isinstance(papers, list):
+                for idx, entry in enumerate(papers[:limit], 1):
+                    paper = entry.get("paper", {}) if isinstance(entry, dict) else {}
+                    pid = str(paper.get("id", ""))
+                    title = _truncate(paper.get("title") or entry.get("title", ""), 78)
+                    upvotes = int(paper.get("upvotes", 0))
+                    if pid and title:
+                        lines.append(f"`{idx}.` [{title}](https://huggingface.co/papers/{pid}) (`+{upvotes}`)")
+        elif kind == "json_hn":
+            hn_data = _fetch_json(url, timeout=8.0)
+            hits = hn_data.get("hits", []) if isinstance(hn_data, dict) else []
+            for idx, hit in enumerate(hits[:limit], 1):
+                title = _truncate(hit.get("title", ""), 74)
+                oid = hit.get("objectID", "")
+                link = hit.get("url") or f"https://news.ycombinator.com/item?id={oid}"
+                pts = int(hit.get("points") or 0)
+                if title:
+                    lines.append(f"`{idx}.` [{title}]({link}) (`{pts} pts`)")
+        elif kind == "json_lobsters":
+            stories = _fetch_json(url, timeout=8.0)
+            if isinstance(stories, list):
+                for idx, st in enumerate(stories[:limit], 1):
+                    title = _truncate(st.get("title", ""), 74)
+                    link = st.get("url") or st.get("short_id_url") or ""
+                    score = int(st.get("score") or 0)
+                    if title and link:
+                        lines.append(f"`{idx}.` [{title}]({link}) (`{score} pts`)")
+        elif kind == "json_epic":
+            epic = _fetch_json(url, timeout=8.0)
+            elements = (
+                epic.get("data", {})
+                .get("Catalog", {})
+                .get("searchStore", {})
+                .get("elements", [])
+                if isinstance(epic, dict)
+                else []
+            )
+            for el in elements:
+                if not isinstance(el, dict):
+                    continue
+                promos = el.get("promotions") or {}
+                offers = promos.get("promotionalOffers") or []
+                discount_price = el.get("price", {}).get("totalPrice", {}).get("discountPrice")
+                if offers and discount_price == 0:
+                    title = strip_emojis(el.get("title", "Unknown Title"))
+                    slug = el.get("productSlug") or el.get("urlSlug") or ""
+                    if not slug:
+                        mappings = el.get("catalogNs", {}).get("mappings") or []
+                        if mappings and isinstance(mappings[0], dict):
+                            slug = mappings[0].get("pageSlug", "")
+                    store_url = (
+                        f"https://store.epicgames.com/en-US/p/{slug}"
+                        if slug
+                        else "https://store.epicgames.com/en-US/free-games"
+                    )
+                    lines.append(f"- [{_truncate(title, 70)}]({store_url}) (`FREE NOW`)")
+        elif kind == "json_cheapshark":
+            deals = _fetch_json(url, timeout=8.0)
+            if isinstance(deals, list):
+                for idx, d in enumerate(deals[:limit], 1):
+                    title = _truncate(d.get("title", ""), 64)
+                    orig = d.get("normalPrice", "0.00")
+                    did = d.get("dealID", "")
+                    if title and did:
+                        lines.append(
+                            f"`{idx}.` [{title}](https://www.cheapshark.com/redirect?dealID={did}) (Normal `${orig}` -> `$0.00`)"
+                        )
+        else:
+            xml_data = _fetch_text(url, timeout=8.0)
+            parsed = parse_rss_or_atom_xml(xml_data, limit=limit)
+            for idx, item in enumerate(parsed, 1):
+                lines.append(f"`{idx}.` [{_truncate(item['title'], 78)}]({item['url']})")
+    except Exception:
+        return []
+    return lines
+
+
 # --- Planetary Sensors & Financial Feeds ---
 def get_bangkok_weather_sync() -> dict:
     url = (
@@ -102,7 +360,17 @@ def get_bangkok_weather_sync() -> dict:
 
 
 def get_markets_sync() -> dict:
-    result: dict = {"ok": False, "btc_usd": 0.0, "btc_thb": 0.0, "btc_24h": 0.0, "eth_usd": 0.0, "eth_24h": 0.0, "sol_usd": 0.0, "sol_24h": 0.0, "usd_thb": 0.0}
+    result: dict = {
+        "ok": False,
+        "btc_usd": 0.0,
+        "btc_thb": 0.0,
+        "btc_24h": 0.0,
+        "eth_usd": 0.0,
+        "eth_24h": 0.0,
+        "sol_usd": 0.0,
+        "sol_24h": 0.0,
+        "usd_thb": 0.0,
+    }
     try:
         cg = _fetch_json(
             "https://api.coingecko.com/api/v3/simple/price"
@@ -184,48 +452,31 @@ def get_github_radar_sync(limit_per_user: int = 3) -> list[str]:
 
 
 # --- Domain Intelligence Collectors ---
-def fetch_ai_cortex_intel(limit: int = 5) -> dict:
-    hf_lines: list[str] = []
-    tc_lines: list[str] = []
+def fetch_ai_cortex_intel(limit: int = 4) -> dict:
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("ai", []) if s.get("enabled", True)]
+    fields: list[dict] = []
 
-    try:
-        papers = _fetch_json(f"https://huggingface.co/api/daily_papers?limit={limit}", timeout=8.0)
-        if isinstance(papers, list):
-            for idx, entry in enumerate(papers[:limit], 1):
-                paper = entry.get("paper", {}) if isinstance(entry, dict) else {}
-                pid = str(paper.get("id", ""))
-                title = _truncate(paper.get("title") or entry.get("title", ""), 80)
-                upvotes = int(paper.get("upvotes", 0))
-                if pid and title:
-                    hf_lines.append(f"`{idx}.` [{title}](https://huggingface.co/papers/{pid}) (`+{upvotes}`)")
-    except Exception:
-        pass
+    for src in sources[:6]:
+        lines = _collect_feed_lines(src, limit=limit)
+        if lines or src.get("kind") == "rss":
+            fields.append(
+                {
+                    "name": strip_emojis(src.get("name", "AI Feed")),
+                    "value": _clip_field(lines),
+                    "inline": False,
+                }
+            )
 
-    try:
-        xml_data = _fetch_text("https://techcrunch.com/category/artificial-intelligence/feed/", timeout=8.0)
-        articles = parse_rss_or_atom_xml(xml_data, limit=limit)
-        for idx, art in enumerate(articles, 1):
-            tc_lines.append(f"`{idx}.` [{_truncate(art['title'], 80)}]({art['url']})")
-    except Exception:
-        pass
+    if not fields:
+        fields.append({"name": "AI Feeds", "value": "No active AI sources returned items.", "inline": False})
 
     embed = {
-        "title": "// ORBITAL AI & SINGULARITY CORTEX",
-        "description": "Live research breakthroughs and artificial intelligence dispatches intercepted by GENESIS-01 sensors.",
+        "title": "[INTEL] ORBITAL AI & SINGULARITY CORTEX",
+        "description": "Dynamic research papers and artificial intelligence dispatches (`feeds.json` -> `ai`).",
         "color": 0x8B5CF6,
-        "fields": [
-            {
-                "name": "HuggingFace Trending AI Papers",
-                "value": "\n".join(hf_lines) if hf_lines else "Signal temporarily unavailable.",
-                "inline": False,
-            },
-            {
-                "name": "TechCrunch AI Dispatches",
-                "value": "\n".join(tc_lines) if tc_lines else "Signal temporarily unavailable.",
-                "inline": False,
-            },
-        ],
-        "footer": {"text": f"GENESIS-01 Intel Cortex | Host: {socket.gethostname()}"},
+        "fields": fields,
+        "footer": {"text": f"Genesis Motherboard Intel Cortex | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
@@ -235,58 +486,34 @@ def fetch_ai_cortex_intel(limit: int = 5) -> dict:
                 {"type": 2, "style": 1, "label": "Refresh AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
-                {"type": 2, "style": 2, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
+                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def fetch_tech_radar_intel(limit: int = 6) -> dict:
-    hn_lines: list[str] = []
-    verge_lines: list[str] = []
+def fetch_tech_radar_intel(limit: int = 5) -> dict:
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("tech", []) if s.get("enabled", True)]
+    fields: list[dict] = []
 
-    try:
-        hn_data = _fetch_json(
-            f"https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage={limit}",
-            timeout=8.0,
+    for src in sources[:6]:
+        lines = _collect_feed_lines(src, limit=limit)
+        fields.append(
+            {
+                "name": strip_emojis(src.get("name", "Tech Feed")),
+                "value": _clip_field(lines),
+                "inline": False,
+            }
         )
-        hits = hn_data.get("hits", []) if isinstance(hn_data, dict) else []
-        for idx, hit in enumerate(hits[:limit], 1):
-            title = _truncate(hit.get("title", ""), 76)
-            oid = hit.get("objectID", "")
-            url = hit.get("url") or f"https://news.ycombinator.com/item?id={oid}"
-            pts = int(hit.get("points") or 0)
-            if title:
-                hn_lines.append(f"`{idx}.` [{title}]({url}) (`{pts} pts`)")
-    except Exception:
-        pass
-
-    try:
-        xml_data = _fetch_text("https://www.theverge.com/rss/index.xml", timeout=8.0)
-        entries = parse_rss_or_atom_xml(xml_data, limit=limit)
-        for idx, item in enumerate(entries, 1):
-            verge_lines.append(f"`{idx}.` [{_truncate(item['title'], 80)}]({item['url']})")
-    except Exception:
-        pass
 
     embed = {
-        "title": "// DEEP-SPACE TECH & CYBERNETICS RADAR",
-        "description": "Engineering, software architecture, and global tech sector transmissions.",
+        "title": "[INTEL] DEEP-SPACE TECH & CYBERNETICS RADAR",
+        "description": "Dynamic engineering, software architecture, and tech sector transmissions (`feeds.json` -> `tech`).",
         "color": 0x06B6D4,
-        "fields": [
-            {
-                "name": "Hacker News Front Page",
-                "value": "\n".join(hn_lines) if hn_lines else "Signal temporarily unavailable.",
-                "inline": False,
-            },
-            {
-                "name": "The Verge Tech Wire",
-                "value": "\n".join(verge_lines) if verge_lines else "Signal temporarily unavailable.",
-                "inline": False,
-            },
-        ],
-        "footer": {"text": f"GENESIS-01 Intel Cortex | Host: {socket.gethostname()}"},
+        "fields": fields,
+        "footer": {"text": f"Genesis Motherboard Intel Cortex | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
@@ -305,15 +532,8 @@ def fetch_tech_radar_intel(limit: int = 6) -> dict:
 
 def fetch_world_pulse_intel(limit: int = 5) -> dict:
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=120.0)
-    bbc_lines: list[str] = []
-    try:
-        xml_data = _fetch_text("http://feeds.bbci.co.uk/news/world/rss.xml", timeout=8.0)
-        news = parse_rss_or_atom_xml(xml_data, limit=limit)
-        for idx, item in enumerate(news, 1):
-            bbc_lines.append(f"`{idx}.` [{_truncate(item['title'], 80)}]({item['url']})")
-    except Exception:
-        pass
-
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("world", []) if s.get("enabled", True)]
     gh_lines = get_github_radar_sync(limit_per_user=2)
 
     weather_val = "Telemetry offline"
@@ -332,25 +552,35 @@ def fetch_world_pulse_intel(limit: int = 5) -> dict:
             f"USD/THB: `{markets['usd_thb']:.2f} THB`"
         )
 
+    fields: list[dict] = [
+        {"name": "Bangkok / Lat Krabang Sensors", "value": weather_val, "inline": True},
+        {"name": "Crypto & FX Tickers", "value": market_val, "inline": True},
+    ]
+
+    for src in sources[:5]:
+        lines = _collect_feed_lines(src, limit=limit)
+        fields.append(
+            {
+                "name": strip_emojis(src.get("name", "World Feed")),
+                "value": _clip_field(lines),
+                "inline": False,
+            }
+        )
+
+    fields.append(
+        {
+            "name": "Overlord GitHub Activity (vxmpie / swnst)",
+            "value": _clip_field(gh_lines, fallback="No recent public events."),
+            "inline": False,
+        }
+    )
+
     embed = {
-        "title": "// PLANETARY WORLD PULSE, MARKETS & SENSORS",
+        "title": "[INTEL] PLANETARY WORLD PULSE, MARKETS & SENSORS",
         "description": "Global geopolitics, Bangkok planetary atmosphere, financial tickers, and GitHub fleet activity.",
         "color": 0x10B981,
-        "fields": [
-            {"name": "Bangkok / Lat Krabang Sensors", "value": weather_val, "inline": True},
-            {"name": "Crypto & FX Tickers", "value": market_val, "inline": True},
-            {
-                "name": "BBC World News Headlines",
-                "value": "\n".join(bbc_lines) if bbc_lines else "Signal temporarily unavailable.",
-                "inline": False,
-            },
-            {
-                "name": "Commander GitHub Activity (vxmpie / swnst)",
-                "value": "\n".join(gh_lines) if gh_lines else "No recent public events.",
-                "inline": False,
-            },
-        ],
-        "footer": {"text": f"GENESIS-01 Planetary Array | Host: {socket.gethostname()}"},
+        "fields": fields,
+        "footer": {"text": f"Genesis Motherboard Planetary Array | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
@@ -368,71 +598,26 @@ def fetch_world_pulse_intel(limit: int = 5) -> dict:
 
 
 def fetch_free_loot_intel(limit: int = 6) -> dict:
-    epic_lines: list[str] = []
-    deal_lines: list[str] = []
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("loot", []) if s.get("enabled", True)]
+    fields: list[dict] = []
 
-    try:
-        epic = _fetch_json(
-            "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=TH&allowCountries=TH",
-            timeout=8.0,
+    for src in sources[:5]:
+        lines = _collect_feed_lines(src, limit=limit)
+        fields.append(
+            {
+                "name": strip_emojis(src.get("name", "Loot Feed")),
+                "value": _clip_field(lines, fallback="No active zero-cost drops returned right now."),
+                "inline": False,
+            }
         )
-        elements = (
-            epic.get("data", {})
-            .get("Catalog", {})
-            .get("searchStore", {})
-            .get("elements", [])
-            if isinstance(epic, dict)
-            else []
-        )
-        for el in elements:
-            if not isinstance(el, dict):
-                continue
-            promos = el.get("promotions") or {}
-            offers = promos.get("promotionalOffers") or []
-            discount_price = el.get("price", {}).get("totalPrice", {}).get("discountPrice")
-            if offers and discount_price == 0:
-                title = strip_emojis(el.get("title", "Unknown Title"))
-                slug = el.get("productSlug") or el.get("urlSlug") or ""
-                if not slug:
-                    mappings = el.get("catalogNs", {}).get("mappings") or []
-                    if mappings and isinstance(mappings[0], dict):
-                        slug = mappings[0].get("pageSlug", "")
-                store_url = f"https://store.epicgames.com/en-US/p/{slug}" if slug else "https://store.epicgames.com/en-US/free-games"
-                epic_lines.append(f"- [{_truncate(title, 70)}]({store_url}) (`FREE NOW`)")
-    except Exception:
-        pass
-
-    try:
-        deals = _fetch_json(f"https://www.cheapshark.com/api/1.0/deals?upperPrice=0&pageSize={limit}", timeout=8.0)
-        if isinstance(deals, list):
-            for idx, d in enumerate(deals[:limit], 1):
-                title = _truncate(d.get("title", ""), 66)
-                orig = d.get("normalPrice", "0.00")
-                did = d.get("dealID", "")
-                if title and did:
-                    deal_lines.append(
-                        f"`{idx}.` [{title}](https://www.cheapshark.com/redirect?dealID={did}) (Normal `${orig}` -> `$0.00`)"
-                    )
-    except Exception:
-        pass
 
     embed = {
-        "title": "// ORBITAL SUPPLY DROP // FREE GAMES & LOOT",
-        "description": "Active 100%-discount PC game giveaways and zero-cost store drops.",
+        "title": "[INTEL] ORBITAL SUPPLY DROP - FREE GAMES & LOOT",
+        "description": "Active 100%-discount PC game giveaways and zero-cost store drops (`feeds.json` -> `loot`).",
         "color": 0xF59E0B,
-        "fields": [
-            {
-                "name": "Epic Games Store Freebies",
-                "value": "\n".join(epic_lines) if epic_lines else "Check Epic Games Store directly for active rotation.",
-                "inline": False,
-            },
-            {
-                "name": "100% Off PC Deals Radar",
-                "value": "\n".join(deal_lines) if deal_lines else "No zero-price deals returned right now.",
-                "inline": False,
-            },
-        ],
-        "footer": {"text": f"GENESIS-01 Supply Scanner | Host: {socket.gethostname()}"},
+        "fields": fields,
+        "footer": {"text": f"Genesis Motherboard Supply Scanner | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
@@ -441,7 +626,8 @@ def fetch_free_loot_intel(limit: int = 6) -> dict:
             "components": [
                 {"type": 2, "style": 1, "label": "Scan Loot", "custom_id": "cmd:loot"},
                 {"type": 2, "style": 2, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
-                {"type": 2, "style": 2, "label": "Bridge Deck", "custom_id": "cmd:deck"},
+                {"type": 2, "style": 2, "label": "Bridge Console", "custom_id": "cmd:bridge"},
+                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
             ],
         }
     ]
@@ -455,30 +641,13 @@ def build_omni_briefing_payload(
     summary: dict,
 ) -> dict:
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=180.0)
+    reg = load_feeds_registry()
 
-    ai_top: list[str] = []
-    try:
-        papers = _fetch_json("https://huggingface.co/api/daily_papers?limit=3", timeout=6.0)
-        if isinstance(papers, list):
-            for idx, entry in enumerate(papers[:3], 1):
-                paper = entry.get("paper", {}) if isinstance(entry, dict) else {}
-                pid = str(paper.get("id", ""))
-                title = _truncate(paper.get("title") or entry.get("title", ""), 68)
-                if pid and title:
-                    ai_top.append(f"`{idx}.` [{title}](https://huggingface.co/papers/{pid})")
-    except Exception:
-        pass
+    ai_first = next((s for s in reg.get("ai", []) if s.get("enabled", True)), None)
+    tech_first = next((s for s in reg.get("tech", []) if s.get("enabled", True)), None)
 
-    tech_top: list[str] = []
-    try:
-        hn = _fetch_json("https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=3", timeout=6.0)
-        for idx, hit in enumerate(hn.get("hits", [])[:3], 1):
-            title = _truncate(hit.get("title", ""), 68)
-            url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
-            if title:
-                tech_top.append(f"`{idx}.` [{title}]({url})")
-    except Exception:
-        pass
+    ai_top = _collect_feed_lines(ai_first, limit=3) if ai_first else []
+    tech_top = _collect_feed_lines(tech_first, limit=3) if tech_first else []
 
     ram = metrics.get("ram", {})
     cpu_pct = float(metrics.get("cpu", {}).get("total_percent", 0.0))
@@ -493,8 +662,8 @@ def build_omni_briefing_payload(
     )
 
     embed = {
-        "title": "// GENESIS-01 MOTHERSHIP OMNI-BRIEFING",
-        "description": "Unified situational awareness across local reactor hardware and global planetary intelligence.",
+        "title": "[BRIEFING] GENESIS MOTHERBOARD OMNI-BRIEFING",
+        "description": "Unified situational awareness across reactor hardware and global planetary intelligence.",
         "color": 0x3B82F6,
         "fields": [
             {
@@ -510,16 +679,16 @@ def build_omni_briefing_payload(
             {"name": "Markets & FX", "value": market_str, "inline": True},
             {
                 "name": "Top AI Breakthroughs",
-                "value": "\n".join(ai_top) if ai_top else "No feed signal.",
+                "value": _clip_field(ai_top, fallback="No feed signal."),
                 "inline": False,
             },
             {
                 "name": "Top Tech Radar",
-                "value": "\n".join(tech_top) if tech_top else "No feed signal.",
+                "value": _clip_field(tech_top, fallback="No feed signal."),
                 "inline": False,
             },
         ],
-        "footer": {"text": f"GENESIS-01 Orbital Mothership | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [

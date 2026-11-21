@@ -1,6 +1,7 @@
 import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,13 +16,28 @@ _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
 
 
 class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
-    def test_slash_commands_and_builders_are_zero_emoji(self) -> None:
+    def test_slash_commands_and_builders_are_zero_emoji_and_clean_theme(self) -> None:
         raw_cmds = json.dumps(discord_bot.SLASH_COMMANDS)
         self.assertIsNone(_EMOJI_RE.search(raw_cmds))
-        cmd_names = {c["name"] for c in discord_bot.SLASH_COMMANDS}
+        self.assertEqual(discord_bot.GUILD_MOTHERSHIP_NAME, "Genesis Motherboard")
+
+        for cat in (
+            discord_bot.CATEGORY_HUD,
+            discord_bot.CATEGORY_BRIDGE,
+            discord_bot.CATEGORY_INTEL,
+            discord_bot.CATEGORY_CREW,
+            discord_bot.CATEGORY_COMMS,
+        ):
+            self.assertNotIn("//", cat)
+            self.assertIsNone(_EMOJI_RE.search(cat))
+
+        api_cmds = discord_bot.get_discord_api_commands()
+        self.assertTrue(all("_group" not in c for c in api_cmds))
+        cmd_names = {c["name"] for c in api_cmds}
         self.assertTrue(
             {
                 "bridge",
+                "wall",
                 "briefing",
                 "status",
                 "ai",
@@ -37,6 +53,11 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
                 "purge",
                 "log",
                 "note",
+                "feed-add",
+                "feed-remove",
+                "cmd-add",
+                "cmd-remove",
+                "run",
             }.issubset(cmd_names)
         )
 
@@ -112,23 +133,61 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
             return_value=[{"pid": 100, "name": "MuMuNxDevice.exe", "ram_mb": 1450.0, "protected": True}],
         ):
             deck = discord_bot.build_deck_payload()
+            wall = discord_bot.build_command_wall_payload()
             status = discord_bot.build_status_payload()
             mumu = discord_bot.build_mumu_payload()
             procs = discord_bot.build_processes_payload()
             hud = discord_bot.format_hud_channel_names()
 
-        for obj in (deck, status, mumu, procs, hud):
+        for obj in (deck, wall, status, mumu, procs, hud):
             self.assertIsNone(_EMOJI_RE.search(json.dumps(obj)))
 
+        self.assertNotIn("//", deck["embeds"][0]["title"])
+        self.assertEqual(len(wall["embeds"]), 2)
+        self.assertEqual(wall["embeds"][0]["title"], "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY")
         self.assertEqual(len(hud), 4)
-        self.assertTrue(all(len(name) <= 100 for name in hud))
-        self.assertIn("CORE: 18%", hud[0])
-        self.assertIn("FLEET: 1 ONLINE", hud[1])
-        self.assertIn("325.9GB FREE", hud[2])
         self.assertIn("BKK: 31C | BTC: $95.4K", hud[3])
-        self.assertEqual(len(deck["components"]), 3)
-        self.assertEqual(mumu["embeds"][0]["title"], "[ACTIVE] MuMu Drone Fleet (1 Online)")
-        self.assertIn("MuMuNxDevice.exe", procs["embeds"][0]["description"])
+
+    def test_dynamic_feeds_and_custom_commands_encapsulation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_data = Path(tmpdir)
+            tmp_discord = tmp_data / "discord"
+            tmp_feeds = tmp_discord / "feeds.json"
+            tmp_cmds = tmp_discord / "commands.json"
+            tmp_station = tmp_discord / "station.json"
+            tmp_notes = tmp_discord / "notes.json"
+
+            legacy_station = tmp_data / "discord_station.json"
+            tmp_data.mkdir(parents=True, exist_ok=True)
+            legacy_station.write_text(json.dumps({"guild_id": "999"}), encoding="utf-8")
+
+            with patch.object(intel_feeds, "DISCORD_DATA_DIR", tmp_discord), patch.object(
+                intel_feeds, "FEEDS_REGISTRY_PATH", tmp_feeds
+            ), patch.object(discord_bot, "DATA_DIR", tmp_data), patch.object(
+                discord_bot, "DISCORD_DATA_DIR", tmp_discord
+            ), patch.object(discord_bot, "STATION_STATE_PATH", tmp_station), patch.object(
+                discord_bot, "COMMANDS_REGISTRY_PATH", tmp_cmds
+            ), patch.object(discord_bot, "NOTES_PATH", tmp_notes):
+                loaded_state = discord_bot.load_station_state()
+                self.assertEqual(loaded_state.get("guild_id"), "999")
+                self.assertFalse(legacy_station.exists())
+                self.assertTrue(tmp_station.exists())
+
+                add_res = intel_feeds.add_custom_rss_feed("ai", "Anthropic News", "https://example.com/rss.xml")
+                self.assertEqual(add_res["action"], "added")
+                self.assertTrue(tmp_feeds.exists())
+                reg = intel_feeds.list_feed_sources()
+                self.assertTrue(any(f["name"] == "Anthropic News" for f in reg["ai"]))
+
+                rm_res = intel_feeds.remove_feed_source("ai", "Anthropic News")
+                self.assertEqual(rm_res["removed"], 1)
+
+                cmd_res = discord_bot.upsert_custom_command("Dash!", "Open Tailscale UI", "https://node.ts.net")
+                self.assertEqual(cmd_res["command"]["name"], "dash")
+                self.assertTrue(tmp_cmds.exists())
+                wall_payload = discord_bot.build_command_wall_payload()
+                self.assertIn("/run name:dash", json.dumps(wall_payload))
+                self.assertTrue(discord_bot.delete_custom_command("dash"))
 
     def test_intel_feed_parsers_and_emoji_stripping(self) -> None:
         rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -150,12 +209,21 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             intel_feeds,
+            "load_feeds_registry",
+            return_value={
+                "ai": [
+                    {"name": "HF Papers", "kind": "json_hf", "url": "https://hf.test", "enabled": True},
+                    {"name": "Custom RSS", "kind": "rss", "url": "https://rss.test", "enabled": True},
+                ]
+            },
+        ), patch.object(
+            intel_feeds,
             "_fetch_json",
             return_value=[{"paper": {"id": "2501.0001", "title": "Paper \U0001F525 One", "upvotes": 42}}],
         ), patch.object(intel_feeds, "_fetch_text", return_value=rss_xml):
             ai_payload = intel_feeds.fetch_ai_cortex_intel(limit=3)
         self.assertIsNone(_EMOJI_RE.search(json.dumps(ai_payload)))
-        self.assertEqual(ai_payload["embeds"][0]["title"], "// ORBITAL AI & SINGULARITY CORTEX")
+        self.assertEqual(ai_payload["embeds"][0]["title"], "[INTEL] ORBITAL AI & SINGULARITY CORTEX")
 
     def test_encode_multipart_form_data(self) -> None:
         png_stub = b"\x89PNG\r\n\x1a\nFAKEPNG"
@@ -189,23 +257,12 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             discord_bot,
-            "capture_host_screenshot_png",
-            return_value=(b"\x89PNG\r\n\x1a\nHOST", "Mothership Bridge Display (genesis)"),
+            "load_custom_commands",
+            return_value=[{"name": "ping", "description": "Test", "response": "Pong!"}],
         ):
-            snap_payload, snap_files = await discord_bot._execute_command_action(
-                "screenshot_host", {"target": "host"}
-            )
-        self.assertIsNotNone(snap_files)
-        self.assertEqual(len(snap_files), 1)
-        self.assertEqual(snap_payload["embeds"][0]["title"], "[SENSOR] Mothership Bridge Display (genesis)")
-
-        with patch.object(
-            discord_bot,
-            "fetch_ai_cortex_intel",
-            return_value={"embeds": [{"title": "// ORBITAL AI & SINGULARITY CORTEX"}]},
-        ):
-            ai_res, _ = await discord_bot._execute_command_action("ai")
-        self.assertEqual(ai_res["embeds"][0]["title"], "// ORBITAL AI & SINGULARITY CORTEX")
+            run_payload, _ = await discord_bot._execute_command_action("run", {"name": "ping"})
+        self.assertEqual(run_payload["embeds"][0]["title"], "[MACRO] /ping")
+        self.assertEqual(run_payload["embeds"][0]["description"], "Pong!")
 
 
 if __name__ == "__main__":

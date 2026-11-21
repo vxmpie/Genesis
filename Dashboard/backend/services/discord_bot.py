@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -20,12 +21,17 @@ from backend.core.config import CONFIG, DATA_DIR
 from backend.core.events import add_event
 from backend.services.discord_notifier import DISCORD_API_BASE, purge_discord_channel_messages, sanitize_error_text
 from backend.services.intel_feeds import (
+    DISCORD_DATA_DIR,
+    VALID_FEED_CATEGORIES,
+    add_custom_rss_feed,
     build_omni_briefing_payload,
     fetch_ai_cortex_intel,
     fetch_free_loot_intel,
     fetch_tech_radar_intel,
     fetch_world_pulse_intel,
     get_cached_hud_sensors_sync,
+    list_feed_sources,
+    remove_feed_source,
     strip_emojis,
 )
 from backend.services.maintenance import deep_clean_execute, get_vm_disk_status, ram_boost, trim_vm_caches
@@ -39,88 +45,78 @@ from backend.services.mumu_monitor import (
 from backend.services.telemetry import get_session_summary, get_system_metrics, get_top_processes
 from backend.services.tunnel import get_tunnel_status
 
-# --- Constants & Mothership Topology ---
+# --- Constants & Motherboard Topology ---
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-STATION_STATE_PATH = DATA_DIR / "discord_station.json"
-NOTES_PATH = DATA_DIR / "notes.json"
-USER_AGENT = "Genesis-Mothership-Core/4.0"
+STATION_STATE_PATH = DISCORD_DATA_DIR / "station.json"
+COMMANDS_REGISTRY_PATH = DISCORD_DATA_DIR / "commands.json"
+NOTES_PATH = DISCORD_DATA_DIR / "notes.json"
+USER_AGENT = "Genesis-Motherboard-Core/4.1"
 
-GUILD_MOTHERSHIP_NAME = "GENESIS-01 // ORBITAL MOTHERSHIP"
-BOT_MOTHERSHIP_NICK = "GENESIS // AI CORE"
+GUILD_MOTHERSHIP_NAME = "Genesis Motherboard"
+BOT_MOTHERSHIP_NICK = "MOTHERBOARD CORE"
 
-CATEGORY_HUD = "// [00] ORBITAL TELEMETRY ARRAY"
-CATEGORY_BRIDGE = "// [01] BRIDGE COMMAND DECK"
-CATEGORY_INTEL = "// [02] OMNISCIENT INTEL CORTEX"
-CATEGORY_CREW = "// [03] CREW QUARTERS"
-CATEGORY_COMMS = "// [04] COMMS & AIRLOCKS"
+CATEGORY_HUD = "[00] TELEMETRY ARRAY"
+CATEGORY_BRIDGE = "[01] BRIDGE COMMAND"
+CATEGORY_INTEL = "[02] INTEL CORTEX"
+CATEGORY_CREW = "[03] CREW QUARTERS"
+CATEGORY_COMMS = "[04] COMMS & AIRLOCKS"
 
 HUD_CHANNEL_PREFIXES = ("CORE:", "FLEET:", "HULL C:", "BKK:")
+
+ROLE_DEFINITIONS: list[dict] = [
+    {"key": "overlord", "name": "OVERLORD", "color": 0xF59E0B, "hoist": True, "mentionable": True},
+    {"key": "core", "name": "MOTHERBOARD CORE", "color": 0x06B6D4, "hoist": True, "mentionable": True},
+    {"key": "audio", "name": "AUDIO DRONE", "color": 0x8B5CF6, "hoist": True, "mentionable": True},
+]
 
 PERMISSION_VIEW_CHANNEL = 1 << 10
 PERMISSION_CONNECT = 1 << 20
 
 SLASH_COMMANDS: list[dict] = [
     {
+        "_group": "Bridge & Overview",
         "name": "bridge",
-        "description": "Spawn or refresh the GENESIS-01 Mothership Bridge Console",
+        "description": "Spawn or refresh the Genesis Motherboard Bridge Console",
         "type": 1,
     },
     {
+        "_group": "Bridge & Overview",
+        "name": "wall",
+        "description": "Display and sync the dynamic Master Command Wall",
+        "type": 1,
+    },
+    {
+        "_group": "Bridge & Overview",
         "name": "briefing",
-        "description": "Unified Mothership Omni-Briefing (Ship + Weather + Markets + AI/Tech)",
+        "description": "Unified Omni-Briefing (Hardware + Weather + Markets + AI/Tech)",
         "type": 1,
     },
     {
+        "_group": "Reactor & Hardware Control",
         "name": "status",
         "description": "Full reactor and hull telemetry (CPU, RAM, GPU, Disk, Ping, Tunnel)",
         "type": 1,
     },
     {
-        "name": "ai",
-        "description": "Orbital AI & Singularity Cortex (HuggingFace Papers + TechCrunch AI)",
+        "_group": "Reactor & Hardware Control",
+        "name": "processes",
+        "description": "List top 10 resource-consuming processes on Genesis Motherboard",
         "type": 1,
     },
     {
-        "name": "tech",
-        "description": "Deep-Space Tech & Cybernetics Radar (Hacker News + The Verge)",
-        "type": 1,
-    },
-    {
-        "name": "world",
-        "description": "Planetary World Pulse, Bangkok Weather, Markets & GitHub Radar",
-        "type": 1,
-    },
-    {
-        "name": "loot",
-        "description": "Orbital Supply Drop (Epic Games Freebies & 100%-Off PC Deals)",
-        "type": 1,
-    },
-    {
+        "_group": "Reactor & Hardware Control",
         "name": "boost",
         "description": "Execute Reactor RAM Boost (Standby List purge and working set trim)",
         "type": 1,
     },
     {
-        "name": "mumu",
-        "description": "Inspect MuMu drone fleet, Roblox presence, and recovery controls",
+        "_group": "Reactor & Hardware Control",
+        "name": "clean",
+        "description": "Execute Hull Deep Clean across temp directories, logs, and caches",
         "type": 1,
     },
     {
-        "name": "recover",
-        "description": "Trigger Roblox drone recovery on an instance or all active instances",
-        "type": 1,
-        "options": [
-            {
-                "name": "instance",
-                "description": "Instance index (1-10). Leave empty to recover all active instances.",
-                "type": 4,
-                "required": False,
-                "min_value": 1,
-                "max_value": 10,
-            }
-        ],
-    },
-    {
+        "_group": "Reactor & Hardware Control",
         "name": "screenshot",
         "description": "Capture live PNG sensor frame from MuMu or Host desktop",
         "type": 1,
@@ -138,16 +134,7 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "name": "processes",
-        "description": "List top 10 resource-consuming processes on the mothership",
-        "type": 1,
-    },
-    {
-        "name": "clean",
-        "description": "Execute Hull Deep Clean across temp directories, logs, and caches",
-        "type": 1,
-    },
-    {
+        "_group": "Reactor & Hardware Control",
         "name": "purge",
         "description": "Purge messages from the #reactor-telemetry alerts channel",
         "type": 1,
@@ -163,29 +150,139 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "name": "log",
-        "description": "Record a Captain's Log entry into #captain-datacore and local vault",
+        "_group": "MuMu Drone Fleet",
+        "name": "mumu",
+        "description": "Inspect MuMu drone fleet, Roblox presence, and recovery controls",
+        "type": 1,
+    },
+    {
+        "_group": "MuMu Drone Fleet",
+        "name": "recover",
+        "description": "Trigger Roblox drone recovery on an instance or all active instances",
         "type": 1,
         "options": [
             {
-                "name": "text",
-                "description": "Log entry content to store",
-                "type": 3,
-                "required": True,
+                "name": "instance",
+                "description": "Instance index (1-10). Leave empty to recover all active instances.",
+                "type": 4,
+                "required": False,
+                "min_value": 1,
+                "max_value": 10,
             }
         ],
     },
     {
+        "_group": "Omniscient Intel Cortex",
+        "name": "ai",
+        "description": "Orbital AI & Singularity Cortex (Papers + AI News + Custom Feeds)",
+        "type": 1,
+    },
+    {
+        "_group": "Omniscient Intel Cortex",
+        "name": "tech",
+        "description": "Deep-Space Tech & Cybernetics Radar (Hacker News + Verge + Lobsters)",
+        "type": 1,
+    },
+    {
+        "_group": "Omniscient Intel Cortex",
+        "name": "world",
+        "description": "Planetary World Pulse, Bangkok Weather, Markets & GitHub Radar",
+        "type": 1,
+    },
+    {
+        "_group": "Omniscient Intel Cortex",
+        "name": "loot",
+        "description": "Orbital Supply Drop (Epic Games Freebies & 100%-Off PC Deals)",
+        "type": 1,
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "feed-add",
+        "description": "Dynamically subscribe a new RSS/Atom news feed to an Intel channel",
+        "type": 1,
+        "options": [
+            {
+                "name": "category",
+                "description": "Target Intel category",
+                "type": 3,
+                "required": True,
+                "choices": [
+                    {"name": "AI Cortex", "value": "ai"},
+                    {"name": "Tech Radar", "value": "tech"},
+                    {"name": "World Pulse", "value": "world"},
+                    {"name": "Free Loot", "value": "loot"},
+                ],
+            },
+            {"name": "name", "description": "Display title for this source", "type": 3, "required": True},
+            {"name": "url", "description": "RSS or Atom XML feed URL", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "feed-remove",
+        "description": "Remove an RSS/Atom or JSON feed source from an Intel category",
+        "type": 1,
+        "options": [
+            {
+                "name": "category",
+                "description": "Target Intel category",
+                "type": 3,
+                "required": True,
+                "choices": [
+                    {"name": "AI Cortex", "value": "ai"},
+                    {"name": "Tech Radar", "value": "tech"},
+                    {"name": "World Pulse", "value": "world"},
+                    {"name": "Free Loot", "value": "loot"},
+                ],
+            },
+            {"name": "name", "description": "Exact source name to remove", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "cmd-add",
+        "description": "Hang a new custom quick-command or macro onto #command-wall",
+        "type": 1,
+        "options": [
+            {"name": "name", "description": "Trigger keyword (e.g. dashboard, kmitl)", "type": 3, "required": True},
+            {"name": "description", "description": "Short label shown on #command-wall", "type": 3, "required": True},
+            {"name": "response", "description": "Text, link, or command output returned by /run", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "cmd-remove",
+        "description": "Remove a custom quick-command from #command-wall",
+        "type": 1,
+        "options": [
+            {"name": "name", "description": "Trigger keyword to delete", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "run",
+        "description": "Execute a saved custom command or macro from #command-wall",
+        "type": 1,
+        "options": [
+            {"name": "name", "description": "Custom command keyword to run", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
+        "name": "log",
+        "description": "Record a Captain's Log entry into #captain-datacore and local vault",
+        "type": 1,
+        "options": [
+            {"name": "text", "description": "Log entry content to store", "type": 3, "required": True},
+        ],
+    },
+    {
+        "_group": "Dynamic Registry & Datacore",
         "name": "note",
         "description": "Alias for /log: save a quick note into #captain-datacore",
         "type": 1,
         "options": [
-            {
-                "name": "text",
-                "description": "Note content to store",
-                "type": 3,
-                "required": True,
-            }
+            {"name": "text", "description": "Note content to store", "type": 3, "required": True},
         ],
     },
 ]
@@ -193,13 +290,35 @@ SLASH_COMMANDS: list[dict] = [
 _STATE_LOCK = threading.RLock()
 
 
-# --- Discord REST & Multipart Helpers ---
+def get_discord_api_commands() -> list[dict]:
+    return [{k: v for k, v in cmd.items() if not k.startswith("_")} for cmd in SLASH_COMMANDS]
+
+
+# --- Folder Encapsulation, Migration & Dynamic Storage ---
+def _migrate_legacy_files() -> None:
+    DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    legacy_pairs = [
+        (DATA_DIR / "discord_station.json", STATION_STATE_PATH),
+        (DATA_DIR / "notes.json", NOTES_PATH),
+    ]
+    for src, dst in legacy_pairs:
+        if src.exists():
+            try:
+                if not dst.exists():
+                    os.replace(src, dst)
+                else:
+                    src.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def _utc_iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def load_station_state() -> dict:
     with _STATE_LOCK:
+        _migrate_legacy_files()
         if STATION_STATE_PATH.exists():
             try:
                 data = json.loads(STATION_STATE_PATH.read_text(encoding="utf-8-sig"))
@@ -212,20 +331,81 @@ def load_station_state() -> dict:
 
 def save_station_state(state: dict) -> None:
     with _STATE_LOCK:
+        DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp_path = STATION_STATE_PATH.with_suffix(".json.tmp")
         tmp_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
         os.replace(tmp_path, STATION_STATE_PATH)
 
 
-def append_quick_note(text: str, author: str = "commander") -> dict:
+def load_custom_commands() -> list[dict]:
+    with _STATE_LOCK:
+        DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if COMMANDS_REGISTRY_PATH.exists():
+            try:
+                data = json.loads(COMMANDS_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+                if isinstance(data, list):
+                    return [x for x in data if isinstance(x, dict)]
+            except Exception:
+                pass
+        return []
+
+
+def save_custom_commands(cmds: list[dict]) -> None:
+    with _STATE_LOCK:
+        DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = COMMANDS_REGISTRY_PATH.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(cmds, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
+        os.replace(tmp_path, COMMANDS_REGISTRY_PATH)
+
+
+def upsert_custom_command(name: str, description: str, response: str) -> dict:
+    clean_name = re.sub(r"[^a-z0-9_-]", "-", strip_emojis(name).lower()).strip("-")[:32]
+    if not clean_name:
+        raise ValueError("Command trigger name must contain alphanumeric characters")
+    clean_desc = strip_emojis(description)[:120] or "Custom command"
+    clean_resp = strip_emojis(response)[:1500]
+    if not clean_resp:
+        raise ValueError("Command response cannot be empty")
+
+    with _STATE_LOCK:
+        cmds = load_custom_commands()
+        entry = {
+            "name": clean_name,
+            "description": clean_desc,
+            "response": clean_resp,
+            "updated_utc": _utc_iso_now(),
+        }
+        for idx, item in enumerate(cmds):
+            if str(item.get("name", "")).lower() == clean_name:
+                cmds[idx] = entry
+                save_custom_commands(cmds)
+                return {"action": "updated", "command": entry}
+        cmds.append(entry)
+        save_custom_commands(cmds)
+        return {"action": "added", "command": entry}
+
+
+def delete_custom_command(name: str) -> bool:
+    clean_name = re.sub(r"[^a-z0-9_-]", "-", strip_emojis(name).lower()).strip("-")
+    with _STATE_LOCK:
+        cmds = load_custom_commands()
+        kept = [c for c in cmds if str(c.get("name", "")).lower() != clean_name]
+        if len(kept) == len(cmds):
+            return False
+        save_custom_commands(kept)
+        return True
+
+
+def append_quick_note(text: str, author: str = "overlord") -> dict:
     clean_text = strip_emojis(text)
     entry = {
         "id": uuid.uuid4().hex[:8],
         "text": clean_text,
-        "author": strip_emojis(author) or "commander",
+        "author": strip_emojis(author) or "overlord",
         "timestamp_utc": _utc_iso_now(),
     }
     with _STATE_LOCK:
+        _migrate_legacy_files()
         notes: list[dict] = []
         if NOTES_PATH.exists():
             try:
@@ -242,6 +422,7 @@ def append_quick_note(text: str, author: str = "commander") -> dict:
     return entry
 
 
+# --- Discord REST & Multipart Helpers ---
 def encode_multipart_form_data(
     payload_json: dict,
     files: list[tuple[str, str, bytes]],
@@ -451,7 +632,7 @@ def capture_host_screenshot_png() -> tuple[bytes | None, str]:
         if proc.returncode == 0 and tmp_path.exists():
             data = tmp_path.read_bytes()
             if data.startswith(b"\x89PNG"):
-                return data, f"Mothership Bridge Display ({socket.gethostname()})"
+                return data, f"Genesis Motherboard Display ({socket.gethostname()})"
         err_text = (proc.stderr or proc.stdout or "Desktop capture unavailable in current session").strip()
         return None, f"Host capture failed: {err_text[:180]}"
     except Exception as exc:
@@ -484,10 +665,10 @@ def build_deck_payload() -> dict:
     )
 
     embed = {
-        "title": "// GENESIS-01 MOTHERSHIP BRIDGE CONSOLE",
+        "title": "[GENESIS MOTHERBOARD] BRIDGE COMMAND CONSOLE",
         "description": (
-            f"Flagship Command & Omniscient Intelligence Terminal for vessel **{socket.gethostname()}**.\n"
-            "Control reactor hardware, deploy drone recovery, capture live sensors, or intercept global AI/Tech/World intelligence."
+            f"Unified Command & Intelligence Terminal for vessel **{socket.gethostname()}**.\n"
+            "Control reactor hardware, deploy drone recovery, capture live sensors, or inspect global feeds."
         ),
         "color": 0x3B82F6,
         "fields": [
@@ -518,7 +699,7 @@ def build_deck_payload() -> dict:
                 "inline": False,
             },
         ],
-        "footer": {"text": f"GENESIS-01 Orbital Mothership | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -550,11 +731,104 @@ def build_deck_payload() -> dict:
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Free Loot", "custom_id": "cmd:loot"},
-                {"type": 2, "style": 3, "label": "Sync All Intel", "custom_id": "cmd:sync_intel"},
+                {"type": 2, "style": 3, "label": "Command Wall", "custom_id": "cmd:wall"},
             ],
         },
     ]
     return {"embeds": [embed], "components": components}
+
+
+def build_command_wall_payload() -> dict:
+    grouped: dict[str, list[str]] = {}
+    for cmd in SLASH_COMMANDS:
+        grp = str(cmd.get("_group", "General"))
+        opts = cmd.get("options") or []
+        opt_str = " ".join(f"[{o['name']}]" if not o.get("required") else f"<{o['name']}>" for o in opts)
+        sig = f"`/{cmd['name']}{' ' + opt_str if opt_str else ''}`"
+        grouped.setdefault(grp, []).append(f"{sig} -- {cmd['description']}")
+
+    directory_fields: list[dict] = []
+    for grp_name, lines in grouped.items():
+        directory_fields.append(
+            {
+                "name": grp_name,
+                "value": "\n".join(lines)[:1020],
+                "inline": False,
+            }
+        )
+
+    embed_directory = {
+        "title": "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY",
+        "description": (
+            "Live command reference auto-generated from the active Motherboard Registry.\n"
+            "Type `/` in any channel to trigger built-in commands with autocomplete."
+        ),
+        "color": 0x06B6D4,
+        "fields": directory_fields,
+        "footer": {"text": f"Total Built-in Commands: {len(SLASH_COMMANDS)} | Auto-Synced"},
+        "timestamp": _utc_iso_now(),
+    }
+
+    custom_cmds = load_custom_commands()
+    custom_lines = [
+        f"- `/run name:{c['name']}` -- {c.get('description', 'Custom macro')}"
+        for c in custom_cmds[:15]
+    ]
+    custom_val = (
+        "\n".join(custom_lines)
+        if custom_lines
+        else "No custom macros hung yet. Use `/cmd-add` to attach your own commands or quick links here."
+    )
+
+    feeds = list_feed_sources()
+    feed_summary_lines: list[str] = []
+    for cat in VALID_FEED_CATEGORIES:
+        names = [str(f.get("name", "")) for f in feeds.get(cat, []) if f.get("enabled", True)]
+        feed_summary_lines.append(f"`{cat.upper()}` ({len(names)}): {', '.join(names) if names else 'None'}")
+
+    companion_text = (
+        "**Role Hierarchy**: `OVERLORD` (Owner) | `MOTHERBOARD CORE` (Main AI) | `AUDIO DRONE` (Voice Music)\n"
+        "**Recommended Voice Audio Add-on**: Single core bot handles 100% of ship & intelligence ops. "
+        "For 24/7 Lo-Fi/Music inside voice channels, invite **[Jockie Music](https://www.jockiemusic.com/)** "
+        "and assign it the `AUDIO DRONE` role."
+    )
+
+    embed_dynamic = {
+        "title": "[DYNAMIC REGISTRY] CUSTOM MACROS, FEEDS & COMPANION BAY",
+        "color": 0x8B5CF6,
+        "fields": [
+            {
+                "name": f"Custom Command Macros ({len(custom_cmds)}) -- Hang with /cmd-add",
+                "value": custom_val[:1020],
+                "inline": False,
+            },
+            {
+                "name": "Active Intelligence Sources -- Modify with /feed-add & /feed-remove",
+                "value": "\n".join(feed_summary_lines)[:1020],
+                "inline": False,
+            },
+            {
+                "name": "Roles & External Module Bay",
+                "value": companion_text,
+                "inline": False,
+            },
+        ],
+        "footer": {"text": f"Vault: Dashboard/data/discord/ | Host: {socket.gethostname()}"},
+        "timestamp": _utc_iso_now(),
+    }
+
+    components = [
+        {
+            "type": 1,
+            "components": [
+                {"type": 2, "style": 1, "label": "Refresh Wall", "custom_id": "cmd:wall_refresh"},
+                {"type": 2, "style": 2, "label": "List Feeds", "custom_id": "cmd:feeds_list"},
+                {"type": 2, "style": 3, "label": "Sync All Intel", "custom_id": "cmd:sync_intel"},
+                {"type": 2, "style": 2, "label": "Bridge Console", "custom_id": "cmd:bridge"},
+            ],
+        }
+    ]
+    return {"embeds": [embed_directory, embed_dynamic], "components": components}
 
 
 def build_status_payload() -> dict:
@@ -582,7 +856,7 @@ def build_status_payload() -> dict:
     standby_guard = summary.get("standby_guard", {})
 
     embed = {
-        "title": "[ONLINE] GENESIS-01 Reactor & Hull Telemetry",
+        "title": "[ONLINE] GENESIS MOTHERBOARD TELEMETRY",
         "color": 0x10B981,
         "fields": [
             {
@@ -621,7 +895,7 @@ def build_status_payload() -> dict:
                 "inline": False,
             },
         ],
-        "footer": {"text": f"GENESIS-01 Orbital Mothership | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -647,7 +921,9 @@ def build_processes_payload() -> dict:
             try:
                 mem = proc.info["memory_info"]
                 ram_mb = round((mem.rss if mem else 0) / (1024 ** 2), 1)
-                snap.append({"pid": proc.info["pid"], "name": proc.info["name"] or "Unknown", "ram_mb": ram_mb, "protected": False})
+                snap.append(
+                    {"pid": proc.info["pid"], "name": proc.info["name"] or "Unknown", "ram_mb": ram_mb, "protected": False}
+                )
             except Exception:
                 continue
         snap.sort(key=lambda x: x["ram_mb"], reverse=True)
@@ -660,10 +936,10 @@ def build_processes_payload() -> dict:
     ]
 
     embed = {
-        "title": "// TOP 10 MOTHERSHIP PROCESSES BY RAM",
+        "title": "[PROCESSES] TOP 10 MEMORY CONSUMERS",
         "description": "\n".join(lines) if lines else "No process telemetry sampled yet.",
         "color": 0x06B6D4,
-        "footer": {"text": f"GENESIS-01 Process Scanner | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Process Scanner | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
@@ -689,7 +965,7 @@ def build_mumu_payload() -> dict:
             "title": "[IDLE] MuMu Drone Fleet Status",
             "description": "No MuMu emulator drones are currently active.",
             "color": 0x64748B,
-            "footer": {"text": f"GENESIS-01 Fleet Monitor | Host: {socket.gethostname()}"},
+            "footer": {"text": f"Genesis Motherboard Fleet Monitor | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
         }
         return {"embeds": [embed], "components": []}
@@ -747,13 +1023,13 @@ def build_mumu_payload() -> dict:
         "title": f"[ACTIVE] MuMu Drone Fleet ({len(devices)} Online)",
         "color": 0x3B82F6,
         "fields": fields,
-        "footer": {"text": f"GENESIS-01 Fleet Monitor | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Fleet Monitor | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     return {"embeds": [embed], "components": components}
 
 
-# --- Server Provisioning & Intel Sync ---
+# --- Server Provisioning, Roles & Intel Sync ---
 async def _find_or_create_channel(
     bot_token: str,
     guild_id: str,
@@ -815,6 +1091,51 @@ async def _find_or_create_channel(
     raise RuntimeError(f"Failed to create channel '{target_name}' (HTTP {st}): {sanitize_error_text(body)}")
 
 
+async def _provision_guild_roles(
+    bot_token: str,
+    guild_id: str,
+    owner_id: str,
+    bot_id: str,
+) -> dict[str, str]:
+    st_r, roles_raw, _ = await _discord_api("GET", f"/guilds/{guild_id}/roles", bot_token)
+    roles_list = roles_raw if (st_r == 200 and isinstance(roles_raw, list)) else []
+    by_name = {str(r.get("name", "")).lower(): r for r in roles_list if isinstance(r, dict)}
+    resolved: dict[str, str] = {}
+
+    for spec in ROLE_DEFINITIONS:
+        r_name = spec["name"]
+        existing = by_name.get(r_name.lower())
+        role_id = str(existing["id"]) if existing else None
+        payload = {
+            "name": r_name,
+            "color": spec["color"],
+            "hoist": spec["hoist"],
+            "mentionable": spec["mentionable"],
+        }
+        if role_id:
+            await _discord_api("PATCH", f"/guilds/{guild_id}/roles/{role_id}", bot_token, payload=payload)
+        else:
+            st_c, created, _ = await _discord_api("POST", f"/guilds/{guild_id}/roles", bot_token, payload=payload)
+            if 200 <= st_c < 300 and isinstance(created, dict) and created.get("id"):
+                role_id = str(created["id"])
+        if role_id:
+            resolved[spec["key"]] = role_id
+
+    if resolved.get("overlord") and owner_id:
+        await _discord_api(
+            "PUT",
+            f"/guilds/{guild_id}/members/{owner_id}/roles/{resolved['overlord']}",
+            bot_token,
+        )
+    if resolved.get("core") and bot_id:
+        await _discord_api(
+            "PUT",
+            f"/guilds/{guild_id}/members/{bot_id}/roles/{resolved['core']}",
+            bot_token,
+        )
+    return resolved
+
+
 async def _upsert_board_message(
     bot_token: str,
     channel_id: str,
@@ -846,7 +1167,29 @@ async def _upsert_board_message(
     return existing_msg_id
 
 
-async def sync_intel_channels(bot_token: str | None = None) -> dict:
+async def refresh_command_wall(bot_token: str | None = None) -> dict:
+    alerts_cfg = CONFIG.get("alerts", {})
+    token = (bot_token or str(alerts_cfg.get("discord_bot_token", "") or "")).strip()
+    state = load_station_state()
+    wall_cid = state.get("command_wall_channel_id")
+    if not token or not wall_cid:
+        return {"ok": False, "error": "Command wall channel not provisioned"}
+
+    wall_payload = await asyncio.to_thread(build_command_wall_payload)
+    msg_id = await _upsert_board_message(
+        token,
+        str(wall_cid),
+        state.get("command_wall_message_id"),
+        wall_payload,
+        pin=True,
+    )
+    if msg_id:
+        state["command_wall_message_id"] = msg_id
+        save_station_state(state)
+    return {"ok": True, "command_wall_message_id": msg_id}
+
+
+async def sync_intel_channels(bot_token: str | None = None, categories: tuple[str, ...] | None = None) -> dict:
     alerts_cfg = CONFIG.get("alerts", {})
     token = (bot_token or str(alerts_cfg.get("discord_bot_token", "") or "")).strip()
     if not token:
@@ -868,10 +1211,12 @@ async def sync_intel_channels(bot_token: str | None = None) -> dict:
         "loot": fetch_free_loot_intel,
     }
 
+    target_keys = categories if categories else tuple(builders.keys())
     updated: list[str] = []
-    for key, builder_fn in builders.items():
+    for key in target_keys:
+        builder_fn = builders.get(key)
         cid = intel_channels.get(key)
-        if not cid:
+        if not builder_fn or not cid:
             continue
         try:
             payload = await asyncio.to_thread(builder_fn)
@@ -915,8 +1260,13 @@ async def provision_guild_station(
         return {"ok": False, "error": f"Failed to resolve guild from channel {dash_ch_id} (HTTP {st_ch})"}
     guild_id = str(ch_data["guild_id"])
 
+    st_g, guild_data, _ = await _discord_api("GET", f"/guilds/{guild_id}", token)
+    owner_id = str(guild_data.get("owner_id", "")) if (st_g == 200 and isinstance(guild_data, dict)) else ""
+
     await _discord_api("PATCH", f"/guilds/{guild_id}", token, payload={"name": GUILD_MOTHERSHIP_NAME})
     await _discord_api("PATCH", f"/guilds/{guild_id}/members/@me", token, payload={"nick": BOT_MOTHERSHIP_NICK})
+
+    roles_map = await _provision_guild_roles(token, guild_id, owner_id, app_id)
 
     st_list, channels_raw, _ = await _discord_api("GET", f"/guilds/{guild_id}/channels", token)
     if st_list != 200 or not isinstance(channels_raw, list):
@@ -926,21 +1276,52 @@ async def provision_guild_station(
     state = load_station_state()
     state["guild_id"] = guild_id
     state["app_id"] = app_id
+    state["roles"] = roles_map
 
     cat_hud = await _find_or_create_channel(
-        token, guild_id, channels, CATEGORY_HUD, 4, position=0, legacy_names=("// GENESIS TELEMETRY HUD",)
+        token,
+        guild_id,
+        channels,
+        CATEGORY_HUD,
+        4,
+        position=0,
+        legacy_names=("// GENESIS TELEMETRY HUD", "// [00] ORBITAL TELEMETRY ARRAY"),
     )
     cat_bridge = await _find_or_create_channel(
-        token, guild_id, channels, CATEGORY_BRIDGE, 4, position=1, legacy_names=("// OPERATIONS CORE",)
+        token,
+        guild_id,
+        channels,
+        CATEGORY_BRIDGE,
+        4,
+        position=1,
+        legacy_names=("// OPERATIONS CORE", "// [01] BRIDGE COMMAND DECK"),
     )
     cat_intel = await _find_or_create_channel(
-        token, guild_id, channels, CATEGORY_INTEL, 4, position=2
+        token,
+        guild_id,
+        channels,
+        CATEGORY_INTEL,
+        4,
+        position=2,
+        legacy_names=("// [02] OMNISCIENT INTEL CORTEX",),
     )
     cat_crew = await _find_or_create_channel(
-        token, guild_id, channels, CATEGORY_CREW, 4, position=3, legacy_names=("// PERSONAL LOUNGE",)
+        token,
+        guild_id,
+        channels,
+        CATEGORY_CREW,
+        4,
+        position=3,
+        legacy_names=("// PERSONAL LOUNGE", "// [03] CREW QUARTERS"),
     )
     cat_comms = await _find_or_create_channel(
-        token, guild_id, channels, CATEGORY_COMMS, 4, position=4, legacy_names=("// VOICE DECK",)
+        token,
+        guild_id,
+        channels,
+        CATEGORY_COMMS,
+        4,
+        position=4,
+        legacy_names=("// VOICE DECK", "// [04] COMMS & AIRLOCKS"),
     )
 
     locked_overwrites = [
@@ -1008,6 +1389,16 @@ async def provision_guild_station(
         legacy_names=("command-deck",),
         known_id=state.get("command_deck_channel_id"),
     )
+    wall_ch = await _find_or_create_channel(
+        token,
+        guild_id,
+        channels,
+        "command-wall",
+        0,
+        parent_id=cat_bridge["id"],
+        position=1,
+        known_id=state.get("command_wall_channel_id"),
+    )
     reactor_ch = await _find_or_create_channel(
         token,
         guild_id,
@@ -1015,7 +1406,7 @@ async def provision_guild_station(
         "reactor-telemetry",
         0,
         parent_id=cat_bridge["id"],
-        position=1,
+        position=2,
         legacy_names=("dashboard",),
         known_id=dash_ch_id,
     )
@@ -1026,12 +1417,13 @@ async def provision_guild_station(
         "captain-datacore",
         0,
         parent_id=cat_bridge["id"],
-        position=2,
+        position=3,
         legacy_names=("dropzone",),
         known_id=state.get("dropzone_channel_id"),
     )
 
     state["command_deck_channel_id"] = str(bridge_ch["id"])
+    state["command_wall_channel_id"] = str(wall_ch["id"])
     state["dropzone_channel_id"] = str(datacore_ch["id"])
 
     existing_intel_ids = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
@@ -1083,11 +1475,12 @@ async def provision_guild_station(
             if c.get("type") == 4 and str(c["id"]) not in keep_cat_ids and str(c["id"]) not in used_parents:
                 await _discord_api("DELETE", f"/channels/{c['id']}", token)
 
+    api_commands = get_discord_api_commands()
     st_cmd, _, err_cmd = await _discord_api(
         "PUT",
         f"/applications/{app_id}/guilds/{guild_id}/commands",
         token,
-        payload=SLASH_COMMANDS,
+        payload=api_commands,
     )
     if st_cmd not in (200, 201):
         return {"ok": False, "error": f"Command registration failed (HTTP {st_cmd}): {err_cmd[:150]}"}
@@ -1104,24 +1497,28 @@ async def provision_guild_station(
         state["deck_message_id"] = deck_msg_id
 
     save_station_state(state)
+    wall_res = await refresh_command_wall(token)
     intel_res = await sync_intel_channels(token)
 
     add_event(
         "system",
-        f"GENESIS-01 Orbital Mothership provisioned in guild {guild_id} ({len(SLASH_COMMANDS)} slash commands)",
+        f"Genesis Motherboard provisioned in guild {guild_id} ({len(api_commands)} slash commands, roles={list(roles_map.keys())})",
     )
     return {
         "ok": True,
         "guild_name": GUILD_MOTHERSHIP_NAME,
         "guild_id": guild_id,
         "app_id": app_id,
+        "roles": roles_map,
         "bridge_channel_id": state["command_deck_channel_id"],
+        "command_wall_channel_id": state["command_wall_channel_id"],
         "reactor_channel_id": str(reactor_ch["id"]),
         "datacore_channel_id": state["dropzone_channel_id"],
         "intel_channel_ids": state["intel_channel_ids"],
         "hud_channel_ids": resolved_hud_ids,
         "deck_message_id": state.get("deck_message_id"),
-        "commands_registered": [c["name"] for c in SLASH_COMMANDS],
+        "command_wall_message_id": wall_res.get("command_wall_message_id"),
+        "commands_registered": [c["name"] for c in api_commands],
         "intel_sync": intel_res,
     }
 
@@ -1130,7 +1527,7 @@ async def provision_guild_station(
 async def _execute_command_action(
     action: str,
     options: dict[str, object] | None = None,
-    author_name: str = "commander",
+    author_name: str = "overlord",
 ) -> tuple[dict, list[tuple[str, str, bytes]] | None]:
     opts = options or {}
 
@@ -1139,6 +1536,143 @@ async def _execute_command_action(
 
     if action in ("deck", "bridge", "deck_refresh"):
         return await asyncio.to_thread(build_deck_payload), None
+
+    if action in ("wall", "wall_refresh"):
+        await refresh_command_wall()
+        return await asyncio.to_thread(build_command_wall_payload), None
+
+    if action == "feeds_list":
+        feeds = await asyncio.to_thread(list_feed_sources)
+        fields = [
+            {
+                "name": f"Category: {cat.upper()} ({len(feeds.get(cat, []))})",
+                "value": "\n".join(
+                    f"- **{f['name']}** (`{f['kind']}`): {f['url']}" for f in feeds.get(cat, [])
+                )[:1020]
+                or "Empty",
+                "inline": False,
+            }
+            for cat in VALID_FEED_CATEGORIES
+        ]
+        return {
+            "embeds": [
+                {
+                    "title": "[REGISTRY] ACTIVE DYNAMIC INTELLIGENCE SOURCES",
+                    "color": 0x06B6D4,
+                    "fields": fields,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action == "feed-add":
+        cat = str(opts.get("category") or "")
+        name = str(opts.get("name") or "")
+        url = str(opts.get("url") or "")
+        res = await asyncio.to_thread(add_custom_rss_feed, cat, name, url)
+        await sync_intel_channels(categories=(res["category"],))
+        await refresh_command_wall()
+        return {
+            "embeds": [
+                {
+                    "title": f"[OK] Feed {res['action'].capitalize()}",
+                    "description": (
+                        f"Source **{res['feed']['name']}** added to `{res['category']}`.\n"
+                        f"Intel channel and `#command-wall` synchronized."
+                    ),
+                    "color": 0x10B981,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action == "feed-remove":
+        cat = str(opts.get("category") or "")
+        name = str(opts.get("name") or "")
+        res = await asyncio.to_thread(remove_feed_source, cat, name)
+        await sync_intel_channels(categories=(res["category"],))
+        await refresh_command_wall()
+        return {
+            "embeds": [
+                {
+                    "title": "[OK] Feed Removed",
+                    "description": f"Removed **{res['name']}** from `{res['category']}` and synced `#command-wall`.",
+                    "color": 0x10B981,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action == "cmd-add":
+        res = await asyncio.to_thread(
+            upsert_custom_command,
+            str(opts.get("name") or ""),
+            str(opts.get("description") or ""),
+            str(opts.get("response") or ""),
+        )
+        await refresh_command_wall()
+        cmd = res["command"]
+        return {
+            "embeds": [
+                {
+                    "title": f"[OK] Custom Command {res['action'].capitalize()}",
+                    "description": (
+                        f"Trigger: `/run name:{cmd['name']}`\n"
+                        f"Description: {cmd['description']}\n"
+                        "Updated on `#command-wall`."
+                    ),
+                    "color": 0x10B981,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action == "cmd-remove":
+        target = str(opts.get("name") or "")
+        deleted = await asyncio.to_thread(delete_custom_command, target)
+        if deleted:
+            await refresh_command_wall()
+        return {
+            "embeds": [
+                {
+                    "title": "[OK] Custom Command Removed" if deleted else "[WARN] Command Not Found",
+                    "description": (
+                        f"Removed `{target}` from `#command-wall`."
+                        if deleted
+                        else f"No custom command named `{target}` in registry."
+                    ),
+                    "color": 0x10B981 if deleted else 0xF59E0B,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action == "run":
+        target = re.sub(r"[^a-z0-9_-]", "-", strip_emojis(str(opts.get("name") or "")).lower()).strip("-")
+        cmds = await asyncio.to_thread(load_custom_commands)
+        matched = next((c for c in cmds if str(c.get("name", "")).lower() == target), None)
+        if not matched:
+            return {
+                "embeds": [
+                    {
+                        "title": "[WARN] Unknown Custom Command",
+                        "description": f"Custom macro `{target}` was not found. Check `#command-wall` or add one via `/cmd-add`.",
+                        "color": 0xF59E0B,
+                        "timestamp": _utc_iso_now(),
+                    }
+                ]
+            }, None
+        return {
+            "embeds": [
+                {
+                    "title": f"[MACRO] /{matched['name']}",
+                    "description": matched.get("response", ""),
+                    "color": 0x06B6D4,
+                    "footer": {"text": matched.get("description", "Custom Command")},
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
 
     if action == "briefing":
         def _build_brief():
@@ -1164,12 +1698,13 @@ async def _execute_command_action(
 
     if action == "sync_intel":
         sync_res = await sync_intel_channels()
+        await refresh_command_wall()
         ok = bool(sync_res.get("ok"))
         feeds = ", ".join(sync_res.get("synced_feeds", [])) or "none"
         return {
             "embeds": [
                 {
-                    "title": "[OK] Omniscient Intel Cortex Synchronized" if ok else "[WARN] Intel Sync Failed",
+                    "title": "[OK] Intel Cortex Synchronized" if ok else "[WARN] Intel Sync Failed",
                     "description": f"Refreshed channels: `{feeds}`" if ok else str(sync_res.get("error", "")),
                     "color": 0x10B981 if ok else 0xF59E0B,
                     "timestamp": _utc_iso_now(),
@@ -1208,7 +1743,7 @@ async def _execute_command_action(
                 },
                 {"name": "Duration", "value": f"`{res.get('duration_ms', 0)} ms`", "inline": True},
             ],
-            "footer": {"text": f"GENESIS-01 Orbital Mothership | Host: {socket.gethostname()}"},
+            "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
         }
         return {"embeds": [embed]}, None
@@ -1229,7 +1764,7 @@ async def _execute_command_action(
                 {"name": "Total Freed", "value": f"`{res.get('total_freed_mb', 0)} MB`", "inline": True},
                 {"name": "Files Deleted", "value": f"`{res.get('total_deleted', 0)}`", "inline": True},
             ],
-            "footer": {"text": f"GENESIS-01 Orbital Mothership | Host: {socket.gethostname()}"},
+            "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
         }
         return {"embeds": [embed]}, None
@@ -1366,7 +1901,7 @@ async def _execute_command_action(
                     "title": f"[SENSOR] {label}",
                     "color": 0x3B82F6,
                     "image": {"url": f"attachment://{fname}"},
-                    "footer": {"text": f"GENESIS-01 Visual Array | Host: {socket.gethostname()}"},
+                    "footer": {"text": f"Genesis Motherboard Visual Array | Host: {socket.gethostname()}"},
                     "timestamp": _utc_iso_now(),
                 }
             ],
@@ -1466,7 +2001,7 @@ class DiscordBotService:
 
         member = data.get("member", {}) if isinstance(data.get("member"), dict) else {}
         user = member.get("user") if isinstance(member.get("user"), dict) else data.get("user", {})
-        author_name = str(user.get("username", "commander")) if isinstance(user, dict) else "commander"
+        author_name = str(user.get("username", "overlord")) if isinstance(user, dict) else "overlord"
 
         action = ""
         opts: dict[str, object] = {}
@@ -1482,7 +2017,7 @@ class DiscordBotService:
             if custom_id.startswith("cmd:"):
                 action = custom_id[4:]
                 opts["from_button"] = True
-                if action == "deck_refresh":
+                if action in ("deck_refresh", "wall_refresh"):
                     ack_type = 6
         else:
             return
@@ -1540,12 +2075,12 @@ class DiscordBotService:
                     "intents": 1,
                     "properties": {
                         "os": "windows",
-                        "browser": "genesis_mothership",
-                        "device": "genesis_mothership",
+                        "browser": "genesis_motherboard",
+                        "device": "genesis_motherboard",
                     },
                     "presence": {
                         "status": "online",
-                        "activities": [{"name": "GENESIS-01 // Orbital Core", "type": 3}],
+                        "activities": [{"name": "Genesis Motherboard :7700", "type": 3}],
                     },
                 },
             }
@@ -1582,7 +2117,7 @@ class DiscordBotService:
                             self._app_id = str(app_info["id"])
                         elif isinstance(d_body.get("user"), dict):
                             self._app_id = str(d_body["user"].get("id", ""))
-                        add_event("system", "GENESIS-01 Discord Mothership Gateway online and listening")
+                        add_event("system", "Genesis Motherboard Discord Gateway online and listening")
                     elif op == 0 and t_name == "INTERACTION_CREATE" and isinstance(d_body, dict):
                         asyncio.create_task(self._handle_interaction(d_body, bot_token))
             finally:
