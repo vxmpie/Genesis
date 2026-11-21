@@ -46,6 +46,7 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
                 "briefing",
                 "lang",
                 "status",
+                "google",
                 "ai",
                 "tech",
                 "world",
@@ -233,6 +234,60 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cisa_lines), 1)
         self.assertIn("CVE-2026-9999", cisa_lines[0])
 
+    def test_google_and_antigravity_zero_overhead_delta_watcher(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            ver_file = tmp_root / "version"
+            skills_dir = tmp_root / "skills"
+            skills_dir.mkdir(parents=True, exist_ok=True)
+            (skills_dir / "antigravity_guide").mkdir()
+            ver_file.write_text("44.9.1", encoding="utf-8")
+
+            state: dict = {}
+            intel_feeds._LAST_AGY_MTIME = -1.0
+            deltas1, changed1 = intel_feeds.check_local_antigravity_delta_sync(state, ver_file, skills_dir)
+            self.assertEqual(deltas1, [])
+            self.assertTrue(changed1)
+            self.assertEqual(state["google_watcher_baseline"]["agy_version"], "44.9.1")
+
+            ver_file.write_text("45.0.0", encoding="utf-8")
+            (skills_dir / "new_super_skill").mkdir()
+            intel_feeds._LAST_AGY_MTIME = -1.0
+            deltas2, changed2 = intel_feeds.check_local_antigravity_delta_sync(state, ver_file, skills_dir)
+            self.assertTrue(changed2)
+            self.assertEqual(len(deltas2), 2)
+            self.assertEqual(deltas2[0]["new_version"], "45.0.0")
+            self.assertIn("new_super_skill", deltas2[1]["added_skills"])
+
+            rss_v1 = """<?xml version="1.0"?><rss><channel><item><title>Gemini 3.1 Released</title><link>https://blog.google/1</link></item></channel></rss>"""
+            rss_v2 = """<?xml version="1.0"?><rss><channel><item><title>Gemini 4.0 Released</title><link>https://blog.google/2</link></item></channel></rss>"""
+
+            with patch.object(
+                intel_feeds,
+                "load_feeds_registry",
+                return_value={"google": [{"name": "Google AI Blog", "kind": "rss", "url": "https://blog.google/rss", "enabled": True}]},
+            ):
+                with patch.object(intel_feeds, "_fetch_text_with_etag", return_value=(200, rss_v1)):
+                    ext_d1, ext_c1 = intel_feeds.check_google_external_feeds_delta_sync(state)
+                self.assertEqual(ext_d1, [])
+                self.assertTrue(ext_c1)
+
+                with patch.object(intel_feeds, "_fetch_text_with_etag", return_value=(304, "")):
+                    ext_304, _ = intel_feeds.check_google_external_feeds_delta_sync(state)
+                self.assertEqual(ext_304, [])
+
+                with patch.object(intel_feeds, "_fetch_text_with_etag", return_value=(200, rss_v2)):
+                    ext_d2, ext_c2 = intel_feeds.check_google_external_feeds_delta_sync(state)
+                self.assertTrue(ext_c2)
+                self.assertEqual(len(ext_d2), 1)
+                self.assertEqual(ext_d2[0]["title"], "Gemini 4.0 Released")
+                self.assertEqual(ext_d2[0]["url"], "https://blog.google/2")
+
+                with patch.object(intel_feeds, "_fetch_text", return_value=rss_v2):
+                    g_board = intel_feeds.fetch_google_gemini_intel(limit=2, lang="dual")
+                self.assertIsNone(_EMOJI_RE.search(json.dumps(g_board, ensure_ascii=False)))
+                self.assertIn("GOOGLE, GEMINI MODELS & ANTIGRAVITY RADAR", g_board["embeds"][0]["title"])
+
     def test_encode_multipart_form_data(self) -> None:
         png_stub = b"\x89PNG\r\n\x1a\nFAKEPNG"
         body, ctype = discord_bot.encode_multipart_form_data(
@@ -245,7 +300,7 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         self.assertIn(png_stub, body)
 
     async def test_execute_command_actions(self) -> None:
-        with patch.object(
+        with patch.object(discord_bot, "get_current_lang", return_value="dual"), patch.object(
             discord_bot,
             "ram_boost",
             return_value={

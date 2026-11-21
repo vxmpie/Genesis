@@ -26,8 +26,11 @@ from backend.services.intel_feeds import (
     VALID_LANG_MODES,
     add_custom_rss_feed,
     build_omni_briefing_payload,
+    check_google_external_feeds_delta_sync,
+    check_local_antigravity_delta_sync,
     fetch_ai_cortex_intel,
     fetch_free_loot_intel,
+    fetch_google_gemini_intel,
     fetch_tech_radar_intel,
     fetch_world_pulse_intel,
     get_cached_hud_sensors_sync,
@@ -79,6 +82,7 @@ CHANNEL_TOPICS: dict[str, str] = {
     "command-wall": "Dynamic Slash Command Directory, Custom Macros & Active Feeds | กำแพงคู่มือคำสั่งแบบไดนามิก คำสั่งลัด และแหล่งข่าวทั้งหมด",
     "reactor-telemetry": "Automated System Incident, Watchdog Recovery & Memory Guard Alerts | ห้องแจ้งเตือนสถานะระบบ การกู้คืนบอท และหน่วยความจำอัตโนมัติ",
     "captain-datacore": "Personal Vault & Dropzone: Drop text/links/files here or use /log to auto-archive | คลังเก็บโน้ตและลิงก์ส่วนตัว พิมพ์หรือวางลิงก์ในห้องนี้เพื่อบันทึกเข้า Vault อัตโนมัติ",
+    "google-gemini-radar": "Official Google AI, Gemini Models, DeepMind, Gemini CLI & Local Antigravity Updates | เรดาร์แจ้งเตือนอัปเดต Google, โมเดล Gemini ใหม่ และเวอร์ชัน Antigravity ทันที",
     "ai-singularity-feed": "Live AI Research Papers (HuggingFace) & Artificial Intelligence News | อัปเดตเปเปอร์วิจัย AI และข่าวเทคโนโลยีปัญญาประดิษฐ์",
     "tech-cyber-radar": "Hacker News, GitHub Trending, CISA Zero-Day CVE & Tech Radar | เรดาร์ข่าววิศวกรรมซอฟต์แวร์ โปรเจกต์ฮิตบน GitHub และเตือนภัยไซเบอร์",
     "world-market-pulse": "BBC World News, Bangkok Weather Sensors, Crypto/FX Tickers & GitHub Activity | ข่าวโลก สภาพอากาศกรุงเทพฯ ราคาคริปโต/ค่าเงิน และความเคลื่อนไหว GitHub",
@@ -235,6 +239,14 @@ SLASH_COMMANDS: list[dict] = [
     {
         "_group_en": "Omniscient Intel Cortex",
         "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
+        "_desc_th": "เรดาร์อัปเดต Google AI, โมเดล Gemini, DeepMind, Gemini CLI และเวอร์ชัน Antigravity ในเครื่อง",
+        "name": "google",
+        "description": "Google, Gemini models, DeepMind, Gemini CLI & local Antigravity radar",
+        "type": 1,
+    },
+    {
+        "_group_en": "Omniscient Intel Cortex",
+        "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
         "_desc_th": "ดึงเปเปอร์วิจัย AI ยอดนิยมและข่าววงการปัญญาประดิษฐ์",
         "name": "ai",
         "description": "Orbital AI & Singularity Cortex (Papers + AI News + Custom Feeds)",
@@ -278,6 +290,7 @@ SLASH_COMMANDS: list[dict] = [
                 "type": 3,
                 "required": True,
                 "choices": [
+                    {"name": "Google & Gemini", "value": "google"},
                     {"name": "AI Cortex", "value": "ai"},
                     {"name": "Tech Radar", "value": "tech"},
                     {"name": "World Pulse", "value": "world"},
@@ -302,6 +315,7 @@ SLASH_COMMANDS: list[dict] = [
                 "type": 3,
                 "required": True,
                 "choices": [
+                    {"name": "Google & Gemini", "value": "google"},
                     {"name": "AI Cortex", "value": "ai"},
                     {"name": "Tech Radar", "value": "tech"},
                     {"name": "World Pulse", "value": "world"},
@@ -609,7 +623,7 @@ async def _discord_api(
             raw_body,
             content_type,
         )
-        if status == 429 and attempt < retries - 1:
+        if status in (0, 429, 502, 503, 504) and attempt < retries - 1:
             wait_sec = 1.5
             retry_hdr = headers.get("retry-after") or headers.get("x-ratelimit-reset-after")
             if retry_hdr:
@@ -833,16 +847,17 @@ def build_deck_payload(lang: str | None = None) -> dict:
         {
             "type": 1,
             "components": [
+                {"type": 2, "style": 1, "label": "Google & AGY", "custom_id": "cmd:google"},
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "Tech & CVE", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Free Loot", "custom_id": "cmd:loot"},
-                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
             ],
         },
         {
             "type": 1,
             "components": [
+                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
                 {"type": 2, "style": 3, "label": tr(mode, "Sync All Intel", "อัปเดตข่าวทุกห้อง"), "custom_id": "cmd:sync_intel"},
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:bridge"},
                 {"type": 2, "style": 2, "label": tr(mode, "Refresh Bridge", "รีเฟรชแผง"), "custom_id": "cmd:deck_refresh"},
@@ -1381,6 +1396,7 @@ async def sync_intel_channels(bot_token: str | None = None, categories: tuple[st
 
     lang = get_current_lang()
     builders = {
+        "google": lambda: fetch_google_gemini_intel(limit=3, lang=lang),
         "ai": lambda: fetch_ai_cortex_intel(limit=4, lang=lang),
         "tech": lambda: fetch_tech_radar_intel(limit=4, lang=lang),
         "world": lambda: fetch_world_pulse_intel(limit=5, lang=lang),
@@ -1609,6 +1625,17 @@ async def provision_guild_station(
     state["dropzone_channel_id"] = str(datacore_ch["id"])
 
     existing_intel_ids = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
+    ch_google = await _find_or_create_channel(
+        token,
+        guild_id,
+        channels,
+        "google-gemini-radar",
+        0,
+        parent_id=cat_intel["id"],
+        position=0,
+        known_id=existing_intel_ids.get("google"),
+        topic=CHANNEL_TOPICS["google-gemini-radar"],
+    )
     ch_ai = await _find_or_create_channel(
         token,
         guild_id,
@@ -1616,7 +1643,7 @@ async def provision_guild_station(
         "ai-singularity-feed",
         0,
         parent_id=cat_intel["id"],
-        position=0,
+        position=1,
         known_id=existing_intel_ids.get("ai"),
         topic=CHANNEL_TOPICS["ai-singularity-feed"],
     )
@@ -1627,7 +1654,7 @@ async def provision_guild_station(
         "tech-cyber-radar",
         0,
         parent_id=cat_intel["id"],
-        position=1,
+        position=2,
         known_id=existing_intel_ids.get("tech"),
         topic=CHANNEL_TOPICS["tech-cyber-radar"],
     )
@@ -1638,7 +1665,7 @@ async def provision_guild_station(
         "world-market-pulse",
         0,
         parent_id=cat_intel["id"],
-        position=2,
+        position=3,
         known_id=existing_intel_ids.get("world"),
         topic=CHANNEL_TOPICS["world-market-pulse"],
     )
@@ -1649,17 +1676,21 @@ async def provision_guild_station(
         "free-games-loot",
         0,
         parent_id=cat_intel["id"],
-        position=3,
+        position=4,
         known_id=existing_intel_ids.get("loot"),
         topic=CHANNEL_TOPICS["free-games-loot"],
     )
 
     state["intel_channel_ids"] = {
+        "google": str(ch_google["id"]),
         "ai": str(ch_ai["id"]),
         "tech": str(ch_tech["id"]),
         "world": str(ch_world["id"]),
         "loot": str(ch_loot["id"]),
     }
+
+    await asyncio.to_thread(check_local_antigravity_delta_sync, state)
+    await asyncio.to_thread(check_google_external_feeds_delta_sync, state)
 
     await _find_or_create_channel(
         token,
@@ -1756,6 +1787,8 @@ async def _render_board_for_key(board_key: str, lang: str) -> dict:
         return await asyncio.to_thread(build_mumu_payload, lang)
     if board_key == "processes":
         return await asyncio.to_thread(build_processes_payload, lang)
+    if board_key == "google":
+        return await asyncio.to_thread(fetch_google_gemini_intel, 3, lang)
     if board_key == "ai":
         return await asyncio.to_thread(fetch_ai_cortex_intel, 4, lang)
     if board_key == "tech":
@@ -1979,6 +2012,9 @@ async def _execute_command_action(
                 lang=lang,
             )
         return await asyncio.to_thread(_build_brief), None
+
+    if action == "google":
+        return await asyncio.to_thread(fetch_google_gemini_intel, 3, lang), None
 
     if action == "ai":
         return await asyncio.to_thread(fetch_ai_cortex_intel, 4, lang), None
@@ -2254,6 +2290,7 @@ class DiscordBotService:
         self._hud_task: asyncio.Task | None = None
         self._intel_task: asyncio.Task | None = None
         self._morning_task: asyncio.Task | None = None
+        self._google_watcher_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
         self._seq: int | None = None
         self._app_id: str | None = None
@@ -2275,11 +2312,19 @@ class DiscordBotService:
             self._intel_task = running_loop.create_task(self._intel_broadcast_loop())
         if self._morning_task is None or self._morning_task.done():
             self._morning_task = running_loop.create_task(self._morning_briefing_loop())
+        if self._google_watcher_task is None or self._google_watcher_task.done():
+            self._google_watcher_task = running_loop.create_task(self._google_antigravity_watcher_loop())
 
     async def stop(self) -> None:
         if self._stop_event:
             self._stop_event.set()
-        for task in (self._gateway_task, self._hud_task, self._intel_task, self._morning_task):
+        for task in (
+            self._gateway_task,
+            self._hud_task,
+            self._intel_task,
+            self._morning_task,
+            self._google_watcher_task,
+        ):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -2292,6 +2337,7 @@ class DiscordBotService:
         self._hud_task = None
         self._intel_task = None
         self._morning_task = None
+        self._google_watcher_task = None
         self._connected = False
 
     def _get_bot_token(self) -> str:
@@ -2473,6 +2519,13 @@ class DiscordBotService:
                 if not token:
                     await asyncio.sleep(15)
                     continue
+                state = load_station_state()
+                intel_ch = state.get("intel_channel_ids", {})
+                if not isinstance(intel_ch, dict) or "google" not in intel_ch:
+                    try:
+                        await provision_guild_station(token)
+                    except Exception:
+                        pass
                 await self._run_gateway_session(token)
                 backoff = 2.0
             except asyncio.CancelledError:
@@ -2566,6 +2619,82 @@ class DiscordBotService:
                 break
             except Exception:
                 await asyncio.sleep(60)
+
+    async def _dispatch_google_delta_alerts(self, token: str, state: dict, deltas: list[dict]) -> None:
+        intel_ch = state.get("intel_channel_ids", {})
+        google_cid = str(intel_ch.get("google", "") or "") if isinstance(intel_ch, dict) else ""
+        if not google_cid:
+            return
+
+        await sync_intel_channels(token, categories=("google",))
+        roles = state.get("roles", {}) if isinstance(state.get("roles"), dict) else {}
+        overlord_id = str(roles.get("overlord", "") or "")
+        mention_text = f"<@&{overlord_id}> " if overlord_id else ""
+        lang = get_current_lang()
+
+        fields = [
+            {
+                "name": f"[{d.get('source', 'Google')}] {d.get('title', 'Update')}"[:250],
+                "value": str(d.get("description", ""))[:1020],
+                "inline": False,
+            }
+            for d in deltas[:10]
+        ]
+
+        alert_payload = {
+            "content": f"{mention_text}`[GOOGLE / GEMINI / ANTIGRAVITY ALERT]` {tr(lang, 'New release or update detected.', 'ตรวจพบข่าวโมเดลหรืออัปเดตใหม่ทันที')}",
+            "embeds": [
+                {
+                    "title": f"[BREAKING] {tr(lang, 'GOOGLE, GEMINI & ANTIGRAVITY UPDATE DETECTED', 'ตรวจพบอัปเดตใหม่จาก Google, Gemini หรือ Antigravity')}",
+                    "color": 0x4285F4,
+                    "fields": fields,
+                    "footer": {"text": f"Genesis Motherboard Instant Radar | Host: {socket.gethostname()}"},
+                    "timestamp": _utc_iso_now(),
+                }
+            ],
+        }
+        await _discord_api("POST", f"/channels/{google_cid}/messages", token, payload=alert_payload)
+
+    async def _google_antigravity_watcher_loop(self) -> None:
+        await asyncio.sleep(15)
+        cycle = 0
+        while True:
+            try:
+                token = self._get_bot_token()
+                if token:
+                    state = load_station_state()
+                    all_deltas: list[dict] = []
+                    changed_any = False
+
+                    agy_deltas, agy_changed = await asyncio.to_thread(
+                        check_local_antigravity_delta_sync, state
+                    )
+                    if agy_deltas:
+                        all_deltas.extend(agy_deltas)
+                    if agy_changed:
+                        changed_any = True
+
+                    if cycle % 12 == 0:
+                        ext_deltas, ext_changed = await asyncio.to_thread(
+                            check_google_external_feeds_delta_sync, state
+                        )
+                        if ext_deltas:
+                            all_deltas.extend(ext_deltas)
+                        if ext_changed:
+                            changed_any = True
+
+                    if changed_any:
+                        save_station_state(state)
+
+                    if all_deltas:
+                        await self._dispatch_google_delta_alerts(token, state, all_deltas)
+
+                cycle = (cycle + 1) % 12
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(15)
 
 
 discord_bot_service = DiscordBotService()

@@ -6,10 +6,12 @@ import re
 import socket
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from pathlib import Path
 
 from backend.core.config import DATA_DIR
 
@@ -17,21 +19,63 @@ from backend.core.config import DATA_DIR
 DISCORD_DATA_DIR = DATA_DIR / "discord"
 FEEDS_REGISTRY_PATH = DISCORD_DATA_DIR / "feeds.json"
 
-USER_AGENT = "Genesis-Motherboard-Core/4.2"
+ANTIGRAVITY_VERSION_PATH = Path(
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity\version")
+)
+ANTIGRAVITY_SKILLS_DIR = Path(
+    os.path.expanduser(r"~\.gemini\antigravity\builtin\skills")
+)
+
+USER_AGENT = "Genesis-Motherboard-Core/4.3"
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 _WHITESPACE_RE = re.compile(r"\s+")
 _TAG_RE = re.compile(r"<[^>]+>")
 
 _SENSOR_LOCK = threading.Lock()
 _REGISTRY_LOCK = threading.RLock()
+_ETAG_LOCK = threading.Lock()
 _SENSOR_CACHE: dict = {"updated_at": 0.0, "weather": None, "markets": None}
+_ETAG_CACHE: dict[str, dict[str, str]] = {}
+_LAST_AGY_MTIME: float = -1.0
 
 GITHUB_ACCOUNTS = ("vxmpie", "swnst")
-VALID_FEED_CATEGORIES = ("ai", "tech", "world", "loot")
+VALID_FEED_CATEGORIES = ("google", "ai", "tech", "world", "loot")
 VALID_LANG_MODES = ("dual", "th", "en")
 
 DEFAULT_FEEDS_REGISTRY: dict = {
-    "schema_version": 2,
+    "schema_version": 3,
+    "google": [
+        {
+            "name": "Google AI & Gemini Official Blog",
+            "kind": "rss",
+            "url": "https://blog.google/technology/ai/rss/",
+            "enabled": True,
+        },
+        {
+            "name": "Google DeepMind Blog",
+            "kind": "rss",
+            "url": "https://deepmind.google/blog/rss.xml",
+            "enabled": True,
+        },
+        {
+            "name": "Google Developers Blog",
+            "kind": "rss",
+            "url": "https://developers.googleblog.com/rss/",
+            "enabled": True,
+        },
+        {
+            "name": "Gemini CLI Releases (GitHub)",
+            "kind": "rss",
+            "url": "https://github.com/google-gemini/gemini-cli/releases.atom",
+            "enabled": True,
+        },
+        {
+            "name": "Google GenAI Python SDK Releases",
+            "kind": "rss",
+            "url": "https://github.com/googleapis/python-genai/releases.atom",
+            "enabled": True,
+        },
+    ],
     "ai": [
         {
             "name": "HuggingFace Daily Papers",
@@ -182,12 +226,17 @@ def load_feeds_registry() -> dict:
                         if cat not in data or not isinstance(data[cat], list):
                             data[cat] = copy.deepcopy(DEFAULT_FEEDS_REGISTRY[cat])
                             changed = True
-                    if int(data.get("schema_version", 1)) < 2:
-                        existing_tech_urls = {str(x.get("url", "")) for x in data.get("tech", []) if isinstance(x, dict)}
-                        for default_src in DEFAULT_FEEDS_REGISTRY["tech"]:
-                            if default_src["url"] not in existing_tech_urls:
-                                data["tech"].insert(1, copy.deepcopy(default_src))
-                        data["schema_version"] = 2
+                    if int(data.get("schema_version", 1)) < 3:
+                        for cat_check in ("google", "tech"):
+                            existing_urls = {
+                                str(x.get("url", ""))
+                                for x in data.get(cat_check, [])
+                                if isinstance(x, dict)
+                            }
+                            for default_src in DEFAULT_FEEDS_REGISTRY[cat_check]:
+                                if default_src["url"] not in existing_urls:
+                                    data[cat_check].append(copy.deepcopy(default_src))
+                        data["schema_version"] = 3
                         changed = True
                     if changed:
                         save_feeds_registry(data)
@@ -254,6 +303,202 @@ def remove_feed_source(category: str, name: str) -> dict:
 
 def list_feed_sources() -> dict:
     return load_feeds_registry()
+
+
+# --- Local Antigravity IDE Telemetry & Zero-Overhead Watcher ---
+def get_local_antigravity_status_sync(
+    version_path: Path | None = None,
+    skills_dir: Path | None = None,
+) -> dict:
+    v_path = version_path or ANTIGRAVITY_VERSION_PATH
+    s_dir = skills_dir or ANTIGRAVITY_SKILLS_DIR
+
+    version_str = "Not Installed"
+    updated_at = "Unknown"
+    mtime = 0.0
+    installed = False
+
+    if v_path.exists():
+        try:
+            st = v_path.stat()
+            mtime = float(st.st_mtime)
+            updated_at = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            raw_v = v_path.read_text(encoding="utf-8", errors="ignore").strip()
+            if raw_v:
+                version_str = strip_emojis(raw_v)
+                installed = True
+        except Exception:
+            pass
+
+    skills: list[str] = []
+    if s_dir.exists():
+        try:
+            skills = sorted(
+                entry.name
+                for entry in os.scandir(s_dir)
+                if entry.is_dir() and not entry.name.startswith(".")
+            )
+        except Exception:
+            pass
+
+    return {
+        "installed": installed,
+        "version": version_str,
+        "updated_at": updated_at,
+        "mtime": mtime,
+        "builtin_skills": skills,
+        "skills_count": len(skills),
+    }
+
+
+def check_local_antigravity_delta_sync(
+    state: dict,
+    version_path: Path | None = None,
+    skills_dir: Path | None = None,
+) -> tuple[list[dict], bool]:
+    global _LAST_AGY_MTIME
+    v_path = version_path or ANTIGRAVITY_VERSION_PATH
+    s_dir = skills_dir or ANTIGRAVITY_SKILLS_DIR
+
+    cur_mtime = 0.0
+    if v_path.exists():
+        try:
+            cur_mtime = float(v_path.stat().st_mtime)
+        except Exception:
+            cur_mtime = 0.0
+    if s_dir.exists():
+        try:
+            cur_mtime = max(cur_mtime, float(s_dir.stat().st_mtime))
+        except Exception:
+            pass
+
+    baseline = state.setdefault("google_watcher_baseline", {})
+    if _LAST_AGY_MTIME > 0 and cur_mtime == _LAST_AGY_MTIME and "agy_version" in baseline:
+        return [], False
+    _LAST_AGY_MTIME = cur_mtime
+
+    status = get_local_antigravity_status_sync(v_path, s_dir)
+    cur_ver = status["version"]
+    cur_skills = status["builtin_skills"]
+
+    prev_ver = baseline.get("agy_version")
+    prev_skills = baseline.get("agy_skills")
+
+    if prev_ver is None or prev_skills is None:
+        baseline["agy_version"] = cur_ver
+        baseline["agy_skills"] = cur_skills
+        return [], True
+
+    deltas: list[dict] = []
+    state_changed = False
+
+    if cur_ver != prev_ver:
+        deltas.append(
+            {
+                "kind": "antigravity_version",
+                "source": "Local Antigravity IDE",
+                "old_version": prev_ver,
+                "new_version": cur_ver,
+                "title": f"Antigravity IDE Updated: v{prev_ver} -> v{cur_ver}",
+                "description": f"Local Antigravity IDE binary on host `{socket.gethostname()}` upgraded to **v{cur_ver}** (`{status['updated_at']}`).",
+            }
+        )
+        baseline["agy_version"] = cur_ver
+        state_changed = True
+
+    added_skills = sorted(set(cur_skills) - set(prev_skills))
+    if added_skills:
+        deltas.append(
+            {
+                "kind": "antigravity_skills",
+                "source": "Local Antigravity Builtin Skills",
+                "added_skills": added_skills,
+                "title": f"New Antigravity Built-in Skill(s): {', '.join(added_skills)}",
+                "description": f"Detected {len(added_skills)} new built-in Antigravity skill module(s): `{', '.join(added_skills)}`.",
+            }
+        )
+        baseline["agy_skills"] = cur_skills
+        state_changed = True
+    elif len(cur_skills) != len(prev_skills):
+        baseline["agy_skills"] = cur_skills
+        state_changed = True
+
+    return deltas, state_changed
+
+
+def _fetch_text_with_etag(url: str, timeout: float = 7.0) -> tuple[int, str]:
+    headers = {"User-Agent": USER_AGENT}
+    with _ETAG_LOCK:
+        cached = _ETAG_CACHE.get(url, {})
+        if cached.get("etag"):
+            headers["If-None-Match"] = cached["etag"]
+        if cached.get("last_modified"):
+            headers["If-Modified-Since"] = cached["last_modified"]
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="ignore")
+            etag = resp.headers.get("ETag") or ""
+            last_mod = resp.headers.get("Last-Modified") or ""
+            if etag or last_mod:
+                with _ETAG_LOCK:
+                    _ETAG_CACHE[url] = {"etag": etag, "last_modified": last_mod}
+            return resp.status, body
+    except urllib.error.HTTPError as exc:
+        if exc.code == 304:
+            return 304, ""
+        raise
+
+
+def check_google_external_feeds_delta_sync(state: dict) -> tuple[list[dict], bool]:
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("google", []) if s.get("enabled", True)]
+    baseline = state.setdefault("google_watcher_baseline", {})
+    seen_map: dict[str, list[str]] = baseline.setdefault("seen_urls", {})
+
+    deltas: list[dict] = []
+    state_changed = False
+
+    for src in sources:
+        name = strip_emojis(src.get("name", "Google Feed"))
+        url = str(src.get("url", "")).strip()
+        if not url:
+            continue
+        try:
+            st_code, xml_body = _fetch_text_with_etag(url, timeout=7.0)
+            if st_code == 304 or not xml_body:
+                continue
+            items = parse_rss_or_atom_xml(xml_body, limit=3)
+            if not items:
+                continue
+            top = items[0]
+            top_url = top["url"]
+            top_title = top["title"]
+
+            known_list = seen_map.get(name)
+            if not isinstance(known_list, list) or not known_list:
+                seen_map[name] = [it["url"] for it in items if it.get("url")]
+                state_changed = True
+                continue
+
+            if top_url not in known_list:
+                deltas.append(
+                    {
+                        "kind": "google_feed",
+                        "source": name,
+                        "title": top_title,
+                        "url": top_url,
+                        "description": f"**{name}** published a new update:\n[{top_title}]({top_url})",
+                    }
+                )
+                known_list.insert(0, top_url)
+                seen_map[name] = known_list[:20]
+                state_changed = True
+        except Exception:
+            continue
+
+    return deltas, state_changed
 
 
 # --- HTTP, HTML & XML Parsers ---
@@ -536,6 +781,68 @@ def get_github_radar_sync(limit_per_user: int = 3) -> list[str]:
 
 
 # --- Domain Intelligence Collectors ---
+def fetch_google_gemini_intel(limit: int = 3, lang: str = "dual") -> dict:
+    mode = normalize_lang(lang)
+    agy = get_local_antigravity_status_sync()
+    reg = load_feeds_registry()
+    sources = [s for s in reg.get("google", []) if s.get("enabled", True)]
+
+    skills_preview = ", ".join(f"`{s}`" for s in agy["builtin_skills"][:12]) or "None"
+    agy_val = (
+        f"{tr(mode, 'Installed Version', 'เวอร์ชันในเครื่อง')}: **`v{agy['version']}`** "
+        f"({tr(mode, 'Updated', 'อัปเดตเมื่อ')}: `{agy['updated_at']}`)\n"
+        f"{tr(mode, 'Built-in Skills', 'ทักษะในระบบ')} (`{agy['skills_count']}`): {skills_preview}\n"
+        f"{tr(mode, 'Real-Time Watcher', 'ระบบตรวจจับอัตโนมัติ')}: `ACTIVE (0% GPU / Instant OS Stat + 60s ETag Probe)`"
+    )
+
+    fields: list[dict] = [
+        {
+            "name": tr(mode, "Local Antigravity IDE Telemetry", "สถานะ Antigravity IDE บนเครื่อง"),
+            "value": agy_val[:1020],
+            "inline": False,
+        }
+    ]
+
+    for src in sources[:6]:
+        lines = _collect_feed_lines(src, limit=limit)
+        fields.append(
+            {
+                "name": strip_emojis(src.get("name", "Google Feed")),
+                "value": _clip_field(
+                    lines,
+                    fallback=tr(mode, "Signal temporarily unavailable.", "สัญญาณขัดข้องชั่วคราว"),
+                ),
+                "inline": False,
+            }
+        )
+
+    embed = {
+        "title": f"[INTEL] {tr(mode, 'GOOGLE, GEMINI MODELS & ANTIGRAVITY RADAR', 'เรดาร์อัปเดต Google, โมเดล Gemini และ Antigravity')}",
+        "description": tr_block(
+            mode,
+            "Real-time monitoring for Google AI, Gemini models, DeepMind, Gemini CLI, GenAI SDK, and local Antigravity IDE.",
+            "ระบบตรวจจับข่าวสารโมเดล Gemini ใหม่ อัปเดตจาก Google/DeepMind และตรวจจับเวอร์ชัน Antigravity ในเครื่องแบบเรียลไทม์",
+        ),
+        "color": 0x4285F4,
+        "fields": fields,
+        "footer": {"text": f"Genesis Motherboard Google Radar | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
+        "timestamp": _utc_iso_now(),
+    }
+    components = [
+        {
+            "type": 1,
+            "components": [
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh Google", "รีเฟรช Google"), "custom_id": "cmd:google"},
+                {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
+                {"type": 2, "style": 2, "label": "Tech & CVE", "custom_id": "cmd:tech"},
+                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:google"},
+            ],
+        }
+    ]
+    return {"embeds": [embed], "components": components}
+
+
 def fetch_ai_cortex_intel(limit: int = 4, lang: str = "dual") -> dict:
     mode = normalize_lang(lang)
     reg = load_feeds_registry()
@@ -579,8 +886,8 @@ def fetch_ai_cortex_intel(limit: int = 4, lang: str = "dual") -> dict:
             "type": 1,
             "components": [
                 {"type": 2, "style": 1, "label": tr(mode, "Refresh AI", "รีเฟรช AI"), "custom_id": "cmd:ai"},
+                {"type": 2, "style": 2, "label": "Google & AGY", "custom_id": "cmd:google"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
-                {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:ai"},
             ],
@@ -622,9 +929,9 @@ def fetch_tech_radar_intel(limit: int = 4, lang: str = "dual") -> dict:
             "type": 1,
             "components": [
                 {"type": 2, "style": 1, "label": tr(mode, "Refresh Tech", "รีเฟรช Tech"), "custom_id": "cmd:tech"},
+                {"type": 2, "style": 2, "label": "Google & AGY", "custom_id": "cmd:google"},
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
-                {"type": 2, "style": 2, "label": "Free Loot", "custom_id": "cmd:loot"},
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:tech"},
             ],
         }
@@ -695,7 +1002,7 @@ def fetch_world_pulse_intel(limit: int = 5, lang: str = "dual") -> dict:
             "type": 1,
             "components": [
                 {"type": 2, "style": 1, "label": tr(mode, "Refresh World", "รีเฟรช World"), "custom_id": "cmd:world"},
-                {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
+                {"type": 2, "style": 2, "label": "Google & AGY", "custom_id": "cmd:google"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:world"},
@@ -757,15 +1064,18 @@ def build_omni_briefing_payload(
 ) -> dict:
     mode = normalize_lang(lang)
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=180.0)
+    agy = get_local_antigravity_status_sync()
     reg = load_feeds_registry()
 
+    google_first = next((s for s in reg.get("google", []) if s.get("enabled", True)), None)
     ai_first = next((s for s in reg.get("ai", []) if s.get("enabled", True)), None)
     tech_first = next((s for s in reg.get("tech", []) if s.get("enabled", True)), None)
     gh_trend = next((s for s in reg.get("tech", []) if s.get("kind") == "html_gh_trending"), None)
 
-    ai_top = _collect_feed_lines(ai_first, limit=3) if ai_first else []
-    tech_top = _collect_feed_lines(tech_first, limit=3) if tech_first else []
-    trend_top = _collect_feed_lines(gh_trend, limit=3) if gh_trend else []
+    google_top = _collect_feed_lines(google_first, limit=2) if google_first else []
+    ai_top = _collect_feed_lines(ai_first, limit=2) if ai_first else []
+    tech_top = _collect_feed_lines(tech_first, limit=2) if tech_first else []
+    trend_top = _collect_feed_lines(gh_trend, limit=2) if gh_trend else []
 
     ram = metrics.get("ram", {})
     cpu_pct = float(metrics.get("cpu", {}).get("total_percent", 0.0))
@@ -786,16 +1096,16 @@ def build_omni_briefing_payload(
         "title": f"{title_prefix} {title_text}",
         "description": tr_block(
             mode,
-            "Unified situational awareness across reactor hardware and global planetary intelligence.",
-            "สรุปสถานะเครื่อง เซ็นเซอร์อากาศ ตลาดโลก และข่าวเทคโนโลยีเด่นรวมไว้ในหน้าเดียว",
+            "Unified situational awareness across reactor hardware, Google/Antigravity, and global intelligence.",
+            "สรุปสถานะเครื่อง เซ็นเซอร์อากาศ ตลาดโลก อัปเดต Google/Antigravity และข่าวเทคโนโลยีเด่นในหน้าเดียว",
         ),
         "color": 0x3B82F6,
         "fields": [
             {
-                "name": tr(mode, "Ship Reactor & Fleet", "สถานะเครื่องและ MuMu"),
+                "name": tr(mode, "Ship Reactor & Antigravity", "สถานะเครื่องและ Antigravity"),
                 "value": (
                     f"CPU `{cpu_pct:.1f}%` | RAM `{ram.get('used_gb', 0)}/{ram.get('total_gb', 0)} GB` | C: `{c_free:.1f} GB`\n"
-                    f"MuMu: `{mumu_health.get('count', 0)}` online | Boosts: `{summary.get('session_boosts', 0)}`\n"
+                    f"MuMu: `{mumu_health.get('count', 0)}` online | Antigravity IDE: `v{agy['version']}` (`{agy['skills_count']}` skills)\n"
                     f"Ingress: `{tunnel_url}`"
                 ),
                 "inline": False,
@@ -803,13 +1113,13 @@ def build_omni_briefing_payload(
             {"name": tr(mode, "Bangkok Sensors", "อากาศ กทม."), "value": weather_str, "inline": True},
             {"name": tr(mode, "Markets & FX", "คริปโตและค่าเงิน"), "value": market_str, "inline": True},
             {
-                "name": tr(mode, "Top AI Breakthroughs", "AI เด่นประจำวัน"),
-                "value": _clip_field(ai_top, fallback="No feed signal."),
+                "name": tr(mode, "Google, Gemini & AI Breakthroughs", "อัปเดต Google, Gemini และ AI เด่น"),
+                "value": _clip_field(google_top + ai_top, fallback="No feed signal."),
                 "inline": False,
             },
             {
                 "name": tr(mode, "Top Tech & GitHub Trending", "ข่าว Tech และโปรเจกต์ฮิต GitHub"),
-                "value": _clip_field(tech_top + trend_top[:2], fallback="No feed signal."),
+                "value": _clip_field(tech_top + trend_top, fallback="No feed signal."),
                 "inline": False,
             },
         ],
@@ -821,7 +1131,7 @@ def build_omni_briefing_payload(
             "type": 1,
             "components": [
                 {"type": 2, "style": 1, "label": tr(mode, "Refresh Briefing", "รีเฟรชสรุป"), "custom_id": "cmd:briefing"},
-                {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
+                {"type": 2, "style": 2, "label": "Google & AGY", "custom_id": "cmd:google"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 3, "label": "RAM Boost", "custom_id": "cmd:boost"},
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:briefing"},
