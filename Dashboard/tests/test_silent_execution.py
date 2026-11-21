@@ -10,6 +10,7 @@ SERVICES_DIR = DASHBOARD_DIR / "backend" / "services"
 class TestSilentExecution(unittest.TestCase):
     def test_all_service_subprocesses_use_creationflags(self) -> None:
         target_files = [
+            "discord_bot.py",
             "maintenance.py",
             "mumu_monitor.py",
             "telemetry.py",

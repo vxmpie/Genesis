@@ -8,6 +8,7 @@ from backend.api.routes import FRONTEND_DIST_DIR, router
 from backend.api.ws import broadcast_event, websocket_endpoint
 from backend.core.config import CONFIG
 from backend.core.events import add_event, set_event_broadcaster
+from backend.services.discord_bot import discord_bot_service
 from backend.services.discord_notifier import heartbeat_loop, notifier, run_auto_discord_purge
 from backend.services.maintenance import (
     auto_boost_loop,
@@ -37,6 +38,7 @@ async def lifespan(fastapi_app: FastAPI):
     loop = asyncio.get_running_loop()
     set_event_broadcaster(loop, broadcast_event)
     notifier.start(loop)
+    discord_bot_service.start(loop)
 
     tasks = [
         asyncio.create_task(cpu_sampler_loop()),
@@ -74,6 +76,7 @@ async def lifespan(fastapi_app: FastAPI):
                 pass
             except Exception:
                 pass
+        await discord_bot_service.stop()
         await notifier.stop()
         stop_tunnel_process()
         set_event_broadcaster(None, None)
