@@ -1302,6 +1302,39 @@ async def _provision_guild_roles(
     return resolved
 
 
+async def _cleanup_board_channel_clutter(
+    bot_token: str,
+    channel_id: str,
+    keep_msg_id: str,
+) -> int:
+    st_m, msgs, _ = await _discord_api("GET", f"/channels/{channel_id}/messages?limit=30", bot_token)
+    if st_m != 200 or not isinstance(msgs, list):
+        return 0
+    deleted = 0
+    board_prefixes = ("[INTEL] ", "[BRIDGE] ", "[COMMAND WALL] ")
+    for m in msgs:
+        if not isinstance(m, dict):
+            continue
+        mid = str(m.get("id", ""))
+        if not mid or mid == str(keep_msg_id):
+            continue
+        mtype = int(m.get("type", 0))
+        should_delete = False
+        if mtype == 6:
+            should_delete = True
+        else:
+            author = m.get("author", {}) if isinstance(m.get("author"), dict) else {}
+            embeds = m.get("embeds", []) if isinstance(m.get("embeds"), list) else []
+            first_title = str(embeds[0].get("title", "")) if embeds and isinstance(embeds[0], dict) else ""
+            if author.get("bot") and any(first_title.startswith(p) for p in board_prefixes):
+                should_delete = True
+        if should_delete:
+            st_d, _, _ = await _discord_api("DELETE", f"/channels/{channel_id}/messages/{mid}", bot_token)
+            if st_d in (200, 204):
+                deleted += 1
+    return deleted
+
+
 async def _upsert_board_message(
     bot_token: str,
     channel_id: str,
@@ -1316,7 +1349,7 @@ async def _upsert_board_message(
             bot_token,
             payload=payload,
         )
-        if 200 <= st_edit < 300:
+        if st_edit != 404:
             return existing_msg_id
 
     st_post, msg_data, _ = await _discord_api(
@@ -1329,6 +1362,7 @@ async def _upsert_board_message(
         msg_id = str(msg_data["id"])
         if pin:
             await _discord_api("PUT", f"/channels/{channel_id}/pins/{msg_id}", bot_token)
+            await _cleanup_board_channel_clutter(bot_token, channel_id, msg_id)
         return msg_id
     return existing_msg_id
 
@@ -2400,6 +2434,14 @@ class DiscordBotService:
                 opts["from_button"] = True
                 if action in ("deck_refresh", "wall_refresh") or action.startswith("lang_cycle:"):
                     ack_type = 6
+                elif action in VALID_FEED_CATEGORIES:
+                    state = load_station_state()
+                    ch_map = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
+                    msg_map = state.get("intel_message_ids", {}) if isinstance(state.get("intel_message_ids"), dict) else {}
+                    clicked_ch = str(data.get("channel_id", ""))
+                    clicked_msg = str((data.get("message") or {}).get("id", "")) if isinstance(data.get("message"), dict) else ""
+                    if clicked_ch == str(ch_map.get(action, "")) or clicked_msg == str(msg_map.get(action, "")):
+                        ack_type = 6
         else:
             return
 

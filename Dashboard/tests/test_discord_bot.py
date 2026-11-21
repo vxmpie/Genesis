@@ -327,6 +327,47 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_payload["embeds"][0]["title"], "[MACRO] /ping")
         self.assertEqual(run_payload["embeds"][0]["description"], "Pong!")
 
+    def test_epic_url_resolution_and_loot_deduplication(self) -> None:
+        mock_element = {
+            "title": "Mark of the Deep",
+            "productSlug": None,
+            "urlSlug": "2fd257a6cd80405a833f9004ff07993a",
+            "offerMappings": [{"pageSlug": "mark-of-the-deep-f7dc08", "pageType": "productHome"}],
+            "catalogNs": {"mappings": [{"pageSlug": "mark-of-the-deep-f7dc08", "pageType": "productHome"}]},
+        }
+        resolved = intel_feeds._resolve_epic_store_url(mock_element)
+        self.assertEqual(resolved, "https://store.epicgames.com/en-US/p/mark-of-the-deep-f7dc08")
+
+        fallback_el = {
+            "title": "Mystery Game",
+            "productSlug": None,
+            "urlSlug": "2fd257a6cd80405a833f9004ff07993a",
+            "offerMappings": [],
+            "catalogNs": {"mappings": []},
+        }
+        self.assertEqual(intel_feeds._resolve_epic_store_url(fallback_el), "https://store.epicgames.com/en-US/free-games")
+
+        mock_gp = [
+            {
+                "title": "Mark of the Deep (Epic Games) Giveaway",
+                "worth": "$29.99",
+                "gamerpower_url": "https://www.gamerpower.com/mark-of-the-deep-epic-games-giveaway",
+            },
+            {
+                "title": "Distant Space (Steam) Giveaway",
+                "worth": "$0.99",
+                "gamerpower_url": "https://www.gamerpower.com/distant-space-steam-giveaway",
+            },
+        ]
+        with patch.object(intel_feeds, "_fetch_json", return_value=mock_gp):
+            gp_lines = intel_feeds._collect_feed_lines(
+                {"kind": "json_gamerpower", "url": "https://www.gamerpower.com/api/giveaways?platform=pc&type=game"},
+                limit=5,
+            )
+        self.assertEqual(len(gp_lines), 1)
+        self.assertIn("Distant Space", gp_lines[0])
+        self.assertNotIn("Mark of the Deep", gp_lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()

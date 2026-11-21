@@ -43,7 +43,7 @@ VALID_FEED_CATEGORIES = ("google", "ai", "tech", "world", "loot")
 VALID_LANG_MODES = ("dual", "th", "en")
 
 DEFAULT_FEEDS_REGISTRY: dict = {
-    "schema_version": 3,
+    "schema_version": 4,
     "google": [
         {
             "name": "Google AI & Gemini Official Blog",
@@ -138,15 +138,15 @@ DEFAULT_FEEDS_REGISTRY: dict = {
     ],
     "loot": [
         {
-            "name": "Epic Games Freebies",
+            "name": "Epic Games Store (Free Now & Upcoming)",
             "kind": "json_epic",
             "url": "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=TH&allowCountries=TH",
             "enabled": True,
         },
         {
-            "name": "CheapShark 100% Off Deals",
-            "kind": "json_cheapshark",
-            "url": "https://www.cheapshark.com/api/1.0/deals?upperPrice=0&pageSize=6",
+            "name": "Verified PC Giveaways (Steam / IndieGala / Itch)",
+            "kind": "json_gamerpower",
+            "url": "https://www.gamerpower.com/api/giveaways?platform=pc&type=game",
             "enabled": True,
         },
     ],
@@ -226,7 +226,7 @@ def load_feeds_registry() -> dict:
                         if cat not in data or not isinstance(data[cat], list):
                             data[cat] = copy.deepcopy(DEFAULT_FEEDS_REGISTRY[cat])
                             changed = True
-                    if int(data.get("schema_version", 1)) < 3:
+                    if int(data.get("schema_version", 1)) < 4:
                         for cat_check in ("google", "tech"):
                             existing_urls = {
                                 str(x.get("url", ""))
@@ -236,7 +236,8 @@ def load_feeds_registry() -> dict:
                             for default_src in DEFAULT_FEEDS_REGISTRY[cat_check]:
                                 if default_src["url"] not in existing_urls:
                                     data[cat_check].append(copy.deepcopy(default_src))
-                        data["schema_version"] = 3
+                        data["loot"] = copy.deepcopy(DEFAULT_FEEDS_REGISTRY["loot"])
+                        data["schema_version"] = 4
                         changed = True
                     if changed:
                         save_feeds_registry(data)
@@ -626,36 +627,64 @@ def _collect_feed_lines(source: dict, limit: int = 5) -> list[str]:
                 if isinstance(epic, dict)
                 else []
             )
+            active_lines: list[str] = []
+            upcoming_lines: list[str] = []
             for el in elements:
                 if not isinstance(el, dict):
                     continue
                 promos = el.get("promotions") or {}
                 offers = promos.get("promotionalOffers") or []
+                upcoming = promos.get("upcomingPromotionalOffers") or []
                 discount_price = el.get("price", {}).get("totalPrice", {}).get("discountPrice")
-                if offers and discount_price == 0:
-                    title = strip_emojis(el.get("title", "Unknown Title"))
-                    slug = el.get("productSlug") or el.get("urlSlug") or ""
-                    if not slug:
-                        mappings = el.get("catalogNs", {}).get("mappings") or []
-                        if mappings and isinstance(mappings[0], dict):
-                            slug = mappings[0].get("pageSlug", "")
-                    store_url = (
-                        f"https://store.epicgames.com/en-US/p/{slug}"
-                        if slug
-                        else "https://store.epicgames.com/en-US/free-games"
-                    )
-                    lines.append(f"- [{_truncate(title, 70)}]({store_url}) (`FREE NOW`)")
+                title = strip_emojis(el.get("title", "Unknown Title"))
+                store_url = _resolve_epic_store_url(el)
+                if _has_epic_zero_discount_offer(offers) and discount_price == 0:
+                    active_lines.append(f"- [{_truncate(title, 70)}]({store_url}) (`FREE NOW`)")
+                elif _has_epic_zero_discount_offer(upcoming):
+                    upcoming_lines.append(f"- [{_truncate(title, 70)}]({store_url}) (`UPCOMING FREE`)")
+            lines.extend((active_lines + upcoming_lines)[:limit])
+        elif kind == "json_gamerpower":
+            giveaways = _fetch_json(url, timeout=8.0)
+            if isinstance(giveaways, list):
+                idx = 0
+                for g in giveaways:
+                    if not isinstance(g, dict):
+                        continue
+                    raw_title = strip_emojis(g.get("title", ""))
+                    if not raw_title or "(epic games)" in raw_title.lower():
+                        continue
+                    gp_url = str(g.get("gamerpower_url") or g.get("open_giveaway_url") or "").strip()
+                    worth = strip_emojis(g.get("worth", "N/A"))
+                    if not gp_url:
+                        continue
+                    idx += 1
+                    worth_str = f" (Normal `{worth}` -> `FREE`)" if worth and worth != "N/A" else " (`FREE`)"
+                    lines.append(f"`{idx}.` [{_truncate(raw_title, 66)}]({gp_url}){worth_str}")
+                    if idx >= limit:
+                        break
         elif kind == "json_cheapshark":
             deals = _fetch_json(url, timeout=8.0)
             if isinstance(deals, list):
-                for idx, d in enumerate(deals[:limit], 1):
+                idx = 0
+                for d in deals:
+                    if not isinstance(d, dict) or str(d.get("storeID", "")) == "25":
+                        continue
                     title = _truncate(d.get("title", ""), 64)
                     orig = d.get("normalPrice", "0.00")
+                    steam_app = str(d.get("steamAppID") or "").strip()
                     did = d.get("dealID", "")
-                    if title and did:
-                        lines.append(
-                            f"`{idx}.` [{title}](https://www.cheapshark.com/redirect?dealID={did}) (Normal `${orig}` -> `$0.00`)"
-                        )
+                    if not title:
+                        continue
+                    target_url = (
+                        f"https://store.steampowered.com/app/{steam_app}"
+                        if steam_app
+                        else f"https://www.cheapshark.com/redirect?dealID={did}"
+                    )
+                    if steam_app or did:
+                        idx += 1
+                        lines.append(f"`{idx}.` [{title}]({target_url}) (Normal `${orig}` -> `$0.00`)")
+                        if idx >= limit:
+                            break
         else:
             xml_data = _fetch_text(url, timeout=8.0)
             parsed = parse_rss_or_atom_xml(xml_data, limit=limit)
@@ -664,6 +693,70 @@ def _collect_feed_lines(source: dict, limit: int = 5) -> list[str]:
     except Exception:
         return []
     return lines
+
+
+def _has_epic_zero_discount_offer(offer_groups: object) -> bool:
+    if not isinstance(offer_groups, list):
+        return False
+    for grp in offer_groups:
+        if not isinstance(grp, dict):
+            continue
+        inner = grp.get("promotionalOffers")
+        if not isinstance(inner, list):
+            continue
+        for off in inner:
+            if not isinstance(off, dict):
+                continue
+            ds = off.get("discountSetting")
+            if isinstance(ds, dict) and ds.get("discountPercentage") == 0:
+                return True
+    return False
+
+
+def _resolve_epic_store_url(el: dict) -> str:
+    slug = ""
+    for mapping_list in (
+        el.get("offerMappings"),
+        (el.get("catalogNs") or {}).get("mappings") if isinstance(el.get("catalogNs"), dict) else None,
+    ):
+        if isinstance(mapping_list, list):
+            for m in mapping_list:
+                if isinstance(m, dict):
+                    candidate = str(m.get("pageSlug") or "").strip().strip("/")
+                    if candidate and not re.fullmatch(r"[0-9a-fA-F]{32}", candidate):
+                        slug = candidate
+                        break
+        if slug:
+            break
+
+    if not slug:
+        prod_slug = str(el.get("productSlug") or "").strip().strip("/")
+        if prod_slug.endswith("/home"):
+            prod_slug = prod_slug[:-5].strip("/")
+        if prod_slug and not re.fullmatch(r"[0-9a-fA-F]{32}", prod_slug):
+            slug = prod_slug
+
+    if not slug:
+        url_slug = str(el.get("urlSlug") or "").strip().strip("/")
+        if url_slug and not re.fullmatch(r"[0-9a-fA-F]{32}", url_slug) and " " not in url_slug:
+            slug = url_slug
+
+    if slug:
+        return f"https://store.epicgames.com/en-US/p/{slug}"
+    return "https://store.epicgames.com/en-US/free-games"
+
+
+def _dedupe_lines_by_url(lines: list[str], seen_urls: set[str]) -> list[str]:
+    unique: list[str] = []
+    for line in lines:
+        m = re.search(r"\]\((https?://[^\s\)]+)\)", line)
+        if m:
+            url = m.group(1)
+            if url in seen_urls and url != "https://store.epicgames.com/en-US/free-games":
+                continue
+            seen_urls.add(url)
+        unique.append(line)
+    return unique
 
 
 # --- Planetary Sensors & Financial Feeds ---
@@ -803,8 +896,9 @@ def fetch_google_gemini_intel(limit: int = 3, lang: str = "dual") -> dict:
         }
     ]
 
+    seen_urls: set[str] = set()
     for src in sources[:6]:
-        lines = _collect_feed_lines(src, limit=limit)
+        lines = _dedupe_lines_by_url(_collect_feed_lines(src, limit=limit), seen_urls)
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "Google Feed")),
@@ -849,8 +943,9 @@ def fetch_ai_cortex_intel(limit: int = 4, lang: str = "dual") -> dict:
     sources = [s for s in reg.get("ai", []) if s.get("enabled", True)]
     fields: list[dict] = []
 
+    seen_urls: set[str] = set()
     for src in sources[:6]:
-        lines = _collect_feed_lines(src, limit=limit)
+        lines = _dedupe_lines_by_url(_collect_feed_lines(src, limit=limit), seen_urls)
         if lines or src.get("kind") == "rss":
             fields.append(
                 {
@@ -902,8 +997,9 @@ def fetch_tech_radar_intel(limit: int = 4, lang: str = "dual") -> dict:
     sources = [s for s in reg.get("tech", []) if s.get("enabled", True)]
     fields: list[dict] = []
 
+    seen_urls: set[str] = set()
     for src in sources[:6]:
-        lines = _collect_feed_lines(src, limit=limit)
+        lines = _dedupe_lines_by_url(_collect_feed_lines(src, limit=limit), seen_urls)
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "Tech Feed")),
@@ -967,8 +1063,9 @@ def fetch_world_pulse_intel(limit: int = 5, lang: str = "dual") -> dict:
         {"name": tr(mode, "Crypto & FX Tickers", "ราคาคริปโตและค่าเงินบาท"), "value": market_val, "inline": True},
     ]
 
+    seen_urls: set[str] = set()
     for src in sources[:5]:
-        lines = _collect_feed_lines(src, limit=limit)
+        lines = _dedupe_lines_by_url(_collect_feed_lines(src, limit=limit), seen_urls)
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "World Feed")),
@@ -1018,8 +1115,9 @@ def fetch_free_loot_intel(limit: int = 6, lang: str = "dual") -> dict:
     sources = [s for s in reg.get("loot", []) if s.get("enabled", True)]
     fields: list[dict] = []
 
+    seen_urls: set[str] = set()
     for src in sources[:5]:
-        lines = _collect_feed_lines(src, limit=limit)
+        lines = _dedupe_lines_by_url(_collect_feed_lines(src, limit=limit), seen_urls)
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "Loot Feed")),
