@@ -91,8 +91,20 @@ CHANNEL_TOPICS: dict[str, str] = {
     "holodeck-archives": "Clips, Highlights & Media Archives | คลังเก็บคลิป ไฮไลต์ และรูปภาพ",
 }
 
+PERMISSION_ADD_REACTIONS = 1 << 6
 PERMISSION_VIEW_CHANNEL = 1 << 10
+PERMISSION_SEND_MESSAGES = 1 << 11
+PERMISSION_MANAGE_MESSAGES = 1 << 13
+PERMISSION_EMBED_LINKS = 1 << 14
+PERMISSION_ATTACH_FILES = 1 << 15
+PERMISSION_READ_MESSAGE_HISTORY = 1 << 16
 PERMISSION_CONNECT = 1 << 20
+PERMISSION_USE_APPLICATION_COMMANDS = 1 << 31
+PERMISSION_CREATE_PUBLIC_THREADS = 1 << 35
+PERMISSION_CREATE_PRIVATE_THREADS = 1 << 36
+PERMISSION_SEND_MESSAGES_IN_THREADS = 1 << 38
+
+POPUP_TTL_SECONDS = 120.0
 
 SLASH_COMMANDS: list[dict] = [
     {
@@ -1302,36 +1314,125 @@ async def _provision_guild_roles(
     return resolved
 
 
+def build_readonly_board_overwrites(
+    guild_id: str,
+    bot_id: str,
+    core_role_id: str | None = None,
+) -> list[dict]:
+    everyone_allow = (
+        PERMISSION_VIEW_CHANNEL
+        | PERMISSION_READ_MESSAGE_HISTORY
+        | PERMISSION_USE_APPLICATION_COMMANDS
+    )
+    everyone_deny = (
+        PERMISSION_SEND_MESSAGES
+        | PERMISSION_ADD_REACTIONS
+        | PERMISSION_CREATE_PUBLIC_THREADS
+        | PERMISSION_CREATE_PRIVATE_THREADS
+        | PERMISSION_SEND_MESSAGES_IN_THREADS
+    )
+    bot_allow = (
+        PERMISSION_VIEW_CHANNEL
+        | PERMISSION_SEND_MESSAGES
+        | PERMISSION_MANAGE_MESSAGES
+        | PERMISSION_EMBED_LINKS
+        | PERMISSION_ATTACH_FILES
+        | PERMISSION_READ_MESSAGE_HISTORY
+    )
+    overwrites: list[dict] = [
+        {
+            "id": str(guild_id),
+            "type": 0,
+            "allow": str(everyone_allow),
+            "deny": str(everyone_deny),
+        },
+        {
+            "id": str(bot_id),
+            "type": 1,
+            "allow": str(bot_allow),
+            "deny": "0",
+        },
+    ]
+    if core_role_id:
+        overwrites.append(
+            {
+                "id": str(core_role_id),
+                "type": 0,
+                "allow": str(bot_allow),
+                "deny": "0",
+            }
+        )
+    return overwrites
+
+
+def get_locked_board_channel_ids(state: dict | None = None) -> set[str]:
+    st = state if isinstance(state, dict) else load_station_state()
+    ids: set[str] = set()
+    for key in ("command_deck_channel_id", "command_wall_channel_id", "reactor_channel_id"):
+        val = str(st.get(key, "") or "").strip()
+        if val:
+            ids.add(val)
+    dash_cid = str(CONFIG.get("alerts", {}).get("discord_channel_id", "") or "").strip()
+    if dash_cid:
+        ids.add(dash_cid)
+    intel_map = st.get("intel_channel_ids", {})
+    if isinstance(intel_map, dict):
+        for cid in intel_map.values():
+            c_str = str(cid or "").strip()
+            if c_str:
+                ids.add(c_str)
+    return ids
+
+
+def get_pinned_board_msg_id_for_channel(channel_id: str, state: dict | None = None) -> str | None:
+    st = state if isinstance(state, dict) else load_station_state()
+    cid = str(channel_id or "").strip()
+    if not cid:
+        return None
+    if cid == str(st.get("command_deck_channel_id", "")):
+        return str(st.get("deck_message_id", "") or "") or None
+    if cid == str(st.get("command_wall_channel_id", "")):
+        return str(st.get("command_wall_message_id", "") or "") or None
+    intel_chs = st.get("intel_channel_ids", {})
+    intel_msgs = st.get("intel_message_ids", {})
+    if isinstance(intel_chs, dict) and isinstance(intel_msgs, dict):
+        for cat, icid in intel_chs.items():
+            if str(icid) == cid:
+                return str(intel_msgs.get(cat, "") or "") or None
+    return None
+
+
 async def _cleanup_board_channel_clutter(
     bot_token: str,
     channel_id: str,
     keep_msg_id: str,
+    active_popup_id: str | None = None,
 ) -> int:
     st_m, msgs, _ = await _discord_api("GET", f"/channels/{channel_id}/messages?limit=30", bot_token)
     if st_m != 200 or not isinstance(msgs, list):
         return 0
+    if active_popup_id is None:
+        st_state = load_station_state()
+        p_map = st_state.get("active_popups", {})
+        if isinstance(p_map, dict):
+            active_popup_id = str(p_map.get(str(channel_id), "") or "") or None
+    keep_set = {str(keep_msg_id)}
+    if active_popup_id:
+        keep_set.add(str(active_popup_id))
     deleted = 0
-    board_prefixes = ("[INTEL] ", "[BRIDGE] ", "[COMMAND WALL] ")
     for m in msgs:
         if not isinstance(m, dict):
             continue
         mid = str(m.get("id", ""))
-        if not mid or mid == str(keep_msg_id):
+        if not mid or mid in keep_set:
             continue
-        mtype = int(m.get("type", 0))
-        should_delete = False
-        if mtype == 6:
-            should_delete = True
-        else:
-            author = m.get("author", {}) if isinstance(m.get("author"), dict) else {}
-            embeds = m.get("embeds", []) if isinstance(m.get("embeds"), list) else []
-            first_title = str(embeds[0].get("title", "")) if embeds and isinstance(embeds[0], dict) else ""
-            if author.get("bot") and any(first_title.startswith(p) for p in board_prefixes):
-                should_delete = True
-        if should_delete:
-            st_d, _, _ = await _discord_api("DELETE", f"/channels/{channel_id}/messages/{mid}", bot_token)
-            if st_d in (200, 204):
-                deleted += 1
+        embeds = m.get("embeds", []) if isinstance(m.get("embeds"), list) else []
+        first_title = str(embeds[0].get("title", "")) if embeds and isinstance(embeds[0], dict) else ""
+        if first_title.startswith("[GOOGLE RADAR ALERT]"):
+            continue
+        st_d, _, _ = await _discord_api("DELETE", f"/channels/{channel_id}/messages/{mid}", bot_token)
+        if st_d in (200, 204):
+            deleted += 1
     return deleted
 
 
@@ -1606,6 +1707,12 @@ async def provision_guild_station(
     state["hud_channel_ids"] = resolved_hud_ids
     state["hud_last_names"] = hud_names
 
+    readonly_board_overwrites = build_readonly_board_overwrites(
+        guild_id,
+        app_id,
+        roles_map.get("core"),
+    )
+
     bridge_ch = await _find_or_create_channel(
         token,
         guild_id,
@@ -1614,6 +1721,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_bridge["id"],
         position=0,
+        permission_overwrites=readonly_board_overwrites,
         legacy_names=("command-deck",),
         known_id=state.get("command_deck_channel_id"),
         topic=CHANNEL_TOPICS["bridge-command"],
@@ -1626,6 +1734,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_bridge["id"],
         position=1,
+        permission_overwrites=readonly_board_overwrites,
         known_id=state.get("command_wall_channel_id"),
         topic=CHANNEL_TOPICS["command-wall"],
     )
@@ -1637,6 +1746,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_bridge["id"],
         position=2,
+        permission_overwrites=readonly_board_overwrites,
         legacy_names=("dashboard",),
         known_id=dash_ch_id,
         topic=CHANNEL_TOPICS["reactor-telemetry"],
@@ -1656,6 +1766,7 @@ async def provision_guild_station(
 
     state["command_deck_channel_id"] = str(bridge_ch["id"])
     state["command_wall_channel_id"] = str(wall_ch["id"])
+    state["reactor_channel_id"] = str(reactor_ch["id"])
     state["dropzone_channel_id"] = str(datacore_ch["id"])
 
     existing_intel_ids = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
@@ -1667,6 +1778,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_intel["id"],
         position=0,
+        permission_overwrites=readonly_board_overwrites,
         known_id=existing_intel_ids.get("google"),
         topic=CHANNEL_TOPICS["google-gemini-radar"],
     )
@@ -1678,6 +1790,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_intel["id"],
         position=1,
+        permission_overwrites=readonly_board_overwrites,
         known_id=existing_intel_ids.get("ai"),
         topic=CHANNEL_TOPICS["ai-singularity-feed"],
     )
@@ -1689,6 +1802,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_intel["id"],
         position=2,
+        permission_overwrites=readonly_board_overwrites,
         known_id=existing_intel_ids.get("tech"),
         topic=CHANNEL_TOPICS["tech-cyber-radar"],
     )
@@ -1700,6 +1814,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_intel["id"],
         position=3,
+        permission_overwrites=readonly_board_overwrites,
         known_id=existing_intel_ids.get("world"),
         topic=CHANNEL_TOPICS["world-market-pulse"],
     )
@@ -1711,6 +1826,7 @@ async def provision_guild_station(
         0,
         parent_id=cat_intel["id"],
         position=4,
+        permission_overwrites=readonly_board_overwrites,
         known_id=existing_intel_ids.get("loot"),
         topic=CHANNEL_TOPICS["free-games-loot"],
     )
@@ -2317,8 +2433,12 @@ class DiscordBotService:
     def __init__(
         self,
         config_provider: Callable[[], dict] | None = None,
+        popup_ttl_sec: float = POPUP_TTL_SECONDS,
     ) -> None:
         self._config_provider = config_provider or (lambda: CONFIG)
+        self._popup_ttl_sec = float(popup_ttl_sec)
+        self._active_popups: dict[str, str] = {}
+        self._popup_timers: dict[str, asyncio.Task] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._gateway_task: asyncio.Task | None = None
         self._hud_task: asyncio.Task | None = None
@@ -2352,6 +2472,10 @@ class DiscordBotService:
     async def stop(self) -> None:
         if self._stop_event:
             self._stop_event.set()
+        for t_popup in list(self._popup_timers.values()):
+            if t_popup and not t_popup.done():
+                t_popup.cancel()
+        self._popup_timers.clear()
         for task in (
             self._gateway_task,
             self._hud_task,
@@ -2378,13 +2502,107 @@ class DiscordBotService:
         cfg = self._config_provider()
         return str(cfg.get("alerts", {}).get("discord_bot_token", "") or "").strip()
 
-    async def _handle_datacore_message(self, msg: dict, bot_token: str) -> None:
-        author = msg.get("author", {}) if isinstance(msg.get("author"), dict) else {}
-        if author.get("bot"):
+    async def _dismiss_active_popup(
+        self,
+        channel_id: str,
+        bot_token: str,
+        keep_board_id: str | None = None,
+    ) -> None:
+        if not channel_id:
             return
+        old_task = self._popup_timers.pop(channel_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        old_mid = self._active_popups.pop(channel_id, None)
         state = load_station_state()
+        persisted_map = state.get("active_popups", {})
+        if isinstance(persisted_map, dict) and channel_id in persisted_map:
+            persisted_mid = str(persisted_map.pop(channel_id, "") or "")
+            if persisted_mid and not old_mid:
+                old_mid = persisted_mid
+            state["active_popups"] = persisted_map
+            save_station_state(state)
+
+        if old_mid and old_mid != keep_board_id:
+            await _discord_api("DELETE", f"/channels/{channel_id}/messages/{old_mid}", bot_token)
+
+    async def _register_transient_popup(
+        self,
+        channel_id: str,
+        popup_msg_id: str,
+        bot_token: str,
+        keep_board_id: str | None = None,
+    ) -> None:
+        if not channel_id or not popup_msg_id or popup_msg_id == keep_board_id:
+            return
+        old_task = self._popup_timers.pop(channel_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        prev_mid = self._active_popups.get(channel_id)
+        if prev_mid and prev_mid != popup_msg_id and prev_mid != keep_board_id:
+            asyncio.create_task(
+                _discord_api("DELETE", f"/channels/{channel_id}/messages/{prev_mid}", bot_token)
+            )
+
+        self._active_popups[channel_id] = popup_msg_id
+        state = load_station_state()
+        persisted_map = state.get("active_popups", {})
+        if not isinstance(persisted_map, dict):
+            persisted_map = {}
+        persisted_map[channel_id] = popup_msg_id
+        state["active_popups"] = persisted_map
+        save_station_state(state)
+
+        if keep_board_id:
+            asyncio.create_task(
+                _cleanup_board_channel_clutter(
+                    bot_token,
+                    channel_id,
+                    keep_board_id,
+                    active_popup_id=popup_msg_id,
+                )
+            )
+
+        async def _expire_after_ttl() -> None:
+            try:
+                await asyncio.sleep(self._popup_ttl_sec)
+                if self._active_popups.get(channel_id) == popup_msg_id:
+                    self._active_popups.pop(channel_id, None)
+                st_now = load_station_state()
+                p_map = st_now.get("active_popups", {})
+                if isinstance(p_map, dict) and p_map.get(channel_id) == popup_msg_id:
+                    p_map.pop(channel_id, None)
+                    st_now["active_popups"] = p_map
+                    save_station_state(st_now)
+                await _discord_api("DELETE", f"/channels/{channel_id}/messages/{popup_msg_id}", bot_token)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+        self._popup_timers[channel_id] = asyncio.create_task(_expire_after_ttl())
+
+    async def _handle_datacore_message(self, msg: dict, bot_token: str) -> None:
+        channel_id = str(msg.get("channel_id", "") or "")
+        msg_id = str(msg.get("id", "") or "")
+        mtype = int(msg.get("type", 0))
+        author = msg.get("author", {}) if isinstance(msg.get("author"), dict) else {}
+        is_bot = bool(author.get("bot"))
+
+        state = load_station_state()
+        locked_ids = get_locked_board_channel_ids(state)
+        if channel_id in locked_ids:
+            if mtype == 6 or not is_bot:
+                if msg_id:
+                    await _discord_api("DELETE", f"/channels/{channel_id}/messages/{msg_id}", bot_token)
+                return
+
+        if is_bot:
+            return
         datacore_id = str(state.get("dropzone_channel_id", "") or "")
-        if not datacore_id or str(msg.get("channel_id", "")) != datacore_id:
+        if not datacore_id or channel_id != datacore_id:
             return
 
         content = str(msg.get("content", "") or "").strip()
@@ -2403,7 +2621,7 @@ class DiscordBotService:
         lang = get_current_lang()
         ack_payload = {
             "content": f"`[VAULT #{entry['id']}]` {tr(lang, 'Archived to datacore.', 'บันทึกลงคลัง Vault อัตโนมัติแล้ว')}",
-            "message_reference": {"message_id": str(msg.get("id", ""))},
+            "message_reference": {"message_id": msg_id},
         }
         await _discord_api("POST", f"/channels/{datacore_id}/messages", bot_token, payload=ack_payload)
 
@@ -2413,10 +2631,15 @@ class DiscordBotService:
         app_id = str(data.get("application_id") or self._app_id or "")
         int_type = int(data.get("type", 0))
         payload_data = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
+        channel_id = str(data.get("channel_id", "") or "")
+        clicked_msg = str((data.get("message") or {}).get("id", "")) if isinstance(data.get("message"), dict) else ""
 
         member = data.get("member", {}) if isinstance(data.get("member"), dict) else {}
         user = member.get("user") if isinstance(member.get("user"), dict) else data.get("user", {})
         author_name = str(user.get("username", "overlord")) if isinstance(user, dict) else "overlord"
+
+        state = load_station_state()
+        board_msg_id = get_pinned_board_msg_id_for_channel(channel_id, state)
 
         action = ""
         opts: dict[str, object] = {}
@@ -2434,13 +2657,14 @@ class DiscordBotService:
                 opts["from_button"] = True
                 if action in ("deck_refresh", "wall_refresh") or action.startswith("lang_cycle:"):
                     ack_type = 6
+                elif action in ("bridge", "deck") and channel_id == str(state.get("command_deck_channel_id", "")) and clicked_msg == board_msg_id:
+                    ack_type = 6
+                elif action == "wall" and channel_id == str(state.get("command_wall_channel_id", "")) and clicked_msg == board_msg_id:
+                    ack_type = 6
                 elif action in VALID_FEED_CATEGORIES:
-                    state = load_station_state()
                     ch_map = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
                     msg_map = state.get("intel_message_ids", {}) if isinstance(state.get("intel_message_ids"), dict) else {}
-                    clicked_ch = str(data.get("channel_id", ""))
-                    clicked_msg = str((data.get("message") or {}).get("id", "")) if isinstance(data.get("message"), dict) else ""
-                    if clicked_ch == str(ch_map.get(action, "")) or clicked_msg == str(msg_map.get(action, "")):
+                    if channel_id == str(ch_map.get(action, "")) and (not clicked_msg or clicked_msg == str(msg_map.get(action, ""))):
                         ack_type = 6
         else:
             return
@@ -2451,6 +2675,9 @@ class DiscordBotService:
             None,
             payload={"type": ack_type},
         )
+
+        if ack_type == 5 and channel_id:
+            await self._dismiss_active_popup(channel_id, bot_token, keep_board_id=board_msg_id)
 
         try:
             resp_payload, files = await _execute_command_action(action, opts, author_name=author_name)
@@ -2467,12 +2694,42 @@ class DiscordBotService:
             }
             files = None
 
+        if ack_type == 5 and isinstance(resp_payload, dict) and isinstance(resp_payload.get("embeds"), list):
+            ttl_mins = max(1, int(round(self._popup_ttl_sec / 60.0)))
+            for emb in resp_payload["embeds"]:
+                if isinstance(emb, dict):
+                    ftr = emb.get("footer")
+                    base_ftr = str(ftr.get("text", "")) if isinstance(ftr, dict) else "Genesis Motherboard"
+                    if "Auto-closes" not in base_ftr:
+                        emb["footer"] = {"text": f"{base_ftr} | Auto-closes in {ttl_mins}m"}
+
         patch_path = f"/webhooks/{app_id}/{int_token}/messages/@original"
         if files:
             raw_body, ctype = encode_multipart_form_data(resp_payload, files)
-            await _discord_api("PATCH", patch_path, None, raw_body=raw_body, content_type=ctype)
+            st_patch, patch_data, _ = await _discord_api("PATCH", patch_path, None, raw_body=raw_body, content_type=ctype)
         else:
-            await _discord_api("PATCH", patch_path, None, payload=resp_payload)
+            st_patch, patch_data, _ = await _discord_api("PATCH", patch_path, None, payload=resp_payload)
+
+        if ack_type == 5 and channel_id and 200 <= st_patch < 300:
+            new_popup_id = str(patch_data.get("id", "")) if isinstance(patch_data, dict) else ""
+            if not new_popup_id:
+                st_get, orig_data, _ = await _discord_api("GET", patch_path, None)
+                if st_get == 200 and isinstance(orig_data, dict):
+                    new_popup_id = str(orig_data.get("id", ""))
+            if new_popup_id and new_popup_id != board_msg_id:
+                await self._register_transient_popup(
+                    channel_id,
+                    new_popup_id,
+                    bot_token,
+                    keep_board_id=board_msg_id,
+                )
+        elif ack_type == 6 and channel_id and clicked_msg and clicked_msg != board_msg_id:
+            await self._register_transient_popup(
+                channel_id,
+                clicked_msg,
+                bot_token,
+                keep_board_id=board_msg_id,
+            )
 
     async def _run_gateway_session(self, bot_token: str) -> None:
         st, gw_data, err = await _discord_api("GET", "/gateway/bot", bot_token)

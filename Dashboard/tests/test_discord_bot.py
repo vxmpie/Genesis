@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import sys
@@ -367,6 +368,91 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(gp_lines), 1)
         self.assertIn("Distant Space", gp_lines[0])
         self.assertNotIn("Mark of the Deep", gp_lines[0])
+
+    async def test_readonly_board_overwrites_and_single_slot_popup_ttl(self) -> None:
+        ow = discord_bot.build_readonly_board_overwrites("111", "222", "333")
+        self.assertEqual(len(ow), 3)
+        everyone_deny = int(ow[0]["deny"])
+        everyone_allow = int(ow[0]["allow"])
+        self.assertTrue(everyone_deny & discord_bot.PERMISSION_SEND_MESSAGES)
+        self.assertTrue(everyone_deny & discord_bot.PERMISSION_ADD_REACTIONS)
+        self.assertTrue(everyone_allow & discord_bot.PERMISSION_VIEW_CHANNEL)
+        self.assertTrue(everyone_allow & discord_bot.PERMISSION_READ_MESSAGE_HISTORY)
+
+        mock_state = {
+            "command_deck_channel_id": "ch_bridge",
+            "deck_message_id": "msg_board_main",
+            "command_wall_channel_id": "ch_wall",
+            "command_wall_message_id": "msg_wall_main",
+            "dropzone_channel_id": "ch_datacore",
+            "intel_channel_ids": {"loot": "ch_loot"},
+            "intel_message_ids": {"loot": "msg_loot_main"},
+            "active_popups": {},
+        }
+
+        deleted_paths: list[str] = []
+        patch_seq = 0
+
+        async def fake_discord_api(method: str, path: str, bot_token: str | None = None, **kwargs):
+            nonlocal patch_seq
+            if method == "DELETE":
+                deleted_paths.append(path)
+                return 204, {}, ""
+            if method == "GET" and "/messages?limit=30" in path:
+                return 200, [{"id": "msg_board_main", "type": 0}], ""
+            if method == "PATCH" and path.endswith("/messages/@original"):
+                patch_seq += 1
+                return 200, {"id": f"popup_{patch_seq}"}, ""
+            return 200, {}, ""
+
+        svc = discord_bot.DiscordBotService(popup_ttl_sec=0.08)
+        with patch.object(discord_bot, "load_station_state", return_value=mock_state), patch.object(
+            discord_bot, "save_station_state"
+        ), patch.object(discord_bot, "_discord_api", side_effect=fake_discord_api), patch.object(
+            discord_bot, "_execute_command_action", return_value=({"embeds": [{"title": "[ONLINE] Test"}]}, None)
+        ):
+            await svc._handle_datacore_message(
+                {"id": "stray_user_msg_1", "channel_id": "ch_bridge", "type": 0, "author": {"bot": False}},
+                "fake_token",
+            )
+            self.assertIn("/channels/ch_bridge/messages/stray_user_msg_1", deleted_paths)
+
+            await svc._handle_interaction(
+                {
+                    "id": "int_1",
+                    "token": "tok_1",
+                    "application_id": "app_1",
+                    "type": 3,
+                    "channel_id": "ch_bridge",
+                    "message": {"id": "msg_board_main"},
+                    "data": {"custom_id": "cmd:status"},
+                },
+                "fake_token",
+            )
+            first_popup = svc._active_popups.get("ch_bridge")
+            self.assertIsNotNone(first_popup)
+
+            await svc._handle_interaction(
+                {
+                    "id": "int_2",
+                    "token": "tok_2",
+                    "application_id": "app_1",
+                    "type": 3,
+                    "channel_id": "ch_bridge",
+                    "message": {"id": "msg_board_main"},
+                    "data": {"custom_id": "cmd:mumu"},
+                },
+                "fake_token",
+            )
+            await asyncio.sleep(0.02)
+            self.assertIn(f"/channels/ch_bridge/messages/{first_popup}", deleted_paths)
+            second_popup = svc._active_popups.get("ch_bridge")
+            self.assertIsNotNone(second_popup)
+            self.assertNotEqual(first_popup, second_popup)
+
+            await asyncio.sleep(0.12)
+            self.assertIn(f"/channels/ch_bridge/messages/{second_popup}", deleted_paths)
+            self.assertNotIn("ch_bridge", svc._active_popups)
 
 
 if __name__ == "__main__":
