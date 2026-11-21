@@ -23,6 +23,7 @@ from backend.services.discord_notifier import DISCORD_API_BASE, purge_discord_ch
 from backend.services.intel_feeds import (
     DISCORD_DATA_DIR,
     VALID_FEED_CATEGORIES,
+    VALID_LANG_MODES,
     add_custom_rss_feed,
     build_omni_briefing_payload,
     fetch_ai_cortex_intel,
@@ -30,9 +31,13 @@ from backend.services.intel_feeds import (
     fetch_tech_radar_intel,
     fetch_world_pulse_intel,
     get_cached_hud_sensors_sync,
+    lang_button_label,
     list_feed_sources,
+    normalize_lang,
     remove_feed_source,
     strip_emojis,
+    tr,
+    tr_block,
 )
 from backend.services.maintenance import deep_clean_execute, get_vm_disk_status, ram_boost, trim_vm_caches
 from backend.services.mumu_monitor import (
@@ -50,7 +55,7 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 STATION_STATE_PATH = DISCORD_DATA_DIR / "station.json"
 COMMANDS_REGISTRY_PATH = DISCORD_DATA_DIR / "commands.json"
 NOTES_PATH = DISCORD_DATA_DIR / "notes.json"
-USER_AGENT = "Genesis-Motherboard-Core/4.1"
+USER_AGENT = "Genesis-Motherboard-Core/4.2"
 
 GUILD_MOTHERSHIP_NAME = "Genesis Motherboard"
 BOT_MOTHERSHIP_NICK = "MOTHERBOARD CORE"
@@ -69,54 +74,104 @@ ROLE_DEFINITIONS: list[dict] = [
     {"key": "audio", "name": "AUDIO DRONE", "color": 0x8B5CF6, "hoist": True, "mentionable": True},
 ]
 
+CHANNEL_TOPICS: dict[str, str] = {
+    "bridge-command": "Main Bridge Console & Interactive Hardware/Intel Controls | แผงควบคุมหลักสั่งการระบบเครื่องและเรดาร์ข่าวกรอง",
+    "command-wall": "Dynamic Slash Command Directory, Custom Macros & Active Feeds | กำแพงคู่มือคำสั่งแบบไดนามิก คำสั่งลัด และแหล่งข่าวทั้งหมด",
+    "reactor-telemetry": "Automated System Incident, Watchdog Recovery & Memory Guard Alerts | ห้องแจ้งเตือนสถานะระบบ การกู้คืนบอท และหน่วยความจำอัตโนมัติ",
+    "captain-datacore": "Personal Vault & Dropzone: Drop text/links/files here or use /log to auto-archive | คลังเก็บโน้ตและลิงก์ส่วนตัว พิมพ์หรือวางลิงก์ในห้องนี้เพื่อบันทึกเข้า Vault อัตโนมัติ",
+    "ai-singularity-feed": "Live AI Research Papers (HuggingFace) & Artificial Intelligence News | อัปเดตเปเปอร์วิจัย AI และข่าวเทคโนโลยีปัญญาประดิษฐ์",
+    "tech-cyber-radar": "Hacker News, GitHub Trending, CISA Zero-Day CVE & Tech Radar | เรดาร์ข่าววิศวกรรมซอฟต์แวร์ โปรเจกต์ฮิตบน GitHub และเตือนภัยไซเบอร์",
+    "world-market-pulse": "BBC World News, Bangkok Weather Sensors, Crypto/FX Tickers & GitHub Activity | ข่าวโลก สภาพอากาศกรุงเทพฯ ราคาคริปโต/ค่าเงิน และความเคลื่อนไหว GitHub",
+    "free-games-loot": "Epic Games Store Freebies & 100%-Off PC Game Giveaways | เรดาร์แจ้งเตือนเกมแจกฟรี 100% บน Epic Games และ PC",
+    "observation-lounge": "General Discussion & Personal Lounge | ห้องสนทนาทั่วไปและพักผ่อน",
+    "holodeck-archives": "Clips, Highlights & Media Archives | คลังเก็บคลิป ไฮไลต์ และรูปภาพ",
+}
+
 PERMISSION_VIEW_CHANNEL = 1 << 10
 PERMISSION_CONNECT = 1 << 20
 
 SLASH_COMMANDS: list[dict] = [
     {
-        "_group": "Bridge & Overview",
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "เปิดหรือรีเฟรชแผงควบคุมหลัก Genesis Motherboard",
         "name": "bridge",
         "description": "Spawn or refresh the Genesis Motherboard Bridge Console",
         "type": 1,
     },
     {
-        "_group": "Bridge & Overview",
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "แสดงและซิงค์กำแพงคู่มือคำสั่งทั้งหมด (#command-wall)",
         "name": "wall",
         "description": "Display and sync the dynamic Master Command Wall",
         "type": 1,
     },
     {
-        "_group": "Bridge & Overview",
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "รายงานสรุปครบชุด (สถานะเครื่อง + อากาศ + ตลาด + ข่าว AI/Tech)",
         "name": "briefing",
         "description": "Unified Omni-Briefing (Hardware + Weather + Markets + AI/Tech)",
         "type": 1,
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "สลับภาษาของบอร์ดและคำสั่ง (2 ภาษา DUAL / ไทย TH / อังกฤษ EN)",
+        "name": "lang",
+        "description": "Switch Discord station language mode (dual, th, en)",
+        "type": 1,
+        "options": [
+            {
+                "name": "mode",
+                "description": "Language display mode (omit to cycle)",
+                "type": 3,
+                "required": False,
+                "choices": [
+                    {"name": "Bilingual (EN + TH)", "value": "dual"},
+                    {"name": "Thai Only (TH)", "value": "th"},
+                    {"name": "English Only (EN)", "value": "en"},
+                ],
+            }
+        ],
+    },
+    {
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "ดูสถานะ CPU, RAM, GPU, Disk, Ping และลิงก์ Tailscale สดๆ",
         "name": "status",
         "description": "Full reactor and hull telemetry (CPU, RAM, GPU, Disk, Ping, Tunnel)",
         "type": 1,
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "จัดอันดับ Top 10 โปรเซสที่กินแรมสูงสุดบนเครื่อง",
         "name": "processes",
         "description": "List top 10 resource-consuming processes on Genesis Motherboard",
         "type": 1,
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "สั่ง RAM Boost ล้าง Standby List และลดขนาด Working Set ทันที",
         "name": "boost",
         "description": "Execute Reactor RAM Boost (Standby List purge and working set trim)",
         "type": 1,
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "สั่ง Deep Clean ล้างไฟล์ Temp, Log และ Cache ทั้งระบบ",
         "name": "clean",
         "description": "Execute Hull Deep Clean across temp directories, logs, and caches",
         "type": 1,
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "แคปภาพหน้าจอ MuMu หรือหน้า Desktop ส่งเป็น PNG เข้าแชท",
         "name": "screenshot",
         "description": "Capture live PNG sensor frame from MuMu or Host desktop",
         "type": 1,
@@ -134,7 +189,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Reactor & Hardware Control",
+        "_group_en": "Reactor & Hardware Control",
+        "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
+        "_desc_th": "ล้างข้อความเก่าในห้องแจ้งเตือน #reactor-telemetry",
         "name": "purge",
         "description": "Purge messages from the #reactor-telemetry alerts channel",
         "type": 1,
@@ -150,13 +207,17 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "MuMu Drone Fleet",
+        "_group_en": "MuMu Drone Fleet",
+        "_group_th": "จัดการจอ MuMu และบอท Roblox",
+        "_desc_th": "เช็กสถานะ MuMu ทุกจอ บัญชี เกมที่รัน และปุ่มกดกู้คืนรายจอ",
         "name": "mumu",
         "description": "Inspect MuMu drone fleet, Roblox presence, and recovery controls",
         "type": 1,
     },
     {
-        "_group": "MuMu Drone Fleet",
+        "_group_en": "MuMu Drone Fleet",
+        "_group_th": "จัดการจอ MuMu และบอท Roblox",
+        "_desc_th": "สั่งกู้คืนและเปิด Roblox ใหม่ตามหมายเลขจอ หรือทำทุกจอที่เปิดอยู่",
         "name": "recover",
         "description": "Trigger Roblox drone recovery on an instance or all active instances",
         "type": 1,
@@ -172,31 +233,41 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Omniscient Intel Cortex",
+        "_group_en": "Omniscient Intel Cortex",
+        "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
+        "_desc_th": "ดึงเปเปอร์วิจัย AI ยอดนิยมและข่าววงการปัญญาประดิษฐ์",
         "name": "ai",
         "description": "Orbital AI & Singularity Cortex (Papers + AI News + Custom Feeds)",
         "type": 1,
     },
     {
-        "_group": "Omniscient Intel Cortex",
+        "_group_en": "Omniscient Intel Cortex",
+        "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
+        "_desc_th": "ดึง Hacker News, GitHub Trending, CISA Zero-Day CVE และ The Verge",
         "name": "tech",
-        "description": "Deep-Space Tech & Cybernetics Radar (Hacker News + Verge + Lobsters)",
+        "description": "Tech, GitHub Trending & Cyber CVE Radar",
         "type": 1,
     },
     {
-        "_group": "Omniscient Intel Cortex",
+        "_group_en": "Omniscient Intel Cortex",
+        "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
+        "_desc_th": "ดึงข่าวโลก BBC, สภาพอากาศ กทม., ราคาคริปโต/THB และ GitHub Activity",
         "name": "world",
         "description": "Planetary World Pulse, Bangkok Weather, Markets & GitHub Radar",
         "type": 1,
     },
     {
-        "_group": "Omniscient Intel Cortex",
+        "_group_en": "Omniscient Intel Cortex",
+        "_group_th": "เรดาร์ข่าวสารและข้อมูลโลก",
+        "_desc_th": "สแกนเกมแจกฟรี 100% บน Epic Games และร้านค้า PC",
         "name": "loot",
         "description": "Orbital Supply Drop (Epic Games Freebies & 100%-Off PC Deals)",
         "type": 1,
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "เพิ่มแหล่งข่าว RSS/Atom ใหม่เข้าหมวด ai/tech/world/loot แบบไดนามิก",
         "name": "feed-add",
         "description": "Dynamically subscribe a new RSS/Atom news feed to an Intel channel",
         "type": 1,
@@ -218,7 +289,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "ลบแหล่งข่าวออกจากรายการฟีดและซิงค์กำแพงคำสั่งใหม่",
         "name": "feed-remove",
         "description": "Remove an RSS/Atom or JSON feed source from an Intel category",
         "type": 1,
@@ -239,7 +312,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "สร้างและแขวนคำสั่งลัด/มาโครส่วนตัวขึ้น #command-wall",
         "name": "cmd-add",
         "description": "Hang a new custom quick-command or macro onto #command-wall",
         "type": 1,
@@ -250,7 +325,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "ลบคำสั่งลัด/มาโครส่วนตัวออกจาก #command-wall",
         "name": "cmd-remove",
         "description": "Remove a custom quick-command from #command-wall",
         "type": 1,
@@ -259,7 +336,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "เรียกใช้คำสั่งลัด/มาโครที่แขวนไว้บน #command-wall",
         "name": "run",
         "description": "Execute a saved custom command or macro from #command-wall",
         "type": 1,
@@ -268,7 +347,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "บันทึกโน้ตหรือลิงก์ลงห้อง #captain-datacore และคลัง Vault",
         "name": "log",
         "description": "Record a Captain's Log entry into #captain-datacore and local vault",
         "type": 1,
@@ -277,7 +358,9 @@ SLASH_COMMANDS: list[dict] = [
         ],
     },
     {
-        "_group": "Dynamic Registry & Datacore",
+        "_group_en": "Dynamic Registry & Datacore",
+        "_group_th": "ปรับแต่งฟีดข่าว คำสั่งลัด และบันทึกส่วนตัว",
+        "_desc_th": "คำสั่งย่อของ /log สำหรับจดโน้ตด่วนเข้า Vault",
         "name": "note",
         "description": "Alias for /log: save a quick note into #captain-datacore",
         "type": 1,
@@ -335,6 +418,27 @@ def save_station_state(state: dict) -> None:
         tmp_path = STATION_STATE_PATH.with_suffix(".json.tmp")
         tmp_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
         os.replace(tmp_path, STATION_STATE_PATH)
+
+
+def get_current_lang() -> str:
+    state = load_station_state()
+    return normalize_lang(state.get("lang", "dual"))
+
+
+def set_station_lang(lang: str) -> str:
+    mode = normalize_lang(lang)
+    with _STATE_LOCK:
+        state = load_station_state()
+        state["lang"] = mode
+        save_station_state(state)
+    return mode
+
+
+def cycle_station_lang() -> str:
+    current = get_current_lang()
+    idx = VALID_LANG_MODES.index(current) if current in VALID_LANG_MODES else 0
+    next_mode = VALID_LANG_MODES[(idx + 1) % len(VALID_LANG_MODES)]
+    return set_station_lang(next_mode)
 
 
 def load_custom_commands() -> list[dict]:
@@ -644,8 +748,9 @@ def capture_host_screenshot_png() -> tuple[bytes | None, str]:
             pass
 
 
-# --- Embed & Component Builders ---
-def build_deck_payload() -> dict:
+# --- Bilingual Embed & Component Builders ---
+def build_deck_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
     metrics = get_system_metrics()
     mumu = check_mumu_health()
     tunnel = get_tunnel_status()
@@ -665,15 +770,16 @@ def build_deck_payload() -> dict:
     )
 
     embed = {
-        "title": "[GENESIS MOTHERBOARD] BRIDGE COMMAND CONSOLE",
-        "description": (
-            f"Unified Command & Intelligence Terminal for vessel **{socket.gethostname()}**.\n"
-            "Control reactor hardware, deploy drone recovery, capture live sensors, or inspect global feeds."
+        "title": f"[GENESIS MOTHERBOARD] {tr(mode, 'BRIDGE COMMAND CONSOLE', 'แผงควบคุมหลักประจำยาน')}",
+        "description": tr_block(
+            mode,
+            f"Unified Command & Intelligence Terminal for vessel **{socket.gethostname()}**.",
+            f"ศูนย์บัญชาการหลักและข่าวกรองแบบเรียลไทม์สำหรับเครื่อง **{socket.gethostname()}** กดปุ่มด้านล่างหรือสลับภาษาได้ทันที",
         ),
         "color": 0x3B82F6,
         "fields": [
             {
-                "name": "Ship Reactor & Hull",
+                "name": tr(mode, "Ship Reactor & Hull", "สถานะเครื่องและพื้นที่เก็บข้อมูล"),
                 "value": (
                     f"CPU: `{cpu_pct:.1f}%`\n"
                     f"RAM: `{ram.get('used_gb', 0)} / {ram.get('total_gb', 0)} GB` ({ram.get('percent', 0)}%)\n"
@@ -682,7 +788,7 @@ def build_deck_payload() -> dict:
                 "inline": True,
             },
             {
-                "name": "Fleet & Uptime",
+                "name": tr(mode, "Fleet & Uptime", "บอท MuMu และเวลาทำงาน"),
                 "value": (
                     f"MuMu Drones: `{mumu.get('count', 0)}` online\n"
                     f"Session Boosts: `{summary.get('session_boosts', 0)}`\n"
@@ -691,15 +797,15 @@ def build_deck_payload() -> dict:
                 "inline": True,
             },
             {
-                "name": "Planetary Sensors & Ingress",
+                "name": tr(mode, "Planetary Sensors & Ingress", "เซ็นเซอร์โลกและทางเข้าเว็บ Dashboard"),
                 "value": (
-                    f"Bangkok Sector: {bkk_line} | Markets: {btc_line}\n"
+                    f"Bangkok: {bkk_line} | Markets: {btc_line}\n"
                     f"Web Console: `{tunnel_url}`"
                 ),
                 "inline": False,
             },
         ],
-        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Lang: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -707,45 +813,55 @@ def build_deck_payload() -> dict:
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Live Status", "custom_id": "cmd:status"},
-                {"type": 2, "style": 3, "label": "RAM Boost", "custom_id": "cmd:boost"},
-                {"type": 2, "style": 2, "label": "MuMu Fleet", "custom_id": "cmd:mumu"},
-                {"type": 2, "style": 2, "label": "Top Procs", "custom_id": "cmd:processes"},
-                {"type": 2, "style": 1, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
+                {"type": 2, "style": 1, "label": tr(mode, "Live Status", "สถานะเครื่อง"), "custom_id": "cmd:status"},
+                {"type": 2, "style": 3, "label": tr(mode, "RAM Boost", "เคลียร์แรม"), "custom_id": "cmd:boost"},
+                {"type": 2, "style": 2, "label": tr(mode, "MuMu Fleet", "จอ MuMu"), "custom_id": "cmd:mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Top Procs", "โปรเซสหนัก"), "custom_id": "cmd:processes"},
+                {"type": 2, "style": 1, "label": tr(mode, "Omni-Briefing", "สรุปครบชุด"), "custom_id": "cmd:briefing"},
             ],
         },
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 2, "label": "Snap MuMu", "custom_id": "cmd:screenshot_mumu"},
-                {"type": 2, "style": 2, "label": "Snap Host", "custom_id": "cmd:screenshot_host"},
-                {"type": 2, "style": 2, "label": "Deep Clean", "custom_id": "cmd:clean"},
-                {"type": 2, "style": 2, "label": "Trim VM Cache", "custom_id": "cmd:trim_vm"},
-                {"type": 2, "style": 4, "label": "Purge Alerts", "custom_id": "cmd:purge"},
+                {"type": 2, "style": 2, "label": tr(mode, "Snap MuMu", "แคปจอ MuMu"), "custom_id": "cmd:screenshot_mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Snap Host", "แคปจอคอม"), "custom_id": "cmd:screenshot_host"},
+                {"type": 2, "style": 2, "label": tr(mode, "Deep Clean", "ล้างขยะ"), "custom_id": "cmd:clean"},
+                {"type": 2, "style": 2, "label": tr(mode, "Trim VM Cache", "ลดขนาด VM"), "custom_id": "cmd:trim_vm"},
+                {"type": 2, "style": 4, "label": tr(mode, "Purge Alerts", "ล้างแจ้งเตือน"), "custom_id": "cmd:purge"},
             ],
         },
         {
             "type": 1,
             "components": [
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
-                {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
+                {"type": 2, "style": 2, "label": "Tech & CVE", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Free Loot", "custom_id": "cmd:loot"},
-                {"type": 2, "style": 3, "label": "Command Wall", "custom_id": "cmd:wall"},
+                {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
+            ],
+        },
+        {
+            "type": 1,
+            "components": [
+                {"type": 2, "style": 3, "label": tr(mode, "Sync All Intel", "อัปเดตข่าวทุกห้อง"), "custom_id": "cmd:sync_intel"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:bridge"},
+                {"type": 2, "style": 2, "label": tr(mode, "Refresh Bridge", "รีเฟรชแผง"), "custom_id": "cmd:deck_refresh"},
             ],
         },
     ]
     return {"embeds": [embed], "components": components}
 
 
-def build_command_wall_payload() -> dict:
+def build_command_wall_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
     grouped: dict[str, list[str]] = {}
     for cmd in SLASH_COMMANDS:
-        grp = str(cmd.get("_group", "General"))
+        grp = tr(mode, str(cmd.get("_group_en", "General")), str(cmd.get("_group_th", "ทั่วไป")))
         opts = cmd.get("options") or []
         opt_str = " ".join(f"[{o['name']}]" if not o.get("required") else f"<{o['name']}>" for o in opts)
         sig = f"`/{cmd['name']}{' ' + opt_str if opt_str else ''}`"
-        grouped.setdefault(grp, []).append(f"{sig} -- {cmd['description']}")
+        desc = tr(mode, cmd["description"], str(cmd.get("_desc_th", cmd["description"])))
+        grouped.setdefault(grp, []).append(f"{sig} -- {desc}")
 
     directory_fields: list[dict] = []
     for grp_name, lines in grouped.items():
@@ -758,14 +874,15 @@ def build_command_wall_payload() -> dict:
         )
 
     embed_directory = {
-        "title": "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY",
-        "description": (
-            "Live command reference auto-generated from the active Motherboard Registry.\n"
-            "Type `/` in any channel to trigger built-in commands with autocomplete."
+        "title": f"[COMMAND WALL] {tr(mode, 'GENESIS MOTHERBOARD MASTER DIRECTORY', 'กำแพงคู่มือคำสั่งทั้งหมดบนเซิร์ฟเวอร์')}",
+        "description": tr_block(
+            mode,
+            "Live command reference auto-generated from the active Motherboard Registry. Type `/` anywhere to autocomplete.",
+            "รายการคำสั่ง Slash Commands ทั้งหมดที่สร้างอัตโนมัติจากระบบ พิมพ์ `/` ในห้องไหนก็ได้เพื่อเรียกใช้ทันที",
         ),
         "color": 0x06B6D4,
-        "fields": directory_fields,
-        "footer": {"text": f"Total Built-in Commands: {len(SLASH_COMMANDS)} | Auto-Synced"},
+        "fields": directory_fields[:25],
+        "footer": {"text": f"Built-in Commands: {len(SLASH_COMMANDS)} | Mode: {mode.upper()} | Auto-Synced"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -777,7 +894,11 @@ def build_command_wall_payload() -> dict:
     custom_val = (
         "\n".join(custom_lines)
         if custom_lines
-        else "No custom macros hung yet. Use `/cmd-add` to attach your own commands or quick links here."
+        else tr(
+            mode,
+            "No custom macros hung yet. Use `/cmd-add` to attach your own commands or quick links here.",
+            "ยังไม่มีคำสั่งลัดส่วนตัว ใช้ `/cmd-add` เพื่อแขวนคำสั่งหรือลิงก์ที่ใช้บ่อยไว้บนกำแพงนี้ได้เลย",
+        )
     )
 
     feeds = list_feed_sources()
@@ -786,34 +907,41 @@ def build_command_wall_payload() -> dict:
         names = [str(f.get("name", "")) for f in feeds.get(cat, []) if f.get("enabled", True)]
         feed_summary_lines.append(f"`{cat.upper()}` ({len(names)}): {', '.join(names) if names else 'None'}")
 
-    companion_text = (
-        "**Role Hierarchy**: `OVERLORD` (Owner) | `MOTHERBOARD CORE` (Main AI) | `AUDIO DRONE` (Voice Music)\n"
-        "**Recommended Voice Audio Add-on**: Single core bot handles 100% of ship & intelligence ops. "
-        "For 24/7 Lo-Fi/Music inside voice channels, invite **[Jockie Music](https://www.jockiemusic.com/)** "
-        "and assign it the `AUDIO DRONE` role."
+    companion_text = tr_block(
+        mode,
+        "Roles: `OVERLORD` (Owner) | `MOTHERBOARD CORE` (Main AI) | `AUDIO DRONE` (Voice Music). Invite Jockie Music (https://www.jockiemusic.com/) under AUDIO DRONE for voice audio.",
+        "ยศบนเซิร์ฟเวอร์: `OVERLORD` (เจ้าของยาน) | `MOTHERBOARD CORE` (บอทหลัก) | `AUDIO DRONE` (บอทเพลงในห้องเสียง เช่น Jockie Music)",
     )
 
     embed_dynamic = {
-        "title": "[DYNAMIC REGISTRY] CUSTOM MACROS, FEEDS & COMPANION BAY",
+        "title": f"[DYNAMIC REGISTRY] {tr(mode, 'CUSTOM MACROS, FEEDS & COMPANION BAY', 'คำสั่งลัดส่วนตัว แหล่งข่าวไดนามิก และบอทเสริม')}",
         "color": 0x8B5CF6,
         "fields": [
             {
-                "name": f"Custom Command Macros ({len(custom_cmds)}) -- Hang with /cmd-add",
+                "name": tr(
+                    mode,
+                    f"Custom Macros ({len(custom_cmds)}) -- Hang with /cmd-add",
+                    f"คำสั่งลัดส่วนตัว ({len(custom_cmds)}) -- เพิ่มด้วย /cmd-add",
+                ),
                 "value": custom_val[:1020],
                 "inline": False,
             },
             {
-                "name": "Active Intelligence Sources -- Modify with /feed-add & /feed-remove",
+                "name": tr(
+                    mode,
+                    "Active Intelligence Feeds -- Edit with /feed-add & /feed-remove",
+                    "แหล่งข่าวกรองที่กำลังใช้งาน -- เพิ่ม/ลบด้วย /feed-add และ /feed-remove",
+                ),
                 "value": "\n".join(feed_summary_lines)[:1020],
                 "inline": False,
             },
             {
-                "name": "Roles & External Module Bay",
+                "name": tr(mode, "Roles & Companion Modules", "ระบบยศและบอทเสริม"),
                 "value": companion_text,
                 "inline": False,
             },
         ],
-        "footer": {"text": f"Vault: Dashboard/data/discord/ | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Vault: Dashboard/data/discord/ | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -821,17 +949,19 @@ def build_command_wall_payload() -> dict:
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh Wall", "custom_id": "cmd:wall_refresh"},
-                {"type": 2, "style": 2, "label": "List Feeds", "custom_id": "cmd:feeds_list"},
-                {"type": 2, "style": 3, "label": "Sync All Intel", "custom_id": "cmd:sync_intel"},
-                {"type": 2, "style": 2, "label": "Bridge Console", "custom_id": "cmd:bridge"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh Wall", "รีเฟรชกำแพง"), "custom_id": "cmd:wall_refresh"},
+                {"type": 2, "style": 2, "label": tr(mode, "List Feeds", "ดูแหล่งข่าว"), "custom_id": "cmd:feeds_list"},
+                {"type": 2, "style": 3, "label": tr(mode, "Sync All Intel", "อัปเดตข่าว"), "custom_id": "cmd:sync_intel"},
+                {"type": 2, "style": 2, "label": tr(mode, "Bridge Console", "แผงควบคุม"), "custom_id": "cmd:bridge"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:wall"},
             ],
         }
     ]
     return {"embeds": [embed_directory, embed_dynamic], "components": components}
 
 
-def build_status_payload() -> dict:
+def build_status_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
     metrics = get_system_metrics()
     mumu = check_mumu_health()
     tunnel = get_tunnel_status()
@@ -843,7 +973,7 @@ def build_status_payload() -> dict:
     net = metrics.get("network", {})
     c_drive = metrics.get("storage", {}).get("c_drive", {})
 
-    gpu_text = "Unavailable"
+    gpu_text = tr(mode, "Unavailable", "ไม่พบข้อมูลการ์ดจอ")
     if gpu.get("available"):
         gpu_text = (
             f"{gpu.get('name', 'GPU')}\n"
@@ -856,11 +986,11 @@ def build_status_payload() -> dict:
     standby_guard = summary.get("standby_guard", {})
 
     embed = {
-        "title": "[ONLINE] GENESIS MOTHERBOARD TELEMETRY",
+        "title": f"[ONLINE] {tr(mode, 'GENESIS MOTHERBOARD TELEMETRY', 'ข้อมูลสถานะฮาร์ดแวร์และระบบเรียลไทม์')}",
         "color": 0x10B981,
         "fields": [
             {
-                "name": "CPU & Memory Array",
+                "name": tr(mode, "CPU & Memory Array", "ซีพียูและหน่วยความจำ RAM"),
                 "value": (
                     f"CPU: `{cpu.get('total_percent', 0):.1f}%` @ `{cpu.get('frequency_ghz', 0):.2f} GHz`\n"
                     f"RAM Used: `{ram.get('used_gb', 0)} / {ram.get('total_gb', 0)} GB` (`{ram.get('percent', 0)}%`)\n"
@@ -869,7 +999,7 @@ def build_status_payload() -> dict:
                 "inline": False,
             },
             {
-                "name": "Hull Storage & GPU",
+                "name": tr(mode, "Hull Storage & GPU", "พื้นที่ไดร์ฟ C และการ์ดจอ"),
                 "value": (
                     f"Drive C: `{c_drive.get('free_gb', 0)} GB` free / `{c_drive.get('total_gb', 0)} GB` (`{c_drive.get('percent', 0)}%` used)\n"
                     f"GPU: {gpu_text}"
@@ -877,7 +1007,7 @@ def build_status_payload() -> dict:
                 "inline": True,
             },
             {
-                "name": "Subspace Link & Watchdog",
+                "name": tr(mode, "Subspace Link & Watchdog", "เครือข่ายและตัวเฝ้าระวังอัตโนมัติ"),
                 "value": (
                     f"Roblox Ping: `{net.get('roblox_ping_ms', 0)} ms`\n"
                     f"MuMu Active: `{mumu.get('count', 0)}` | Recoveries: `{summary.get('net_recoveries', 0)}`\n"
@@ -886,7 +1016,7 @@ def build_status_payload() -> dict:
                 "inline": True,
             },
             {
-                "name": "Core & Ingress",
+                "name": tr(mode, "Core & Ingress", "เวลาทำงานและลิงก์เว็บ Dashboard"),
                 "value": (
                     f"Uptime: `{_format_uptime(summary.get('uptime_seconds', 0))}` | "
                     f"Boosts: `{summary.get('session_boosts', 0)}` session / `{summary.get('total_boosts', 0)}` total\n"
@@ -895,7 +1025,7 @@ def build_status_payload() -> dict:
                 "inline": False,
             },
         ],
-        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
 
@@ -903,17 +1033,19 @@ def build_status_payload() -> dict:
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh", "custom_id": "cmd:status"},
-                {"type": 2, "style": 3, "label": "RAM Boost", "custom_id": "cmd:boost"},
-                {"type": 2, "style": 2, "label": "MuMu Fleet", "custom_id": "cmd:mumu"},
-                {"type": 2, "style": 2, "label": "Snap Host", "custom_id": "cmd:screenshot_host"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh", "รีเฟรช"), "custom_id": "cmd:status"},
+                {"type": 2, "style": 3, "label": tr(mode, "RAM Boost", "เคลียร์แรม"), "custom_id": "cmd:boost"},
+                {"type": 2, "style": 2, "label": tr(mode, "MuMu Fleet", "จอ MuMu"), "custom_id": "cmd:mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Snap Host", "แคปจอคอม"), "custom_id": "cmd:screenshot_host"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:status"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def build_processes_payload() -> dict:
+def build_processes_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
     procs = get_top_processes(10)
     if not procs:
         snap: list[dict] = []
@@ -936,39 +1068,52 @@ def build_processes_payload() -> dict:
     ]
 
     embed = {
-        "title": "[PROCESSES] TOP 10 MEMORY CONSUMERS",
-        "description": "\n".join(lines) if lines else "No process telemetry sampled yet.",
+        "title": f"[PROCESSES] {tr(mode, 'TOP 10 MEMORY CONSUMERS', '10 อันดับโปรเซสที่ใช้แรมสูงสุด')}",
+        "description": "\n".join(lines) if lines else tr(mode, "No process telemetry sampled yet.", "ยังไม่มีข้อมูลโปรเซส"),
         "color": 0x06B6D4,
-        "footer": {"text": f"Genesis Motherboard Process Scanner | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Process Scanner | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh Procs", "custom_id": "cmd:processes"},
-                {"type": 2, "style": 3, "label": "RAM Boost", "custom_id": "cmd:boost"},
-                {"type": 2, "style": 2, "label": "Live Status", "custom_id": "cmd:status"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh Procs", "รีเฟรช"), "custom_id": "cmd:processes"},
+                {"type": 2, "style": 3, "label": tr(mode, "RAM Boost", "เคลียร์แรม"), "custom_id": "cmd:boost"},
+                {"type": 2, "style": 2, "label": tr(mode, "Live Status", "สถานะเครื่อง"), "custom_id": "cmd:status"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:processes"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def build_mumu_payload() -> dict:
+def build_mumu_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
     health = check_mumu_health()
     devices = health.get("devices", [])
     vm_disk = {int(v.get("instance", 0)): v for v in health.get("vm_disk", []) if v.get("instance")}
 
     if not devices:
         embed = {
-            "title": "[IDLE] MuMu Drone Fleet Status",
-            "description": "No MuMu emulator drones are currently active.",
+            "title": f"[IDLE] {tr(mode, 'MuMu Drone Fleet Status', 'สถานะกองทัพจอ MuMu')}",
+            "description": tr(mode, "No MuMu emulator drones are currently active.", "ขณะนี้ไม่มีจอ MuMu ที่เปิดทำงานอยู่"),
             "color": 0x64748B,
-            "footer": {"text": f"Genesis Motherboard Fleet Monitor | Host: {socket.gethostname()}"},
+            "footer": {"text": f"Genesis Motherboard Fleet Monitor | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
         }
-        return {"embeds": [embed], "components": []}
+        return {
+            "embeds": [embed],
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {"type": 2, "style": 2, "label": tr(mode, "Refresh Fleet", "รีเฟรช"), "custom_id": "cmd:mumu"},
+                        {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:mumu"},
+                    ],
+                }
+            ],
+        }
 
     fields: list[dict] = []
     buttons: list[dict] = []
@@ -1012,24 +1157,25 @@ def build_mumu_payload() -> dict:
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 2, "label": "Refresh Fleet", "custom_id": "cmd:mumu"},
-                {"type": 2, "style": 2, "label": "Snap MuMu", "custom_id": "cmd:screenshot_mumu"},
-                {"type": 2, "style": 2, "label": "Trim VM Cache", "custom_id": "cmd:trim_vm"},
+                {"type": 2, "style": 2, "label": tr(mode, "Refresh Fleet", "รีเฟรช"), "custom_id": "cmd:mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Snap MuMu", "แคปจอ MuMu"), "custom_id": "cmd:screenshot_mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Trim VM Cache", "ลดขนาด VM"), "custom_id": "cmd:trim_vm"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:mumu"},
             ],
         }
     )
 
     embed = {
-        "title": f"[ACTIVE] MuMu Drone Fleet ({len(devices)} Online)",
+        "title": f"[ACTIVE] {tr(mode, f'MuMu Drone Fleet ({len(devices)} Online)', f'สถานะจอ MuMu (เปิดอยู่ {len(devices)} จอ)')}",
         "color": 0x3B82F6,
         "fields": fields,
-        "footer": {"text": f"Genesis Motherboard Fleet Monitor | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Fleet Monitor | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     return {"embeds": [embed], "components": components}
 
 
-# --- Server Provisioning, Roles & Intel Sync ---
+# --- Server Provisioning, Roles, Topics & Intel Sync ---
 async def _find_or_create_channel(
     bot_token: str,
     guild_id: str,
@@ -1041,6 +1187,7 @@ async def _find_or_create_channel(
     permission_overwrites: list[dict] | None = None,
     legacy_names: tuple[str, ...] = (),
     known_id: str | None = None,
+    topic: str | None = None,
 ) -> dict:
     match: dict | None = None
     if known_id:
@@ -1066,6 +1213,8 @@ async def _find_or_create_channel(
             patch_payload["position"] = position
         if permission_overwrites is not None:
             patch_payload["permission_overwrites"] = permission_overwrites
+        if topic is not None and ch_type == 0 and (match.get("topic") or "") != topic:
+            patch_payload["topic"] = topic
         if patch_payload:
             st, updated, _ = await _discord_api(
                 "PATCH", f"/channels/{match['id']}", bot_token, payload=patch_payload
@@ -1081,6 +1230,8 @@ async def _find_or_create_channel(
         create_payload["position"] = position
     if permission_overwrites is not None:
         create_payload["permission_overwrites"] = permission_overwrites
+    if topic is not None and ch_type == 0:
+        create_payload["topic"] = topic
 
     st, created, body = await _discord_api(
         "POST", f"/guilds/{guild_id}/channels", bot_token, payload=create_payload
@@ -1167,6 +1318,29 @@ async def _upsert_board_message(
     return existing_msg_id
 
 
+async def refresh_bridge_console(bot_token: str | None = None) -> dict:
+    alerts_cfg = CONFIG.get("alerts", {})
+    token = (bot_token or str(alerts_cfg.get("discord_bot_token", "") or "")).strip()
+    state = load_station_state()
+    bridge_cid = state.get("command_deck_channel_id")
+    if not token or not bridge_cid:
+        return {"ok": False, "error": "Bridge channel not provisioned"}
+
+    lang = get_current_lang()
+    deck_payload = await asyncio.to_thread(build_deck_payload, lang)
+    msg_id = await _upsert_board_message(
+        token,
+        str(bridge_cid),
+        state.get("deck_message_id"),
+        deck_payload,
+        pin=True,
+    )
+    if msg_id:
+        state["deck_message_id"] = msg_id
+        save_station_state(state)
+    return {"ok": True, "deck_message_id": msg_id}
+
+
 async def refresh_command_wall(bot_token: str | None = None) -> dict:
     alerts_cfg = CONFIG.get("alerts", {})
     token = (bot_token or str(alerts_cfg.get("discord_bot_token", "") or "")).strip()
@@ -1175,7 +1349,8 @@ async def refresh_command_wall(bot_token: str | None = None) -> dict:
     if not token or not wall_cid:
         return {"ok": False, "error": "Command wall channel not provisioned"}
 
-    wall_payload = await asyncio.to_thread(build_command_wall_payload)
+    lang = get_current_lang()
+    wall_payload = await asyncio.to_thread(build_command_wall_payload, lang)
     msg_id = await _upsert_board_message(
         token,
         str(wall_cid),
@@ -1204,11 +1379,12 @@ async def sync_intel_channels(bot_token: str | None = None, categories: tuple[st
     if not isinstance(intel_msgs, dict):
         intel_msgs = {}
 
+    lang = get_current_lang()
     builders = {
-        "ai": fetch_ai_cortex_intel,
-        "tech": fetch_tech_radar_intel,
-        "world": fetch_world_pulse_intel,
-        "loot": fetch_free_loot_intel,
+        "ai": lambda: fetch_ai_cortex_intel(limit=4, lang=lang),
+        "tech": lambda: fetch_tech_radar_intel(limit=4, lang=lang),
+        "world": lambda: fetch_world_pulse_intel(limit=5, lang=lang),
+        "loot": lambda: fetch_free_loot_intel(limit=6, lang=lang),
     }
 
     target_keys = categories if categories else tuple(builders.keys())
@@ -1277,6 +1453,8 @@ async def provision_guild_station(
     state["guild_id"] = guild_id
     state["app_id"] = app_id
     state["roles"] = roles_map
+    if "lang" not in state:
+        state["lang"] = "dual"
 
     cat_hud = await _find_or_create_channel(
         token,
@@ -1388,6 +1566,7 @@ async def provision_guild_station(
         position=0,
         legacy_names=("command-deck",),
         known_id=state.get("command_deck_channel_id"),
+        topic=CHANNEL_TOPICS["bridge-command"],
     )
     wall_ch = await _find_or_create_channel(
         token,
@@ -1398,6 +1577,7 @@ async def provision_guild_station(
         parent_id=cat_bridge["id"],
         position=1,
         known_id=state.get("command_wall_channel_id"),
+        topic=CHANNEL_TOPICS["command-wall"],
     )
     reactor_ch = await _find_or_create_channel(
         token,
@@ -1409,6 +1589,7 @@ async def provision_guild_station(
         position=2,
         legacy_names=("dashboard",),
         known_id=dash_ch_id,
+        topic=CHANNEL_TOPICS["reactor-telemetry"],
     )
     datacore_ch = await _find_or_create_channel(
         token,
@@ -1420,6 +1601,7 @@ async def provision_guild_station(
         position=3,
         legacy_names=("dropzone",),
         known_id=state.get("dropzone_channel_id"),
+        topic=CHANNEL_TOPICS["captain-datacore"],
     )
 
     state["command_deck_channel_id"] = str(bridge_ch["id"])
@@ -1428,16 +1610,48 @@ async def provision_guild_station(
 
     existing_intel_ids = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
     ch_ai = await _find_or_create_channel(
-        token, guild_id, channels, "ai-singularity-feed", 0, parent_id=cat_intel["id"], position=0, known_id=existing_intel_ids.get("ai")
+        token,
+        guild_id,
+        channels,
+        "ai-singularity-feed",
+        0,
+        parent_id=cat_intel["id"],
+        position=0,
+        known_id=existing_intel_ids.get("ai"),
+        topic=CHANNEL_TOPICS["ai-singularity-feed"],
     )
     ch_tech = await _find_or_create_channel(
-        token, guild_id, channels, "tech-cyber-radar", 0, parent_id=cat_intel["id"], position=1, known_id=existing_intel_ids.get("tech")
+        token,
+        guild_id,
+        channels,
+        "tech-cyber-radar",
+        0,
+        parent_id=cat_intel["id"],
+        position=1,
+        known_id=existing_intel_ids.get("tech"),
+        topic=CHANNEL_TOPICS["tech-cyber-radar"],
     )
     ch_world = await _find_or_create_channel(
-        token, guild_id, channels, "world-market-pulse", 0, parent_id=cat_intel["id"], position=2, known_id=existing_intel_ids.get("world")
+        token,
+        guild_id,
+        channels,
+        "world-market-pulse",
+        0,
+        parent_id=cat_intel["id"],
+        position=2,
+        known_id=existing_intel_ids.get("world"),
+        topic=CHANNEL_TOPICS["world-market-pulse"],
     )
     ch_loot = await _find_or_create_channel(
-        token, guild_id, channels, "free-games-loot", 0, parent_id=cat_intel["id"], position=3, known_id=existing_intel_ids.get("loot")
+        token,
+        guild_id,
+        channels,
+        "free-games-loot",
+        0,
+        parent_id=cat_intel["id"],
+        position=3,
+        known_id=existing_intel_ids.get("loot"),
+        topic=CHANNEL_TOPICS["free-games-loot"],
     )
 
     state["intel_channel_ids"] = {
@@ -1448,10 +1662,26 @@ async def provision_guild_station(
     }
 
     await _find_or_create_channel(
-        token, guild_id, channels, "observation-lounge", 0, parent_id=cat_crew["id"], position=0, legacy_names=("general",)
+        token,
+        guild_id,
+        channels,
+        "observation-lounge",
+        0,
+        parent_id=cat_crew["id"],
+        position=0,
+        legacy_names=("general",),
+        topic=CHANNEL_TOPICS["observation-lounge"],
     )
     await _find_or_create_channel(
-        token, guild_id, channels, "holodeck-archives", 0, parent_id=cat_crew["id"], position=1, legacy_names=("clips-and-highlights",)
+        token,
+        guild_id,
+        channels,
+        "holodeck-archives",
+        0,
+        parent_id=cat_crew["id"],
+        position=1,
+        legacy_names=("clips-and-highlights",),
+        topic=CHANNEL_TOPICS["holodeck-archives"],
     )
 
     await _find_or_create_channel(
@@ -1485,30 +1715,21 @@ async def provision_guild_station(
     if st_cmd not in (200, 201):
         return {"ok": False, "error": f"Command registration failed (HTTP {st_cmd}): {err_cmd[:150]}"}
 
-    deck_payload = await asyncio.to_thread(build_deck_payload)
-    deck_msg_id = await _upsert_board_message(
-        token,
-        state["command_deck_channel_id"],
-        state.get("deck_message_id"),
-        deck_payload,
-        pin=True,
-    )
-    if deck_msg_id:
-        state["deck_message_id"] = deck_msg_id
-
     save_station_state(state)
+    bridge_res = await refresh_bridge_console(token)
     wall_res = await refresh_command_wall(token)
     intel_res = await sync_intel_channels(token)
 
     add_event(
         "system",
-        f"Genesis Motherboard provisioned in guild {guild_id} ({len(api_commands)} slash commands, roles={list(roles_map.keys())})",
+        f"Genesis Motherboard provisioned in guild {guild_id} ({len(api_commands)} slash commands, lang={state['lang']})",
     )
     return {
         "ok": True,
         "guild_name": GUILD_MOTHERSHIP_NAME,
         "guild_id": guild_id,
         "app_id": app_id,
+        "lang": state["lang"],
         "roles": roles_map,
         "bridge_channel_id": state["command_deck_channel_id"],
         "command_wall_channel_id": state["command_wall_channel_id"],
@@ -1516,7 +1737,7 @@ async def provision_guild_station(
         "datacore_channel_id": state["dropzone_channel_id"],
         "intel_channel_ids": state["intel_channel_ids"],
         "hud_channel_ids": resolved_hud_ids,
-        "deck_message_id": state.get("deck_message_id"),
+        "deck_message_id": bridge_res.get("deck_message_id"),
         "command_wall_message_id": wall_res.get("command_wall_message_id"),
         "commands_registered": [c["name"] for c in api_commands],
         "intel_sync": intel_res,
@@ -1524,22 +1745,85 @@ async def provision_guild_station(
 
 
 # --- Interaction Handlers ---
+async def _render_board_for_key(board_key: str, lang: str) -> dict:
+    if board_key in ("bridge", "deck"):
+        return await asyncio.to_thread(build_deck_payload, lang)
+    if board_key == "wall":
+        return await asyncio.to_thread(build_command_wall_payload, lang)
+    if board_key == "status":
+        return await asyncio.to_thread(build_status_payload, lang)
+    if board_key == "mumu":
+        return await asyncio.to_thread(build_mumu_payload, lang)
+    if board_key == "processes":
+        return await asyncio.to_thread(build_processes_payload, lang)
+    if board_key == "ai":
+        return await asyncio.to_thread(fetch_ai_cortex_intel, 4, lang)
+    if board_key == "tech":
+        return await asyncio.to_thread(fetch_tech_radar_intel, 4, lang)
+    if board_key == "world":
+        return await asyncio.to_thread(fetch_world_pulse_intel, 5, lang)
+    if board_key == "loot":
+        return await asyncio.to_thread(fetch_free_loot_intel, 6, lang)
+    if board_key == "briefing":
+        def _brief():
+            return build_omni_briefing_payload(
+                get_system_metrics(),
+                check_mumu_health(),
+                get_tunnel_status(),
+                get_session_summary(),
+                lang=lang,
+            )
+        return await asyncio.to_thread(_brief)
+    return await asyncio.to_thread(build_deck_payload, lang)
+
+
 async def _execute_command_action(
     action: str,
     options: dict[str, object] | None = None,
     author_name: str = "overlord",
 ) -> tuple[dict, list[tuple[str, str, bytes]] | None]:
     opts = options or {}
+    lang = get_current_lang()
+
+    if action == "lang":
+        requested = str(opts.get("mode") or "").strip().lower()
+        new_mode = set_station_lang(requested) if requested in VALID_LANG_MODES else cycle_station_lang()
+        asyncio.create_task(refresh_bridge_console())
+        asyncio.create_task(refresh_command_wall())
+        asyncio.create_task(sync_intel_channels())
+        return {
+            "embeds": [
+                {
+                    "title": f"[OK] {tr(new_mode, f'Language Mode: {new_mode.upper()}', f'เปลี่ยนโหมดภาษาเป็น {new_mode.upper()} แล้ว')}",
+                    "description": tr_block(
+                        new_mode,
+                        "Bridge Console, Command Wall, and Intel Cortex boards are syncing to the selected mode.",
+                        "กำลังอัปเดตแผงควบคุม กำแพงคำสั่ง และห้องข่าวกรองทั้งหมดตามโหมดภาษาที่เลือก",
+                    ),
+                    "color": 0x10B981,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
+
+    if action.startswith("lang_cycle:"):
+        board_key = action.split(":", 1)[1]
+        new_mode = cycle_station_lang()
+        payload = await _render_board_for_key(board_key, new_mode)
+        asyncio.create_task(refresh_bridge_console())
+        asyncio.create_task(refresh_command_wall())
+        asyncio.create_task(sync_intel_channels())
+        return payload, None
 
     if action == "status":
-        return await asyncio.to_thread(build_status_payload), None
+        return await asyncio.to_thread(build_status_payload, lang), None
 
     if action in ("deck", "bridge", "deck_refresh"):
-        return await asyncio.to_thread(build_deck_payload), None
+        return await asyncio.to_thread(build_deck_payload, lang), None
 
     if action in ("wall", "wall_refresh"):
         await refresh_command_wall()
-        return await asyncio.to_thread(build_command_wall_payload), None
+        return await asyncio.to_thread(build_command_wall_payload, lang), None
 
     if action == "feeds_list":
         feeds = await asyncio.to_thread(list_feed_sources)
@@ -1557,7 +1841,7 @@ async def _execute_command_action(
         return {
             "embeds": [
                 {
-                    "title": "[REGISTRY] ACTIVE DYNAMIC INTELLIGENCE SOURCES",
+                    "title": f"[REGISTRY] {tr(lang, 'ACTIVE DYNAMIC INTELLIGENCE SOURCES', 'รายการแหล่งข่าวกรองทั้งหมด')}",
                     "color": 0x06B6D4,
                     "fields": fields,
                     "timestamp": _utc_iso_now(),
@@ -1572,13 +1856,15 @@ async def _execute_command_action(
         res = await asyncio.to_thread(add_custom_rss_feed, cat, name, url)
         await sync_intel_channels(categories=(res["category"],))
         await refresh_command_wall()
+        act_en = f"Feed {res['action'].capitalize()}"
         return {
             "embeds": [
                 {
-                    "title": f"[OK] Feed {res['action'].capitalize()}",
-                    "description": (
-                        f"Source **{res['feed']['name']}** added to `{res['category']}`.\n"
-                        f"Intel channel and `#command-wall` synchronized."
+                    "title": f"[OK] {tr(lang, act_en, 'เพิ่ม/อัปเดตแหล่งข่าวแล้ว')}",
+                    "description": tr_block(
+                        lang,
+                        f"Source **{res['feed']['name']}** saved under `{res['category']}`. Intel channel and `#command-wall` synced.",
+                        f"บันทึกแหล่งข่าว **{res['feed']['name']}** เข้าหมวด `{res['category']}` และอัปเดตห้องข่าวกับ `#command-wall` เรียบร้อย",
                     ),
                     "color": 0x10B981,
                     "timestamp": _utc_iso_now(),
@@ -1595,8 +1881,12 @@ async def _execute_command_action(
         return {
             "embeds": [
                 {
-                    "title": "[OK] Feed Removed",
-                    "description": f"Removed **{res['name']}** from `{res['category']}` and synced `#command-wall`.",
+                    "title": f"[OK] {tr(lang, 'Feed Removed', 'ลบแหล่งข่าวออกแล้ว')}",
+                    "description": tr_block(
+                        lang,
+                        f"Removed **{res['name']}** from `{res['category']}` and synced `#command-wall`.",
+                        f"นำแหล่งข่าว **{res['name']}** ออกจาก `{res['category']}` และอัปเดต `#command-wall` แล้ว",
+                    ),
                     "color": 0x10B981,
                     "timestamp": _utc_iso_now(),
                 }
@@ -1612,14 +1902,15 @@ async def _execute_command_action(
         )
         await refresh_command_wall()
         cmd = res["command"]
+        act_en = f"Custom Command {res['action'].capitalize()}"
         return {
             "embeds": [
                 {
-                    "title": f"[OK] Custom Command {res['action'].capitalize()}",
+                    "title": f"[OK] {tr(lang, act_en, 'บันทึกคำสั่งลัดขึ้นกำแพงแล้ว')}",
                     "description": (
                         f"Trigger: `/run name:{cmd['name']}`\n"
                         f"Description: {cmd['description']}\n"
-                        "Updated on `#command-wall`."
+                        + tr(lang, "Updated on `#command-wall`.", "อัปเดตขึ้น `#command-wall` เรียบร้อย")
                     ),
                     "color": 0x10B981,
                     "timestamp": _utc_iso_now(),
@@ -1635,7 +1926,11 @@ async def _execute_command_action(
         return {
             "embeds": [
                 {
-                    "title": "[OK] Custom Command Removed" if deleted else "[WARN] Command Not Found",
+                    "title": (
+                        f"[OK] {tr(lang, 'Custom Command Removed', 'ลบคำสั่งลัดแล้ว')}"
+                        if deleted
+                        else f"[WARN] {tr(lang, 'Command Not Found', 'ไม่พบคำสั่งที่ระบุ')}"
+                    ),
                     "description": (
                         f"Removed `{target}` from `#command-wall`."
                         if deleted
@@ -1655,8 +1950,8 @@ async def _execute_command_action(
             return {
                 "embeds": [
                     {
-                        "title": "[WARN] Unknown Custom Command",
-                        "description": f"Custom macro `{target}` was not found. Check `#command-wall` or add one via `/cmd-add`.",
+                        "title": f"[WARN] {tr(lang, 'Unknown Custom Command', 'ไม่พบคำสั่งลัดนี้')}",
+                        "description": f"Macro `{target}` not found. Check `#command-wall` or add via `/cmd-add`.",
                         "color": 0xF59E0B,
                         "timestamp": _utc_iso_now(),
                     }
@@ -1681,30 +1976,32 @@ async def _execute_command_action(
                 check_mumu_health(),
                 get_tunnel_status(),
                 get_session_summary(),
+                lang=lang,
             )
         return await asyncio.to_thread(_build_brief), None
 
     if action == "ai":
-        return await asyncio.to_thread(fetch_ai_cortex_intel), None
+        return await asyncio.to_thread(fetch_ai_cortex_intel, 4, lang), None
 
     if action == "tech":
-        return await asyncio.to_thread(fetch_tech_radar_intel), None
+        return await asyncio.to_thread(fetch_tech_radar_intel, 4, lang), None
 
     if action == "world":
-        return await asyncio.to_thread(fetch_world_pulse_intel), None
+        return await asyncio.to_thread(fetch_world_pulse_intel, 5, lang), None
 
     if action == "loot":
-        return await asyncio.to_thread(fetch_free_loot_intel), None
+        return await asyncio.to_thread(fetch_free_loot_intel, 6, lang), None
 
     if action == "sync_intel":
         sync_res = await sync_intel_channels()
+        await refresh_bridge_console()
         await refresh_command_wall()
         ok = bool(sync_res.get("ok"))
         feeds = ", ".join(sync_res.get("synced_feeds", [])) or "none"
         return {
             "embeds": [
                 {
-                    "title": "[OK] Intel Cortex Synchronized" if ok else "[WARN] Intel Sync Failed",
+                    "title": f"[OK] {tr(lang, 'Intel Cortex Synchronized', 'ซิงค์ข่าวกรองทุกห้องแล้ว')}" if ok else "[WARN] Intel Sync Failed",
                     "description": f"Refreshed channels: `{feeds}`" if ok else str(sync_res.get("error", "")),
                     "color": 0x10B981 if ok else 0xF59E0B,
                     "timestamp": _utc_iso_now(),
@@ -1713,35 +2010,35 @@ async def _execute_command_action(
         }, None
 
     if action == "processes":
-        return await asyncio.to_thread(build_processes_payload), None
+        return await asyncio.to_thread(build_processes_payload, lang), None
 
     if action == "mumu":
-        return await asyncio.to_thread(build_mumu_payload), None
+        return await asyncio.to_thread(build_mumu_payload, lang), None
 
     if action == "boost":
         res = await asyncio.to_thread(ram_boost, True)
         embed = {
-            "title": "[OK] Reactor RAM Boost Executed",
+            "title": f"[OK] {tr(lang, 'Reactor RAM Boost Executed', 'เคลียร์แรมและ Standby List เรียบร้อย')}",
             "color": 0x10B981,
             "fields": [
-                {"name": "Memory Reclaimed", "value": f"`{res.get('freed_mb', 0)} MB`", "inline": True},
+                {"name": tr(lang, "Memory Reclaimed", "คืนพื้นที่แรม"), "value": f"`{res.get('freed_mb', 0)} MB`", "inline": True},
                 {
-                    "name": "RAM Utilization",
+                    "name": tr(lang, "RAM Utilization", "การใช้แรม"),
                     "value": f"`{res.get('ram_before_percent', 0)}%` -> `{res.get('ram_after_percent', 0)}%`",
                     "inline": True,
                 },
                 {
-                    "name": "Standby Purge",
+                    "name": tr(lang, "Standby Purge", "ล้าง Standby Cache"),
                     "value": "`Purged`" if res.get("standby_purged") else "`Verified Healthy`",
                     "inline": True,
                 },
-                {"name": "Processes Trimmed", "value": f"`{res.get('processes_trimmed', 0)}`", "inline": True},
+                {"name": tr(lang, "Processes Trimmed", "โปรเซสที่ลดขนาด"), "value": f"`{res.get('processes_trimmed', 0)}`", "inline": True},
                 {
-                    "name": "Temp Cleaned",
+                    "name": tr(lang, "Temp Cleaned", "ล้างไฟล์ชั่วคราว"),
                     "value": f"`{res.get('freed_temp_mb', 0)} MB` ({res.get('deleted_temp_files', 0)} files)",
                     "inline": True,
                 },
-                {"name": "Duration", "value": f"`{res.get('duration_ms', 0)} ms`", "inline": True},
+                {"name": tr(lang, "Duration", "ใช้เวลา"), "value": f"`{res.get('duration_ms', 0)} ms`", "inline": True},
             ],
             "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
@@ -1757,12 +2054,12 @@ async def _execute_command_action(
             if d.get("deleted", 0) > 0 or d.get("freed_mb", 0) > 0
         ]
         embed = {
-            "title": "[OK] Hull Deep Clean Completed",
-            "description": "\n".join(summary_lines) if summary_lines else "All tracked cache targets are already clean.",
+            "title": f"[OK] {tr(lang, 'Hull Deep Clean Completed', 'ล้างไฟล์ขยะทั้งระบบเสร็จสิ้น')}",
+            "description": "\n".join(summary_lines) if summary_lines else tr(lang, "All tracked cache targets are already clean.", "แคชทั้งหมดสะอาดอยู่แล้ว"),
             "color": 0x10B981,
             "fields": [
-                {"name": "Total Freed", "value": f"`{res.get('total_freed_mb', 0)} MB`", "inline": True},
-                {"name": "Files Deleted", "value": f"`{res.get('total_deleted', 0)}`", "inline": True},
+                {"name": tr(lang, "Total Freed", "พื้นที่ที่ได้คืน"), "value": f"`{res.get('total_freed_mb', 0)} MB`", "inline": True},
+                {"name": tr(lang, "Files Deleted", "จำนวนไฟล์ที่ลบ"), "value": f"`{res.get('total_deleted', 0)}`", "inline": True},
             ],
             "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
@@ -1775,8 +2072,8 @@ async def _execute_command_action(
             return {
                 "embeds": [
                     {
-                        "title": "[INFO] Trim VM Cache",
-                        "description": "No active MuMu VM drones available to trim.",
+                        "title": f"[INFO] {tr(lang, 'Trim VM Cache', 'ลดขนาดดิสก์ VM')}",
+                        "description": tr(lang, "No active MuMu VM drones available to trim.", "ไม่มีจอ MuMu ที่เปิดอยู่"),
                         "color": 0x64748B,
                         "timestamp": _utc_iso_now(),
                     }
@@ -1791,7 +2088,7 @@ async def _execute_command_action(
         return {
             "embeds": [
                 {
-                    "title": "[OK] VM Cache Trim Dispatched",
+                    "title": f"[OK] {tr(lang, 'VM Cache Trim Dispatched', 'สั่งล้างแคชในจอ MuMu แล้ว')}",
                     "description": "\n".join(trimmed),
                     "color": 0x3B82F6,
                     "timestamp": _utc_iso_now(),
@@ -1805,12 +2102,16 @@ async def _execute_command_action(
         res = await purge_discord_channel_messages(limit=limit, bot_only=False, keep_latest=keep_latest)
         ok = bool(res.get("ok"))
         embed = {
-            "title": "[OK] Reactor Channel Purge Completed" if ok else "[WARN] Channel Purge Failed",
+            "title": (
+                f"[OK] {tr(lang, 'Reactor Channel Purge Completed', 'ล้างข้อความห้องแจ้งเตือนเรียบร้อย')}"
+                if ok
+                else f"[WARN] {tr(lang, 'Channel Purge Failed', 'ล้างข้อความไม่สำเร็จ')}"
+            ),
             "color": 0x10B981 if ok else 0xEF4444,
             "fields": [
-                {"name": "Deleted", "value": f"`{res.get('deleted_count', 0)}`", "inline": True},
-                {"name": "Scanned", "value": f"`{res.get('scanned', 0)}`", "inline": True},
-                {"name": "Kept Latest", "value": f"`{keep_latest}`", "inline": True},
+                {"name": tr(lang, "Deleted", "ลบแล้ว"), "value": f"`{res.get('deleted_count', 0)}`", "inline": True},
+                {"name": tr(lang, "Scanned", "สแกน"), "value": f"`{res.get('scanned', 0)}`", "inline": True},
+                {"name": tr(lang, "Kept Latest", "เก็บไว้ล่าสุด"), "value": f"`{keep_latest}`", "inline": True},
             ],
             "timestamp": _utc_iso_now(),
         }
@@ -1841,8 +2142,8 @@ async def _execute_command_action(
             return {
                 "embeds": [
                     {
-                        "title": "[WARN] No Target Drone",
-                        "description": "No running MuMu drones found and no instance index was specified.",
+                        "title": f"[WARN] {tr(lang, 'No Target Drone', 'ไม่พบจอ MuMu เป้าหมาย')}",
+                        "description": tr(lang, "No running MuMu drones found.", "ไม่พบจอ MuMu ที่กำลังรันอยู่"),
                         "color": 0xF59E0B,
                         "timestamp": _utc_iso_now(),
                     }
@@ -1858,7 +2159,7 @@ async def _execute_command_action(
         return {
             "embeds": [
                 {
-                    "title": "[OK] Drone Recovery Dispatched",
+                    "title": f"[OK] {tr(lang, 'Drone Recovery Dispatched', 'สั่งกู้คืน Roblox แล้ว')}",
                     "description": "\n".join(lines),
                     "color": 0x3B82F6,
                     "timestamp": _utc_iso_now(),
@@ -1886,7 +2187,7 @@ async def _execute_command_action(
             return {
                 "embeds": [
                     {
-                        "title": "[WARN] Visual Sensor Unavailable",
+                        "title": f"[WARN] {tr(lang, 'Visual Sensor Unavailable', 'ไม่สามารถจับภาพหน้าจอได้')}",
                         "description": label,
                         "color": 0xF59E0B,
                         "timestamp": _utc_iso_now(),
@@ -1926,11 +2227,12 @@ async def _execute_command_action(
         }
         if datacore_id and bot_token:
             await _discord_api("POST", f"/channels/{datacore_id}/messages", bot_token, payload={"embeds": [note_embed]})
+        eid = entry["id"]
         return {
             "embeds": [
                 {
-                    "title": f"[OK] Captain's Log Recorded (#{entry['id']})",
-                    "description": f"Stored in datacore vault and posted to <#{datacore_id}>." if datacore_id else "Stored in datacore vault.",
+                    "title": f"[OK] {tr(lang, f'Captain Log Recorded (#{eid})', f'บันทึกเข้าคลัง Vault เรียบร้อย (#{eid})')}",
+                    "description": f"Stored in `Dashboard/data/discord/notes.json` and posted to <#{datacore_id}>." if datacore_id else "Stored in local vault.",
                     "color": 0x10B981,
                     "timestamp": _utc_iso_now(),
                 }
@@ -1940,7 +2242,7 @@ async def _execute_command_action(
     return {"content": f"Unknown command action: `{action}`"}, None
 
 
-# --- Gateway Client, Live HUD & Intel Broadcaster ---
+# --- Gateway Client, Live HUD, Morning Briefing & Datacore Auto-Ingest ---
 class DiscordBotService:
     def __init__(
         self,
@@ -1951,6 +2253,7 @@ class DiscordBotService:
         self._gateway_task: asyncio.Task | None = None
         self._hud_task: asyncio.Task | None = None
         self._intel_task: asyncio.Task | None = None
+        self._morning_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
         self._seq: int | None = None
         self._app_id: str | None = None
@@ -1970,11 +2273,13 @@ class DiscordBotService:
             self._hud_task = running_loop.create_task(self._hud_updater_loop())
         if self._intel_task is None or self._intel_task.done():
             self._intel_task = running_loop.create_task(self._intel_broadcast_loop())
+        if self._morning_task is None or self._morning_task.done():
+            self._morning_task = running_loop.create_task(self._morning_briefing_loop())
 
     async def stop(self) -> None:
         if self._stop_event:
             self._stop_event.set()
-        for task in (self._gateway_task, self._hud_task, self._intel_task):
+        for task in (self._gateway_task, self._hud_task, self._intel_task, self._morning_task):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -1986,11 +2291,41 @@ class DiscordBotService:
         self._gateway_task = None
         self._hud_task = None
         self._intel_task = None
+        self._morning_task = None
         self._connected = False
 
     def _get_bot_token(self) -> str:
         cfg = self._config_provider()
         return str(cfg.get("alerts", {}).get("discord_bot_token", "") or "").strip()
+
+    async def _handle_datacore_message(self, msg: dict, bot_token: str) -> None:
+        author = msg.get("author", {}) if isinstance(msg.get("author"), dict) else {}
+        if author.get("bot"):
+            return
+        state = load_station_state()
+        datacore_id = str(state.get("dropzone_channel_id", "") or "")
+        if not datacore_id or str(msg.get("channel_id", "")) != datacore_id:
+            return
+
+        content = str(msg.get("content", "") or "").strip()
+        attachments = msg.get("attachments", []) or []
+        att_urls = [
+            f"[{a.get('filename', 'file')}]({a.get('url', '')})"
+            for a in attachments
+            if isinstance(a, dict) and a.get("url")
+        ]
+        parts = [p for p in [content, " ".join(att_urls)] if p]
+        if not parts:
+            return
+
+        username = str(author.get("username", "overlord"))
+        entry = await asyncio.to_thread(append_quick_note, "\n".join(parts), username)
+        lang = get_current_lang()
+        ack_payload = {
+            "content": f"`[VAULT #{entry['id']}]` {tr(lang, 'Archived to datacore.', 'บันทึกลงคลัง Vault อัตโนมัติแล้ว')}",
+            "message_reference": {"message_id": str(msg.get("id", ""))},
+        }
+        await _discord_api("POST", f"/channels/{datacore_id}/messages", bot_token, payload=ack_payload)
 
     async def _handle_interaction(self, data: dict, bot_token: str) -> None:
         int_id = str(data.get("id", ""))
@@ -2017,7 +2352,7 @@ class DiscordBotService:
             if custom_id.startswith("cmd:"):
                 action = custom_id[4:]
                 opts["from_button"] = True
-                if action in ("deck_refresh", "wall_refresh"):
+                if action in ("deck_refresh", "wall_refresh") or action.startswith("lang_cycle:"):
                     ack_type = 6
         else:
             return
@@ -2072,7 +2407,7 @@ class DiscordBotService:
                 "op": 2,
                 "d": {
                     "token": bot_token,
-                    "intents": 1,
+                    "intents": 1 | (1 << 9),
                     "properties": {
                         "os": "windows",
                         "browser": "genesis_motherboard",
@@ -2120,6 +2455,8 @@ class DiscordBotService:
                         add_event("system", "Genesis Motherboard Discord Gateway online and listening")
                     elif op == 0 and t_name == "INTERACTION_CREATE" and isinstance(d_body, dict):
                         asyncio.create_task(self._handle_interaction(d_body, bot_token))
+                    elif op == 0 and t_name == "MESSAGE_CREATE" and isinstance(d_body, dict):
+                        asyncio.create_task(self._handle_datacore_message(d_body, bot_token))
             finally:
                 self._connected = False
                 hb_task.cancel()
@@ -2198,6 +2535,37 @@ class DiscordBotService:
                 break
             except Exception:
                 await asyncio.sleep(600)
+
+    async def _morning_briefing_loop(self) -> None:
+        await asyncio.sleep(60)
+        while True:
+            try:
+                now = datetime.now()
+                if now.hour == 8 and 30 <= now.minute <= 45:
+                    today_str = now.strftime("%Y-%m-%d")
+                    state = load_station_state()
+                    token = self._get_bot_token()
+                    bridge_cid = state.get("command_deck_channel_id")
+                    if token and bridge_cid and state.get("last_morning_briefing_date") != today_str:
+                        lang = get_current_lang()
+                        payload = await asyncio.to_thread(
+                            build_omni_briefing_payload,
+                            get_system_metrics(),
+                            check_mumu_health(),
+                            get_tunnel_status(),
+                            get_session_summary(),
+                            lang,
+                            True,
+                        )
+                        st, _, _ = await _discord_api("POST", f"/channels/{bridge_cid}/messages", token, payload=payload)
+                        if 200 <= st < 300:
+                            state["last_morning_briefing_date"] = today_str
+                            save_station_state(state)
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(60)
 
 
 discord_bot_service = DiscordBotService()

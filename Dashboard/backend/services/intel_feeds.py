@@ -17,9 +17,10 @@ from backend.core.config import DATA_DIR
 DISCORD_DATA_DIR = DATA_DIR / "discord"
 FEEDS_REGISTRY_PATH = DISCORD_DATA_DIR / "feeds.json"
 
-USER_AGENT = "Genesis-Motherboard-Core/4.1"
+USER_AGENT = "Genesis-Motherboard-Core/4.2"
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 _WHITESPACE_RE = re.compile(r"\s+")
+_TAG_RE = re.compile(r"<[^>]+>")
 
 _SENSOR_LOCK = threading.Lock()
 _REGISTRY_LOCK = threading.RLock()
@@ -27,8 +28,10 @@ _SENSOR_CACHE: dict = {"updated_at": 0.0, "weather": None, "markets": None}
 
 GITHUB_ACCOUNTS = ("vxmpie", "swnst")
 VALID_FEED_CATEGORIES = ("ai", "tech", "world", "loot")
+VALID_LANG_MODES = ("dual", "th", "en")
 
 DEFAULT_FEEDS_REGISTRY: dict = {
+    "schema_version": 2,
     "ai": [
         {
             "name": "HuggingFace Daily Papers",
@@ -54,6 +57,18 @@ DEFAULT_FEEDS_REGISTRY: dict = {
             "name": "Hacker News Front Page",
             "kind": "json_hn",
             "url": "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=6",
+            "enabled": True,
+        },
+        {
+            "name": "GitHub Global Trending",
+            "kind": "html_gh_trending",
+            "url": "https://github.com/trending",
+            "enabled": True,
+        },
+        {
+            "name": "CISA Zero-Day & KEV CVE Radar",
+            "kind": "json_cisa_kev",
+            "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
             "enabled": True,
         },
         {
@@ -94,7 +109,34 @@ DEFAULT_FEEDS_REGISTRY: dict = {
 }
 
 
-# --- Sanitization & Registry Storage ---
+# --- Bilingual & Sanitization Helpers ---
+def normalize_lang(lang: str | None) -> str:
+    low = str(lang or "dual").strip().lower()
+    return low if low in VALID_LANG_MODES else "dual"
+
+
+def tr(lang: str, en: str, th: str) -> str:
+    mode = normalize_lang(lang)
+    if mode == "en":
+        return en
+    if mode == "th":
+        return th
+    return f"{en} | {th}"
+
+
+def tr_block(lang: str, en: str, th: str) -> str:
+    mode = normalize_lang(lang)
+    if mode == "en":
+        return en
+    if mode == "th":
+        return th
+    return f"{en}\n{th}"
+
+
+def lang_button_label(lang: str) -> str:
+    return f"Lang: {normalize_lang(lang).upper()}"
+
+
 def strip_emojis(text: str) -> str:
     cleaned = _EMOJI_RE.sub("", str(text or ""))
     return _WHITESPACE_RE.sub(" ", html.unescape(cleaned)).strip()
@@ -127,6 +169,7 @@ def _clip_field(lines: list[str], fallback: str = "Signal temporarily unavailabl
     return "\n".join(clipped) if clipped else text[:1020]
 
 
+# --- Dynamic Registry Storage ---
 def load_feeds_registry() -> dict:
     with _REGISTRY_LOCK:
         DISCORD_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -139,6 +182,13 @@ def load_feeds_registry() -> dict:
                         if cat not in data or not isinstance(data[cat], list):
                             data[cat] = copy.deepcopy(DEFAULT_FEEDS_REGISTRY[cat])
                             changed = True
+                    if int(data.get("schema_version", 1)) < 2:
+                        existing_tech_urls = {str(x.get("url", "")) for x in data.get("tech", []) if isinstance(x, dict)}
+                        for default_src in DEFAULT_FEEDS_REGISTRY["tech"]:
+                            if default_src["url"] not in existing_tech_urls:
+                                data["tech"].insert(1, copy.deepcopy(default_src))
+                        data["schema_version"] = 2
+                        changed = True
                     if changed:
                         save_feeds_registry(data)
                     return data
@@ -206,7 +256,7 @@ def list_feed_sources() -> dict:
     return load_feeds_registry()
 
 
-# --- HTTP & XML Fetchers ---
+# --- HTTP, HTML & XML Parsers ---
 def _fetch_text(url: str, timeout: float = 8.0) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -250,6 +300,21 @@ def parse_rss_or_atom_xml(xml_text: str, limit: int = 5) -> list[dict]:
     return items
 
 
+def parse_github_trending_html(html_text: str, limit: int = 5) -> list[dict]:
+    repos: list[dict] = []
+    articles = re.findall(r'<article[^>]*class="[^"]*Box-row[^"]*"[^>]*>(.*?)</article>', html_text, re.S)
+    for art in articles[:limit]:
+        m_repo = re.search(r'<h2[^>]*>.*?href="/([^"]+)"', art, re.S)
+        m_desc = re.search(r'<p[^>]*class="[^"]*col-9[^"]*"[^>]*>(.*?)</p>', art, re.S)
+        m_lang = re.search(r'itemprop="programmingLanguage"[^>]*>(.*?)<', art, re.S)
+        repo = strip_emojis(m_repo.group(1)) if m_repo else ""
+        desc = strip_emojis(_TAG_RE.sub("", m_desc.group(1))) if m_desc else ""
+        lang = strip_emojis(m_lang.group(1)) if m_lang else ""
+        if repo:
+            repos.append({"repo": repo, "lang": lang, "desc": desc})
+    return repos
+
+
 def _collect_feed_lines(source: dict, limit: int = 5) -> list[str]:
     kind = str(source.get("kind", "rss"))
     url = str(source.get("url", "")).strip()
@@ -278,6 +343,25 @@ def _collect_feed_lines(source: dict, limit: int = 5) -> list[str]:
                 pts = int(hit.get("points") or 0)
                 if title:
                     lines.append(f"`{idx}.` [{title}]({link}) (`{pts} pts`)")
+        elif kind == "html_gh_trending":
+            html_raw = _fetch_text(url, timeout=8.0)
+            repos = parse_github_trending_html(html_raw, limit=limit)
+            for idx, r in enumerate(repos, 1):
+                lang_tag = f" (`{r['lang']}`)" if r.get("lang") else ""
+                desc_part = f" -- {_truncate(r['desc'], 58)}" if r.get("desc") else ""
+                lines.append(f"`{idx}.` [{r['repo']}](https://github.com/{r['repo']}){lang_tag}{desc_part}")
+        elif kind == "json_cisa_kev":
+            cisa = _fetch_json(url, timeout=8.0)
+            vulns = cisa.get("vulnerabilities", []) if isinstance(cisa, dict) else []
+            for idx, v in enumerate(vulns[:limit], 1):
+                cve = strip_emojis(v.get("cveID", ""))
+                vendor = strip_emojis(v.get("vendorProject", ""))
+                vname = _truncate(v.get("vulnerabilityName", ""), 54)
+                added = strip_emojis(v.get("dateAdded", ""))
+                if cve:
+                    lines.append(
+                        f"`{idx}.` [{cve}](https://nvd.nist.gov/vuln/detail/{cve}) (`{vendor}` / `{added}`): {vname}"
+                    )
         elif kind == "json_lobsters":
             stories = _fetch_json(url, timeout=8.0)
             if isinstance(stories, list):
@@ -452,7 +536,8 @@ def get_github_radar_sync(limit_per_user: int = 3) -> list[str]:
 
 
 # --- Domain Intelligence Collectors ---
-def fetch_ai_cortex_intel(limit: int = 4) -> dict:
+def fetch_ai_cortex_intel(limit: int = 4, lang: str = "dual") -> dict:
+    mode = normalize_lang(lang)
     reg = load_feeds_registry()
     sources = [s for s in reg.get("ai", []) if s.get("enabled", True)]
     fields: list[dict] = []
@@ -463,37 +548,49 @@ def fetch_ai_cortex_intel(limit: int = 4) -> dict:
             fields.append(
                 {
                     "name": strip_emojis(src.get("name", "AI Feed")),
-                    "value": _clip_field(lines),
+                    "value": _clip_field(lines, fallback=tr(mode, "Signal temporarily unavailable.", "สัญญาณขัดข้องชั่วคราว")),
                     "inline": False,
                 }
             )
 
     if not fields:
-        fields.append({"name": "AI Feeds", "value": "No active AI sources returned items.", "inline": False})
+        fields.append(
+            {
+                "name": tr(mode, "AI Feeds", "ฟีดข่าว AI"),
+                "value": tr(mode, "No active AI sources returned items.", "ยังไม่มีรายการข่าว AI ในขณะนี้"),
+                "inline": False,
+            }
+        )
 
     embed = {
-        "title": "[INTEL] ORBITAL AI & SINGULARITY CORTEX",
-        "description": "Dynamic research papers and artificial intelligence dispatches (`feeds.json` -> `ai`).",
+        "title": f"[INTEL] {tr(mode, 'ORBITAL AI & SINGULARITY CORTEX', 'ศูนย์ข่าวกรองและเปเปอร์วิจัย AI')}",
+        "description": tr_block(
+            mode,
+            "Dynamic AI research breakthroughs and dispatches (Registry: feeds.json -> ai).",
+            "อัปเดตเปเปอร์วิจัย AI ยอดนิยมและข่าวเทคโนโลยีปัญญาประดิษฐ์แบบไดนามิก (แก้ฟีดได้ด้วย /feed-add)",
+        ),
         "color": 0x8B5CF6,
         "fields": fields,
-        "footer": {"text": f"Genesis Motherboard Intel Cortex | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Intel Cortex | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh AI Cortex", "custom_id": "cmd:ai"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh AI", "รีเฟรช AI"), "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:ai"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def fetch_tech_radar_intel(limit: int = 5) -> dict:
+def fetch_tech_radar_intel(limit: int = 4, lang: str = "dual") -> dict:
+    mode = normalize_lang(lang)
     reg = load_feeds_registry()
     sources = [s for s in reg.get("tech", []) if s.get("enabled", True)]
     fields: list[dict] = []
@@ -503,48 +600,54 @@ def fetch_tech_radar_intel(limit: int = 5) -> dict:
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "Tech Feed")),
-                "value": _clip_field(lines),
+                "value": _clip_field(lines, fallback=tr(mode, "Signal temporarily unavailable.", "สัญญาณขัดข้องชั่วคราว")),
                 "inline": False,
             }
         )
 
     embed = {
-        "title": "[INTEL] DEEP-SPACE TECH & CYBERNETICS RADAR",
-        "description": "Dynamic engineering, software architecture, and tech sector transmissions (`feeds.json` -> `tech`).",
+        "title": f"[INTEL] {tr(mode, 'TECH, GITHUB TRENDING & CYBER CVE RADAR', 'เรดาร์เทคโนโลยี โปรเจกต์ฮิต GitHub และช่องโหว่ไซเบอร์')}",
+        "description": tr_block(
+            mode,
+            "Engineering headlines, GitHub global trending repos, and CISA Known Exploited Vulnerabilities.",
+            "สรุปข่าววิศวกรรมซอฟต์แวร์ โปรเจกต์ Open-Source มาแรงบน GitHub และแจ้งเตือนช่องโหว่ Zero-Day (CISA KEV)",
+        ),
         "color": 0x06B6D4,
         "fields": fields,
-        "footer": {"text": f"Genesis Motherboard Intel Cortex | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Intel Cortex | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh Tech Radar", "custom_id": "cmd:tech"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh Tech", "รีเฟรช Tech"), "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "Free Loot", "custom_id": "cmd:loot"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:tech"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def fetch_world_pulse_intel(limit: int = 5) -> dict:
+def fetch_world_pulse_intel(limit: int = 5, lang: str = "dual") -> dict:
+    mode = normalize_lang(lang)
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=120.0)
     reg = load_feeds_registry()
     sources = [s for s in reg.get("world", []) if s.get("enabled", True)]
     gh_lines = get_github_radar_sync(limit_per_user=2)
 
-    weather_val = "Telemetry offline"
+    weather_val = tr(mode, "Telemetry offline", "เซ็นเซอร์ออฟไลน์")
     if weather.get("ok"):
         weather_val = (
-            f"Temp: `{weather['temp_c']:.1f}C` (Feels `{weather['feels_c']:.1f}C`)\n"
-            f"Humidity: `{weather['humidity']:.0f}%` | Wind: `{weather['wind_kmh']:.1f} km/h`\n"
-            f"Rain: `{weather['precip_mm']:.1f} mm`"
+            f"{tr(mode, 'Temp', 'อุณหภูมิ')}: `{weather['temp_c']:.1f}C` ({tr(mode, 'Feels', 'รู้สึกเหมือน')} `{weather['feels_c']:.1f}C`)\n"
+            f"{tr(mode, 'Humidity', 'ความชื้น')}: `{weather['humidity']:.0f}%` | {tr(mode, 'Wind', 'ลม')}: `{weather['wind_kmh']:.1f} km/h`\n"
+            f"{tr(mode, 'Rain', 'ฝน')}: `{weather['precip_mm']:.1f} mm`"
         )
 
-    market_val = "Market feed offline"
+    market_val = tr(mode, "Market feed offline", "ฟีดตลาดออฟไลน์")
     if markets.get("ok"):
         market_val = (
             f"BTC: `${markets['btc_usd']:,.0f}` (`{markets['btc_24h']:+.1f}%`)\n"
@@ -553,8 +656,8 @@ def fetch_world_pulse_intel(limit: int = 5) -> dict:
         )
 
     fields: list[dict] = [
-        {"name": "Bangkok / Lat Krabang Sensors", "value": weather_val, "inline": True},
-        {"name": "Crypto & FX Tickers", "value": market_val, "inline": True},
+        {"name": tr(mode, "Bangkok / Lat Krabang Sensors", "สภาพอากาศ กรุงเทพฯ / ลาดกระบัง"), "value": weather_val, "inline": True},
+        {"name": tr(mode, "Crypto & FX Tickers", "ราคาคริปโตและค่าเงินบาท"), "value": market_val, "inline": True},
     ]
 
     for src in sources[:5]:
@@ -562,42 +665,48 @@ def fetch_world_pulse_intel(limit: int = 5) -> dict:
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "World Feed")),
-                "value": _clip_field(lines),
+                "value": _clip_field(lines, fallback=tr(mode, "Signal temporarily unavailable.", "สัญญาณขัดข้องชั่วคราว")),
                 "inline": False,
             }
         )
 
     fields.append(
         {
-            "name": "Overlord GitHub Activity (vxmpie / swnst)",
-            "value": _clip_field(gh_lines, fallback="No recent public events."),
+            "name": tr(mode, "Overlord GitHub Activity (vxmpie / swnst)", "ความเคลื่อนไหว GitHub (vxmpie / swnst)"),
+            "value": _clip_field(gh_lines, fallback=tr(mode, "No recent public events.", "ไม่มีรายการล่าสุด")),
             "inline": False,
         }
     )
 
     embed = {
-        "title": "[INTEL] PLANETARY WORLD PULSE, MARKETS & SENSORS",
-        "description": "Global geopolitics, Bangkok planetary atmosphere, financial tickers, and GitHub fleet activity.",
+        "title": f"[INTEL] {tr(mode, 'PLANETARY WORLD PULSE, MARKETS & SENSORS', 'ชีพจรข่าวโลก ตลาดการเงิน และสภาพอากาศ')}",
+        "description": tr_block(
+            mode,
+            "Global geopolitics, Bangkok atmospheric telemetry, crypto/FX tickers, and GitHub push activity.",
+            "ข่าวต่างประเทศ สภาพอากาศกรุงเทพฯ ราคาเหรียญและค่าเงินบาท พร้อมความเคลื่อนไหว Repo ส่วนตัว",
+        ),
         "color": 0x10B981,
         "fields": fields,
-        "footer": {"text": f"Genesis Motherboard Planetary Array | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Planetary Array | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh World Pulse", "custom_id": "cmd:world"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh World", "รีเฟรช World"), "custom_id": "cmd:world"},
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
                 {"type": 2, "style": 2, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:world"},
             ],
         }
     ]
     return {"embeds": [embed], "components": components}
 
 
-def fetch_free_loot_intel(limit: int = 6) -> dict:
+def fetch_free_loot_intel(limit: int = 6, lang: str = "dual") -> dict:
+    mode = normalize_lang(lang)
     reg = load_feeds_registry()
     sources = [s for s in reg.get("loot", []) if s.get("enabled", True)]
     fields: list[dict] = []
@@ -607,27 +716,31 @@ def fetch_free_loot_intel(limit: int = 6) -> dict:
         fields.append(
             {
                 "name": strip_emojis(src.get("name", "Loot Feed")),
-                "value": _clip_field(lines, fallback="No active zero-cost drops returned right now."),
+                "value": _clip_field(lines, fallback=tr(mode, "No active zero-cost drops right now.", "ยังไม่มีเกมแจกฟรีเพิ่มเติมในขณะนี้")),
                 "inline": False,
             }
         )
 
     embed = {
-        "title": "[INTEL] ORBITAL SUPPLY DROP - FREE GAMES & LOOT",
-        "description": "Active 100%-discount PC game giveaways and zero-cost store drops (`feeds.json` -> `loot`).",
+        "title": f"[INTEL] {tr(mode, 'ORBITAL SUPPLY DROP - FREE GAMES & LOOT', 'เรดาร์เกมแจกฟรี 100% บน Epic Games และ PC')}",
+        "description": tr_block(
+            mode,
+            "Active 100%-discount PC game giveaways and zero-cost store drops (Registry: feeds.json -> loot).",
+            "สแกนเกมแจกฟรี 100% บน Epic Games Store และดีลลด 100% จากร้านค้า PC อัตโนมัติ",
+        ),
         "color": 0xF59E0B,
         "fields": fields,
-        "footer": {"text": f"Genesis Motherboard Supply Scanner | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard Supply Scanner | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Scan Loot", "custom_id": "cmd:loot"},
+                {"type": 2, "style": 1, "label": tr(mode, "Scan Loot", "สแกนเกมฟรี"), "custom_id": "cmd:loot"},
                 {"type": 2, "style": 2, "label": "Omni-Briefing", "custom_id": "cmd:briefing"},
-                {"type": 2, "style": 2, "label": "Bridge Console", "custom_id": "cmd:bridge"},
                 {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:loot"},
             ],
         }
     ]
@@ -639,15 +752,20 @@ def build_omni_briefing_payload(
     mumu_health: dict,
     tunnel: dict,
     summary: dict,
+    lang: str = "dual",
+    is_morning_dispatch: bool = False,
 ) -> dict:
+    mode = normalize_lang(lang)
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=180.0)
     reg = load_feeds_registry()
 
     ai_first = next((s for s in reg.get("ai", []) if s.get("enabled", True)), None)
     tech_first = next((s for s in reg.get("tech", []) if s.get("enabled", True)), None)
+    gh_trend = next((s for s in reg.get("tech", []) if s.get("kind") == "html_gh_trending"), None)
 
     ai_top = _collect_feed_lines(ai_first, limit=3) if ai_first else []
     tech_top = _collect_feed_lines(tech_first, limit=3) if tech_first else []
+    trend_top = _collect_feed_lines(gh_trend, limit=3) if gh_trend else []
 
     ram = metrics.get("ram", {})
     cpu_pct = float(metrics.get("cpu", {}).get("total_percent", 0.0))
@@ -661,45 +779,52 @@ def build_omni_briefing_payload(
         else "Offline"
     )
 
+    title_prefix = "[MORNING BRIEFING 08:30]" if is_morning_dispatch else "[BRIEFING]"
+    title_text = tr(mode, "GENESIS MOTHERBOARD OMNI-BRIEFING", "รายงานสรุปสถานการณ์ประจำวัน")
+
     embed = {
-        "title": "[BRIEFING] GENESIS MOTHERBOARD OMNI-BRIEFING",
-        "description": "Unified situational awareness across reactor hardware and global planetary intelligence.",
+        "title": f"{title_prefix} {title_text}",
+        "description": tr_block(
+            mode,
+            "Unified situational awareness across reactor hardware and global planetary intelligence.",
+            "สรุปสถานะเครื่อง เซ็นเซอร์อากาศ ตลาดโลก และข่าวเทคโนโลยีเด่นรวมไว้ในหน้าเดียว",
+        ),
         "color": 0x3B82F6,
         "fields": [
             {
-                "name": "Ship Reactor & Fleet",
+                "name": tr(mode, "Ship Reactor & Fleet", "สถานะเครื่องและ MuMu"),
                 "value": (
                     f"CPU `{cpu_pct:.1f}%` | RAM `{ram.get('used_gb', 0)}/{ram.get('total_gb', 0)} GB` | C: `{c_free:.1f} GB`\n"
-                    f"MuMu Active: `{mumu_health.get('count', 0)}` | Session Boosts: `{summary.get('session_boosts', 0)}`\n"
+                    f"MuMu: `{mumu_health.get('count', 0)}` online | Boosts: `{summary.get('session_boosts', 0)}`\n"
                     f"Ingress: `{tunnel_url}`"
                 ),
                 "inline": False,
             },
-            {"name": "Bangkok Sensors", "value": weather_str, "inline": True},
-            {"name": "Markets & FX", "value": market_str, "inline": True},
+            {"name": tr(mode, "Bangkok Sensors", "อากาศ กทม."), "value": weather_str, "inline": True},
+            {"name": tr(mode, "Markets & FX", "คริปโตและค่าเงิน"), "value": market_str, "inline": True},
             {
-                "name": "Top AI Breakthroughs",
+                "name": tr(mode, "Top AI Breakthroughs", "AI เด่นประจำวัน"),
                 "value": _clip_field(ai_top, fallback="No feed signal."),
                 "inline": False,
             },
             {
-                "name": "Top Tech Radar",
-                "value": _clip_field(tech_top, fallback="No feed signal."),
+                "name": tr(mode, "Top Tech & GitHub Trending", "ข่าว Tech และโปรเจกต์ฮิต GitHub"),
+                "value": _clip_field(tech_top + trend_top[:2], fallback="No feed signal."),
                 "inline": False,
             },
         ],
-        "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
+        "footer": {"text": f"Genesis Motherboard | Mode: {mode.upper()} | Host: {socket.gethostname()}"},
         "timestamp": _utc_iso_now(),
     }
     components = [
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 1, "label": "Refresh Briefing", "custom_id": "cmd:briefing"},
+                {"type": 2, "style": 1, "label": tr(mode, "Refresh Briefing", "รีเฟรชสรุป"), "custom_id": "cmd:briefing"},
                 {"type": 2, "style": 2, "label": "AI Cortex", "custom_id": "cmd:ai"},
                 {"type": 2, "style": 2, "label": "Tech Radar", "custom_id": "cmd:tech"},
-                {"type": 2, "style": 2, "label": "World Pulse", "custom_id": "cmd:world"},
                 {"type": 2, "style": 3, "label": "RAM Boost", "custom_id": "cmd:boost"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:briefing"},
             ],
         }
     ]

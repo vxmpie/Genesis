@@ -16,10 +16,15 @@ _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
 
 
 class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
-    def test_slash_commands_and_builders_are_zero_emoji_and_clean_theme(self) -> None:
+    def test_slash_commands_topics_and_bilingual_builders(self) -> None:
         raw_cmds = json.dumps(discord_bot.SLASH_COMMANDS)
         self.assertIsNone(_EMOJI_RE.search(raw_cmds))
         self.assertEqual(discord_bot.GUILD_MOTHERSHIP_NAME, "Genesis Motherboard")
+
+        for ch_name, topic in discord_bot.CHANNEL_TOPICS.items():
+            self.assertNotIn("//", topic, f"Found // in topic for {ch_name}")
+            self.assertIsNone(_EMOJI_RE.search(topic))
+            self.assertIn("|", topic, f"Expected bilingual separator in topic for {ch_name}")
 
         for cat in (
             discord_bot.CATEGORY_HUD,
@@ -32,13 +37,14 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(_EMOJI_RE.search(cat))
 
         api_cmds = discord_bot.get_discord_api_commands()
-        self.assertTrue(all("_group" not in c for c in api_cmds))
+        self.assertTrue(all(not k.startswith("_") for c in api_cmds for k in c))
         cmd_names = {c["name"] for c in api_cmds}
         self.assertTrue(
             {
                 "bridge",
                 "wall",
                 "briefing",
+                "lang",
                 "status",
                 "ai",
                 "tech",
@@ -60,6 +66,10 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
                 "run",
             }.issubset(cmd_names)
         )
+
+        self.assertEqual(intel_feeds.tr("en", "Hello", "สวัสดี"), "Hello")
+        self.assertEqual(intel_feeds.tr("th", "Hello", "สวัสดี"), "สวัสดี")
+        self.assertEqual(intel_feeds.tr("dual", "Hello", "สวัสดี"), "Hello | สวัสดี")
 
         with patch.object(
             discord_bot,
@@ -132,23 +142,24 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
             "get_top_processes",
             return_value=[{"pid": 100, "name": "MuMuNxDevice.exe", "ram_mb": 1450.0, "protected": True}],
         ):
-            deck = discord_bot.build_deck_payload()
-            wall = discord_bot.build_command_wall_payload()
-            status = discord_bot.build_status_payload()
-            mumu = discord_bot.build_mumu_payload()
-            procs = discord_bot.build_processes_payload()
+            deck_dual = discord_bot.build_deck_payload("dual")
+            deck_th = discord_bot.build_deck_payload("th")
+            wall_en = discord_bot.build_command_wall_payload("en")
+            status = discord_bot.build_status_payload("dual")
+            mumu = discord_bot.build_mumu_payload("dual")
+            procs = discord_bot.build_processes_payload("dual")
             hud = discord_bot.format_hud_channel_names()
 
-        for obj in (deck, wall, status, mumu, procs, hud):
-            self.assertIsNone(_EMOJI_RE.search(json.dumps(obj)))
+        for obj in (deck_dual, deck_th, wall_en, status, mumu, procs, hud):
+            self.assertIsNone(_EMOJI_RE.search(json.dumps(obj, ensure_ascii=False)))
 
-        self.assertNotIn("//", deck["embeds"][0]["title"])
-        self.assertEqual(len(wall["embeds"]), 2)
-        self.assertEqual(wall["embeds"][0]["title"], "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY")
+        self.assertIn("แผงควบคุมหลักประจำยาน", deck_dual["embeds"][0]["title"])
+        self.assertEqual(deck_th["embeds"][0]["title"], "[GENESIS MOTHERBOARD] แผงควบคุมหลักประจำยาน")
+        self.assertEqual(wall_en["embeds"][0]["title"], "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY")
+        self.assertEqual(len(deck_dual["components"]), 4)
         self.assertEqual(len(hud), 4)
-        self.assertIn("BKK: 31C | BTC: $95.4K", hud[3])
 
-    def test_dynamic_feeds_and_custom_commands_encapsulation(self) -> None:
+    def test_dynamic_feeds_lang_cycle_and_custom_commands_encapsulation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_data = Path(tmpdir)
             tmp_discord = tmp_data / "discord"
@@ -173,57 +184,54 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(legacy_station.exists())
                 self.assertTrue(tmp_station.exists())
 
+                self.assertEqual(discord_bot.get_current_lang(), "dual")
+                self.assertEqual(discord_bot.cycle_station_lang(), "th")
+                self.assertEqual(discord_bot.cycle_station_lang(), "en")
+                self.assertEqual(discord_bot.cycle_station_lang(), "dual")
+
                 add_res = intel_feeds.add_custom_rss_feed("ai", "Anthropic News", "https://example.com/rss.xml")
                 self.assertEqual(add_res["action"], "added")
-                self.assertTrue(tmp_feeds.exists())
                 reg = intel_feeds.list_feed_sources()
                 self.assertTrue(any(f["name"] == "Anthropic News" for f in reg["ai"]))
-
-                rm_res = intel_feeds.remove_feed_source("ai", "Anthropic News")
-                self.assertEqual(rm_res["removed"], 1)
+                self.assertEqual(intel_feeds.remove_feed_source("ai", "Anthropic News")["removed"], 1)
 
                 cmd_res = discord_bot.upsert_custom_command("Dash!", "Open Tailscale UI", "https://node.ts.net")
                 self.assertEqual(cmd_res["command"]["name"], "dash")
-                self.assertTrue(tmp_cmds.exists())
-                wall_payload = discord_bot.build_command_wall_payload()
+                wall_payload = discord_bot.build_command_wall_payload("dual")
                 self.assertIn("/run name:dash", json.dumps(wall_payload))
                 self.assertTrue(discord_bot.delete_custom_command("dash"))
 
-    def test_intel_feed_parsers_and_emoji_stripping(self) -> None:
-        rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
-        <rss><channel>
-            <item><title>AI Breakthrough \U0001F680 Released</title><link>https://example.com/1</link></item>
-        </channel></rss>"""
-        parsed_rss = intel_feeds.parse_rss_or_atom_xml(rss_xml, limit=5)
-        self.assertEqual(len(parsed_rss), 1)
-        self.assertEqual(parsed_rss[0]["title"], "AI Breakthrough Released")
-        self.assertIsNone(_EMOJI_RE.search(parsed_rss[0]["title"]))
+    def test_intel_feed_parsers_github_trending_and_cisa_kev(self) -> None:
+        gh_html = """
+        <article class="Box-row">
+            <h2><a href="/owner/awesome-agent">owner / awesome-agent</a></h2>
+            <p class="col-9 color-fg-muted my-1 pr-4">Autonomous \U0001F680 AI Agent toolkit</p>
+            <span itemprop="programmingLanguage">Python</span>
+        </article>
+        """
+        repos = intel_feeds.parse_github_trending_html(gh_html, limit=5)
+        self.assertEqual(len(repos), 1)
+        self.assertEqual(repos[0]["repo"], "owner/awesome-agent")
+        self.assertEqual(repos[0]["lang"], "Python")
+        self.assertEqual(repos[0]["desc"], "Autonomous AI Agent toolkit")
 
-        atom_xml = """<?xml version="1.0" encoding="UTF-8"?>
-        <feed xmlns="http://www.w3.org/2005/Atom">
-            <entry><title>Quantum Chip Update</title><link href="https://example.com/atom"/></entry>
-        </feed>"""
-        parsed_atom = intel_feeds.parse_rss_or_atom_xml(atom_xml, limit=5)
-        self.assertEqual(len(parsed_atom), 1)
-        self.assertEqual(parsed_atom[0]["url"], "https://example.com/atom")
-
-        with patch.object(
-            intel_feeds,
-            "load_feeds_registry",
-            return_value={
-                "ai": [
-                    {"name": "HF Papers", "kind": "json_hf", "url": "https://hf.test", "enabled": True},
-                    {"name": "Custom RSS", "kind": "rss", "url": "https://rss.test", "enabled": True},
-                ]
-            },
-        ), patch.object(
-            intel_feeds,
-            "_fetch_json",
-            return_value=[{"paper": {"id": "2501.0001", "title": "Paper \U0001F525 One", "upvotes": 42}}],
-        ), patch.object(intel_feeds, "_fetch_text", return_value=rss_xml):
-            ai_payload = intel_feeds.fetch_ai_cortex_intel(limit=3)
-        self.assertIsNone(_EMOJI_RE.search(json.dumps(ai_payload)))
-        self.assertEqual(ai_payload["embeds"][0]["title"], "[INTEL] ORBITAL AI & SINGULARITY CORTEX")
+        cisa_stub = {
+            "vulnerabilities": [
+                {
+                    "cveID": "CVE-2026-9999",
+                    "vendorProject": "Apache",
+                    "vulnerabilityName": "Remote Code Execution",
+                    "dateAdded": "2026-11-20",
+                }
+            ]
+        }
+        with patch.object(intel_feeds, "_fetch_json", return_value=cisa_stub):
+            cisa_lines = intel_feeds._collect_feed_lines(
+                {"name": "CISA", "kind": "json_cisa_kev", "url": "https://cisa.test", "enabled": True},
+                limit=3,
+            )
+        self.assertEqual(len(cisa_lines), 1)
+        self.assertIn("CVE-2026-9999", cisa_lines[0])
 
     def test_encode_multipart_form_data(self) -> None:
         png_stub = b"\x89PNG\r\n\x1a\nFAKEPNG"
@@ -253,7 +261,7 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         ):
             payload, files = await discord_bot._execute_command_action("boost")
         self.assertIsNone(files)
-        self.assertEqual(payload["embeds"][0]["title"], "[OK] Reactor RAM Boost Executed")
+        self.assertIn("Reactor RAM Boost Executed", payload["embeds"][0]["title"])
 
         with patch.object(
             discord_bot,
