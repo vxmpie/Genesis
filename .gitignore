@@ -79,7 +79,7 @@ Thumbs.db
 .DS_Store
 AGENTS.md
 
-# AI Agent & Assistant Files
+# AI Agent & Assistant Files (Local-Only Private Docs)
 GEMINI.md
 GEMINI.yaml
 .gemini/
@@ -92,3 +92,7 @@ AGENTS.md
 .cursor/
 .windsurfrules
 .antigravity/
+Dashboard/docs/
+docs/
+*.toon.md
+DASHBOARD_OPS_SUMMARY.md
