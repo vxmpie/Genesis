@@ -5,6 +5,7 @@ import {
   Edit3,
   Loader2,
   Plus,
+  RotateCcw,
   Sparkles,
   Trash2,
   X,
@@ -18,6 +19,7 @@ interface GamePresetsCardProps {
   onAddPreset: (placeId: number, name: string) => void;
   onUpdatePreset: (originalPlaceId: number, placeId: number, name: string) => void;
   onDeletePreset: (placeId: number) => void;
+  onRejoinPreset: (placeId: number, instance: number | null) => void;
 }
 
 interface DetectedLiveGame {
@@ -30,6 +32,7 @@ export const GamePresetsCard: React.FC<GamePresetsCardProps> = ({
   onAddPreset,
   onUpdatePreset,
   onDeletePreset,
+  onRejoinPreset,
 }) => {
   const mumu = useDashboardStore((s) => s.mumu);
   const config = useDashboardStore((s) => s.config);
@@ -42,6 +45,7 @@ export const GamePresetsCard: React.FC<GamePresetsCardProps> = ({
   const [editingOriginalPid, setEditingOriginalPid] = useState<number | null>(null);
   const [editPlaceId, setEditPlaceId] = useState('');
   const [editName, setEditName] = useState('');
+  const [rejoinPickerPlaceId, setRejoinPickerPlaceId] = useState<number | null>(null);
 
   const mumuPresets = mumu?.game_presets;
   const configPresets = config?.mumu.game_presets;
@@ -290,6 +294,8 @@ export const GamePresetsCard: React.FC<GamePresetsCardProps> = ({
             const isEditing = editingOriginalPid === preset.place_id;
             const editPending = Boolean(pendingOps[`preset:edit:${preset.place_id}`]);
             const deletePending = Boolean(pendingOps[`preset:delete:${preset.place_id}`]);
+            const rejoinPending = Boolean(pendingOps[`preset:rejoin:${preset.place_id}`]);
+            const showPicker = rejoinPickerPlaceId === preset.place_id && devices.length > 1;
             const activeSlots = devices.filter(
               (d) => (d.configured_place_id || d.target_place_id) === preset.place_id
             );
@@ -405,28 +411,108 @@ export const GamePresetsCard: React.FC<GamePresetsCardProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-ops-border">
+                {showPicker && (
+                  <div className="p-2 rounded bg-ops-elevated border border-ops-borderStrong space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-mono uppercase text-ops-secondary">
+                      <span>Select MuMu Instance</span>
+                      <button
+                        type="button"
+                        onClick={() => setRejoinPickerPlaceId(null)}
+                        className="text-ops-muted hover:text-ops-text"
+                        title="Close instance picker"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        disabled={rejoinPending}
+                        onClick={() => {
+                          onRejoinPreset(preset.place_id, null);
+                          setRejoinPickerPlaceId(null);
+                        }}
+                        className="ops-btn h-6 px-2 bg-ops-ok/15 hover:bg-ops-ok/25 border border-ops-ok/40 text-[10px] font-mono text-ops-text"
+                      >
+                        All ({devices.length})
+                      </button>
+                      {devices.map((dev) => (
+                        <button
+                          key={dev.index}
+                          type="button"
+                          disabled={rejoinPending}
+                          onClick={() => {
+                            onRejoinPreset(preset.place_id, dev.index);
+                            setRejoinPickerPlaceId(null);
+                          }}
+                          title={
+                            dev.username
+                              ? `Rejoin Instance #${dev.index} (@${dev.username})`
+                              : `Rejoin Instance #${dev.index}`
+                          }
+                          className="ops-btn h-6 px-2 bg-ops-inset hover:bg-ops-border border border-ops-border text-[10px] font-mono text-ops-text"
+                        >
+                          #{dev.index}
+                          {dev.username ? ` (${dev.username})` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-ops-border">
                   <button
                     type="button"
-                    onClick={() => startEdit(preset)}
-                    title={`Edit preset ${preset.name}`}
+                    disabled={devices.length === 0 || rejoinPending}
+                    onClick={() => {
+                      if (devices.length === 1) {
+                        onRejoinPreset(preset.place_id, devices[0].index);
+                      } else if (devices.length > 1) {
+                        setRejoinPickerPlaceId((prev) =>
+                          prev === preset.place_id ? null : preset.place_id
+                        );
+                      }
+                    }}
+                    title={
+                      devices.length === 0
+                        ? 'No active MuMu instances'
+                        : devices.length === 1
+                        ? `Rejoin ${preset.name} on Instance #${devices[0].index}`
+                        : `Select MuMu instance(s) to rejoin ${preset.name}`
+                    }
                     className="ops-btn h-7 px-2 bg-ops-elevated hover:bg-ops-border border border-ops-border text-[11px] text-ops-text"
                   >
-                    <Edit3 className="w-3 h-3 text-ops-telemetry" />
-                    <span>Edit</span>
+                    {rejoinPending ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-ops-ok" />
+                    ) : (
+                      <RotateCcw className="w-3 h-3 text-ops-ok" />
+                    )}
+                    <span>Rejoin</span>
                   </button>
 
-                  <ConfirmButton
-                    compact
-                    tone="danger"
-                    label="Delete"
-                    confirmLabel="Confirm"
-                    pendingLabel="Deleting..."
-                    icon={<Trash2 className="w-3 h-3" />}
-                    pending={deletePending}
-                    title={`Delete preset ${preset.name}`}
-                    onConfirm={() => onDeletePreset(preset.place_id)}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(preset)}
+                      title={`Edit preset ${preset.name}`}
+                      className="ops-btn h-7 px-2 bg-ops-elevated hover:bg-ops-border border border-ops-border text-[11px] text-ops-text"
+                    >
+                      <Edit3 className="w-3 h-3 text-ops-telemetry" />
+                      <span>Edit</span>
+                    </button>
+
+                    <ConfirmButton
+                      compact
+                      tone="danger"
+                      label="Delete"
+                      confirmLabel="Confirm"
+                      pendingLabel="Deleting..."
+                      icon={<Trash2 className="w-3 h-3" />}
+                      pending={deletePending}
+                      title={`Delete preset ${preset.name}`}
+                      onConfirm={() => onDeletePreset(preset.place_id)}
+                    />
+                  </div>
                 </div>
               </div>
             );

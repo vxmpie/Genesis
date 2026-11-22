@@ -162,7 +162,17 @@ export type WsServerMessage =
   | { type: 'pcore_affinity_result'; data: CoreAffinityInfo }
   | { type: 'shader_cache_result'; data: ShaderCacheInfo }
   | { type: 'shader_cache_status'; data: ShaderCacheInfo }
-  | { type: 'governor_result'; data: GovernorResult };
+  | { type: 'governor_result'; data: GovernorResult }
+  | {
+      type: 'rejoin_preset_result';
+      success: boolean;
+      place_id: number;
+      game_name?: string;
+      instances: number[];
+      failed?: Array<{ instance: number; error: string }>;
+      instance_places?: Record<string, number>;
+      error?: string;
+    };
 
 // --- Outgoing Client Commands ---
 export interface WsCommandMap {
@@ -199,6 +209,7 @@ export interface WsCommandMap {
   add_game_preset: { place_id: number; name?: string };
   update_game_preset: { original_place_id: number; place_id: number; name: string };
   delete_game_preset: { place_id: number };
+  rejoin_preset: { place_id: number; instance?: number | null };
   set_mumu_username: { instance: number | string; username: string };
   set_auto_rejoin: { instance: number | null; enabled: boolean };
   defender_status: Record<string, never>;
@@ -277,6 +288,7 @@ const KNOWN_WS_TYPES: ReadonlySet<string> = new Set([
   'shader_cache_result',
   'shader_cache_status',
   'governor_result',
+  'rejoin_preset_result',
 ]);
 
 export function isRecord(val: unknown): val is Record<string, unknown> {

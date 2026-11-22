@@ -366,6 +366,18 @@ export function useWebSocket() {
           store.addToast('error', `Governor error: ${msg.data.error}`);
         }
         break;
+      case 'rejoin_preset_result':
+        store.clearPendingPrefix('preset:rejoin:');
+        if (msg.success) {
+          const targets = msg.instances.map((i) => `#${i}`).join(', ');
+          store.addToast(
+            'success',
+            `Rejoined ${msg.game_name || `Place ${msg.place_id}`} on ${targets}`
+          );
+        } else {
+          store.addToast('error', `Preset rejoin failed: ${msg.error || 'Unknown error'}`);
+        }
+        break;
       case 'alerts_delivery':
         store.pushAlertDelivery(msg.entry);
         break;

@@ -14,6 +14,7 @@ export interface InstancesViewProps {
   onAddPreset: (placeId: number, name: string) => void;
   onUpdatePreset: (originalPlaceId: number, placeId: number, name: string) => void;
   onDeletePreset: (placeId: number) => void;
+  onRejoinPreset: (placeId: number, instance: number | null) => void;
   onRefreshVmDisk: () => void;
   onTrimVmCache: (port: number) => void;
 }
@@ -24,6 +25,7 @@ export const InstancesView: React.FC<InstancesViewProps> = ({
   onAddPreset,
   onUpdatePreset,
   onDeletePreset,
+  onRejoinPreset,
   onRefreshVmDisk,
   onTrimVmCache,
 }) => {
@@ -185,6 +187,7 @@ export const InstancesView: React.FC<InstancesViewProps> = ({
         onAddPreset={onAddPreset}
         onUpdatePreset={onUpdatePreset}
         onDeletePreset={onDeletePreset}
+        onRejoinPreset={onRejoinPreset}
       />
 
       <VmDiskSentinelCard

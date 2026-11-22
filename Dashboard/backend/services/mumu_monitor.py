@@ -1419,6 +1419,94 @@ def governor_instance_action(instance_idx: int, action: str) -> dict:
     return {"success": False, "error": f"Unknown action {action}"}
 
 
+def ensure_mumu_adb_connected(adb_path: Path, connected_devices: list[str] | None = None) -> None:
+    """Connect ADB to any running MuMu emulator ports not yet listed in adb devices."""
+    with _process_sampler_lock:
+        ports = [
+            int(inst["adb_port"])
+            for inst in _cached_mumu_instances
+            if inst.get("type") == "Emulator" and isinstance(inst.get("adb_port"), int) and inst["adb_port"] > 0
+        ]
+    if not ports:
+        return
+    known = set(connected_devices if connected_devices is not None else get_mumu_adb_devices())
+    for port in ports:
+        serial = f"127.0.0.1:{port}"
+        if serial not in known:
+            _run_cmd([str(adb_path), "connect", serial], timeout=4)
+
+
+def rejoin_preset_instances(place_id: object, instance_idx: int | None = None) -> dict:
+    """Assign a preset Place ID to one or all active MuMu instances and launch Roblox."""
+    try:
+        pid = validate_place_id(place_id, allow_zero=False)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc), "place_id": 0, "instances": [], "failed": []}
+
+    adb_path = find_mumu_adb()
+    if not adb_path:
+        return {"success": False, "error": "ADB not found", "place_id": pid, "instances": [], "failed": []}
+
+    if instance_idx is not None:
+        targets = [int(instance_idx)]
+    else:
+        with _process_sampler_lock:
+            targets = sorted(
+                {
+                    int(inst["instance_index"])
+                    for inst in _cached_mumu_instances
+                    if inst.get("type") == "Emulator" and int(inst.get("instance_index", 0) or 0) > 0
+                }
+            )
+    if not targets:
+        return {
+            "success": False,
+            "error": "No active MuMu instances detected",
+            "place_id": pid,
+            "instances": [],
+            "failed": [],
+        }
+
+    _state_tracker.mark_governor_action()
+    game_name = get_game_name_for_place_id(pid)
+    succeeded: list[int] = []
+    failed: list[dict] = []
+
+    for idx in targets:
+        port = get_adb_port_for_instance(idx)
+        device_id = f"127.0.0.1:{port}"
+        _run_cmd([str(adb_path), "connect", device_id], timeout=5)
+        set_instance_place_id(idx, pid)
+        _run_cmd([str(adb_path), "-s", device_id, "shell", "am", "force-stop", "com.roblox.client"])
+        time.sleep(0.5)
+        launch_cmd = f'am start -a android.intent.action.VIEW -d "roblox://placeId={pid}"'
+        r_launch = _run_cmd([str(adb_path), "-s", device_id, "shell", launch_cmd])
+        if r_launch.returncode != 0:
+            err = (r_launch.stderr or r_launch.stdout or "").strip() or f"ADB launch failed for {device_id}"
+            failed.append({"instance": idx, "error": err})
+        else:
+            succeeded.append(idx)
+
+    with CONFIG_LOCK:
+        raw_places = CONFIG.get("mumu", {}).get("instance_places", {})
+        instance_places_snap = copy.deepcopy(raw_places) if isinstance(raw_places, dict) else {}
+
+    if succeeded:
+        inst_label = ", ".join(f"#{i}" for i in succeeded)
+        add_event("system", f"Preset Rejoin: Launched {game_name} ({pid}) on Instance {inst_label}")
+
+    error_msg = "; ".join(f"#{f['instance']}: {f['error']}" for f in failed) if failed else ""
+    return {
+        "success": len(failed) == 0 and len(succeeded) > 0,
+        "place_id": pid,
+        "game_name": game_name,
+        "instances": succeeded,
+        "failed": failed,
+        "instance_places": instance_places_snap,
+        **({"error": error_msg} if error_msg else {}),
+    }
+
+
 def recover_roblox_instance(
     serial: str,
     place_id: int | None = None,
@@ -1615,6 +1703,7 @@ async def mumu_game_watchdog_loop() -> None:
             if mumu_cfg.get("auto_reconnect", True):
                 adb = await asyncio.to_thread(find_mumu_adb)
                 if adb:
+                    await asyncio.to_thread(ensure_mumu_adb_connected, adb)
                     devices = await asyncio.to_thread(get_mumu_adb_devices)
                     for enum_idx, serial in enumerate(devices, 1):
                         await asyncio.to_thread(evaluate_watchdog_device_sync, adb, serial, enum_idx)

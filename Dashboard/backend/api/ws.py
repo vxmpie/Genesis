@@ -39,6 +39,7 @@ from backend.services.mumu_monitor import (
     get_adb_port_for_instance,
     get_mumu_instances,
     governor_instance_action,
+    rejoin_preset_instances,
     set_auto_rejoin,
     set_instance_username,
     update_game_preset,
@@ -712,6 +713,29 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
         act = str(data.get("action", "trim_ram"))
         res = await asyncio.to_thread(governor_instance_action, inst, act)
         await manager.send_to(ws, {"type": "governor_result", "data": res})
+
+    elif cmd == "rejoin_preset":
+        raw_inst = data.get("instance")
+        inst_val: int | None = None
+        if raw_inst is not None:
+            try:
+                inst_val = int(raw_inst)
+            except (TypeError, ValueError):
+                await manager.send_to(ws, {"type": "error", "error": "Invalid instance index"})
+                return
+        res = await asyncio.to_thread(rejoin_preset_instances, data.get("place_id"), inst_val)
+        for updated_inst in res.get("instances", []):
+            await broadcast_event(
+                {
+                    "type": "instance_game_updated",
+                    "ok": True,
+                    "instance": updated_inst,
+                    "place_id": res["place_id"],
+                    "game_name": res.get("game_name", "Roblox"),
+                    "instance_places": res.get("instance_places", {}),
+                }
+            )
+        await manager.send_to(ws, {"type": "rejoin_preset_result", **res})
 
     elif cmd == "alerts_status":
         await manager.send_to(ws, {"type": "alerts_status", "data": notifier.get_status()})

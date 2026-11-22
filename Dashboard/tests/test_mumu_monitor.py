@@ -17,6 +17,7 @@ from backend.services.mumu_monitor import (  # noqa: E402
     add_game_preset,
     classify_process_role,
     delete_game_preset,
+    ensure_mumu_adb_connected,
     evaluate_watchdog_device_sync,
     get_emulator_allowlist,
     get_game_name_for_place_id,
@@ -25,6 +26,7 @@ from backend.services.mumu_monitor import (  # noqa: E402
     governor_instance_action,
     is_auto_rejoin_enabled,
     parse_mumu_manager_json,
+    rejoin_preset_instances,
     resolve_instance_index_from_serial,
     set_auto_rejoin,
     set_instance_place_id,
@@ -421,6 +423,51 @@ class TestGamePresetsAndPlacePriority(unittest.TestCase):
         self.assertEqual(pres, {})
         self.assertNotIn("1", mm._instance_live_presence)
         self.assertNotIn("1", mm.CONFIG["mumu"]["instance_usernames"])
+
+    def test_rejoin_preset_instances_connects_assigns_and_launches(self) -> None:
+        mm.CONFIG["mumu"]["game_presets"] = [{"place_id": 93898234979111, "name": "Net a Fish"}]
+        orig_cached = list(mm._cached_mumu_instances)
+        try:
+            mm._cached_mumu_instances = [
+                {"type": "Emulator", "instance_index": 1, "adb_port": 16384},
+                {"type": "Emulator", "instance_index": 2, "adb_port": 16416},
+            ]
+            with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
+                mm, "_run_cmd", return_value=MagicMock(returncode=0, stdout="", stderr="")
+            ) as mock_cmd, patch.object(mm, "save_config"), patch.object(mm, "add_event"):
+                res_single = rejoin_preset_instances(93898234979111, 2)
+                self.assertTrue(res_single["success"])
+                self.assertEqual(res_single["instances"], [2])
+                self.assertEqual(mm.CONFIG["mumu"]["instance_places"]["2"], 93898234979111)
+                self.assertEqual(mock_cmd.call_count, 3)
+
+                mock_cmd.reset_mock()
+                res_all = rejoin_preset_instances(93898234979111, None)
+                self.assertTrue(res_all["success"])
+                self.assertEqual(res_all["instances"], [1, 2])
+                self.assertEqual(mm.CONFIG["mumu"]["instance_places"]["1"], 93898234979111)
+                self.assertEqual(mock_cmd.call_count, 6)
+        finally:
+            mm._cached_mumu_instances = orig_cached
+
+    def test_ensure_mumu_adb_connected_connects_missing_ports(self) -> None:
+        orig_cached = list(mm._cached_mumu_instances)
+        try:
+            mm._cached_mumu_instances = [
+                {"type": "Emulator", "instance_index": 1, "adb_port": 16384},
+                {"type": "Emulator", "instance_index": 2, "adb_port": 16416},
+            ]
+            with patch.object(
+                mm, "get_mumu_adb_devices", return_value=["127.0.0.1:16384"]
+            ), patch.object(
+                mm, "_run_cmd", return_value=MagicMock(returncode=0)
+            ) as mock_cmd:
+                ensure_mumu_adb_connected(Path("adb.exe"))
+            mock_cmd.assert_called_once_with(
+                ["adb.exe", "connect", "127.0.0.1:16416"], timeout=4
+            )
+        finally:
+            mm._cached_mumu_instances = orig_cached
 
 
 if __name__ == "__main__":

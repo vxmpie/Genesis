@@ -352,6 +352,16 @@ export function App() {
     [requireAuthGuard, sendCommand]
   );
 
+  const handleRejoinPreset = useCallback(
+    (placeId: number, instance: number | null) => {
+      requireAuthGuard(() => {
+        useDashboardStore.getState().setPendingOp(`preset:rejoin:${placeId}`);
+        sendCommand('rejoin_preset', { place_id: placeId, instance });
+      });
+    },
+    [requireAuthGuard, sendCommand]
+  );
+
   return (
     <>
       <AppShell>
@@ -385,6 +395,7 @@ export function App() {
             onAddPreset={handleAddPreset}
             onUpdatePreset={handleUpdatePreset}
             onDeletePreset={handleDeletePreset}
+            onRejoinPreset={handleRejoinPreset}
             onRefreshVmDisk={() => {
               useDashboardStore.getState().setPendingOp('vmdisk:refresh');
               sendCommand('vm_disk_refresh');
