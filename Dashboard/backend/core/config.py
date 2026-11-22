@@ -40,6 +40,7 @@ DEFAULT_ALERTS_CONFIG: dict = {
     "notify_on_drift": True,
     "notify_on_tunnel_change": True,
     "notify_on_net_outage": True,
+    "notify_on_auto_clean": True,
 }
 
 ALERT_TOGGLE_KEYS = (
@@ -51,6 +52,7 @@ ALERT_TOGGLE_KEYS = (
     "notify_on_drift",
     "notify_on_tunnel_change",
     "notify_on_net_outage",
+    "notify_on_auto_clean",
 )
 
 DEFAULT_CONFIG: dict = {
@@ -101,6 +103,18 @@ DEFAULT_CONFIG: dict = {
         "standby_purge_min_available_gb": 4.0,
         "standby_purge_min_standby_gb": 4.0,
         "standby_purge_min_free_gb": 1.5,
+        "auto_deep_clean_enabled": True,
+        "auto_deep_clean_hour": 4,
+        "auto_deep_clean_threshold_mb": 500,
+        "auto_deep_clean_min_free_gb": 30.0,
+        "auto_deep_clean_cooldown_hours": 6,
+        "auto_deep_clean_notify_min_mb": 50,
+        "auto_discovery_enabled": True,
+        "auto_discovery_min_mb": 20,
+        "auto_discovery_excludes": [],
+        "disabled_clean_targets": [],
+        "custom_clean_targets": [],
+        "vdi_auto_compact_enabled": True,
     },
     "alerts": copy.deepcopy(DEFAULT_ALERTS_CONFIG),
     "tunnel": {

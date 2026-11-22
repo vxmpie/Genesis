@@ -42,7 +42,16 @@ from backend.services.intel_feeds import (
     tr,
     tr_block,
 )
-from backend.services.maintenance import deep_clean_execute, get_vm_disk_status, ram_boost, trim_vm_caches
+from backend.services.maintenance import (
+    compact_stopped_mumu_vdis,
+    deep_clean_execute,
+    deep_clean_preview,
+    get_auto_clean_status,
+    get_vm_disk_status,
+    ram_boost,
+    trim_vm_caches,
+    update_auto_clean_config,
+)
 from backend.services.mumu_monitor import (
     check_mumu_health,
     find_mumu_adb,
@@ -179,10 +188,25 @@ SLASH_COMMANDS: list[dict] = [
     {
         "_group_en": "Reactor & Hardware Control",
         "_group_th": "ควบคุมฮาร์ดแวร์และหน่วยความจำ",
-        "_desc_th": "สั่ง Deep Clean ล้างไฟล์ Temp, Log และ Cache ทั้งระบบ",
+        "_desc_th": "สั่ง Deep Clean, พรีวิวแคช, บีบอัด VDI จอ MuMu ที่ปิดอยู่ หรือเปิด/ปิด Auto Clean",
         "name": "clean",
-        "description": "Execute Hull Deep Clean across temp directories, logs, and caches",
+        "description": "Hull Deep Clean, preview targets, compact stopped VDI disks, or toggle Auto Clean",
         "type": 1,
+        "options": [
+            {
+                "name": "mode",
+                "description": "Clean operation mode (default: execute)",
+                "type": 3,
+                "required": False,
+                "choices": [
+                    {"name": "Execute Deep Clean", "value": "execute"},
+                    {"name": "Preview Cleanable Targets", "value": "preview"},
+                    {"name": "Compact Stopped VMs (VDI)", "value": "compact_vdi"},
+                    {"name": "Enable Auto Deep Clean", "value": "auto_on"},
+                    {"name": "Disable Auto Deep Clean", "value": "auto_off"},
+                ],
+            }
+        ],
     },
     {
         "_group_en": "Reactor & Hardware Control",
@@ -781,12 +805,18 @@ def build_deck_payload(lang: str | None = None) -> dict:
     mumu = check_mumu_health()
     tunnel = get_tunnel_status()
     summary = get_session_summary()
+    auto_clean = get_auto_clean_status()
     weather, markets = get_cached_hud_sensors_sync(max_age_sec=300.0)
 
     ram = metrics.get("ram", {})
     cpu_pct = float(metrics.get("cpu", {}).get("total_percent", 0.0))
     c_free = float(metrics.get("storage", {}).get("c_drive", {}).get("free_gb", 0.0))
     tunnel_url = tunnel.get("tunnel_url") or tunnel.get("local_url") or "http://127.0.0.1:7700"
+    auto_clean_enabled = bool(auto_clean.get("auto_deep_clean_enabled", True))
+    auto_clean_hour = int(auto_clean.get("auto_deep_clean_hour", 4))
+    last_clean_str = auto_clean.get("last_auto_clean_at") or "Never"
+    if auto_clean.get("last_auto_clean_at"):
+        last_clean_str = f"{last_clean_str} ({auto_clean.get('last_auto_clean_freed_mb', 0)} MB)"
 
     bkk_line = f"`{weather['temp_c']:.1f}C` (Hum `{weather['humidity']:.0f}%`)" if weather.get("ok") else "`Offline`"
     btc_line = (
@@ -814,11 +844,11 @@ def build_deck_payload(lang: str | None = None) -> dict:
                 "inline": True,
             },
             {
-                "name": tr(mode, "Fleet & Uptime", "บอท MuMu และเวลาทำงาน"),
+                "name": tr(mode, "Fleet & Maintenance", "บอท MuMu และบำรุงรักษา"),
                 "value": (
-                    f"MuMu Drones: `{mumu.get('count', 0)}` online\n"
-                    f"Session Boosts: `{summary.get('session_boosts', 0)}`\n"
-                    f"Uptime: `{_format_uptime(summary.get('uptime_seconds', 0))}`"
+                    f"MuMu Drones: `{mumu.get('count', 0)}` online | Boosts: `{summary.get('session_boosts', 0)}`\n"
+                    f"Auto Clean: `{'ON' if auto_clean_enabled else 'OFF'}` (`{auto_clean_hour:02d}:00`)\n"
+                    f"Last Clean: `{last_clean_str}` | Up: `{_format_uptime(summary.get('uptime_seconds', 0))}`"
                 ),
                 "inline": True,
             },
@@ -835,6 +865,12 @@ def build_deck_payload(lang: str | None = None) -> dict:
         "timestamp": _utc_iso_now(),
     }
 
+    auto_btn_label = tr(
+        mode,
+        f"Auto Clean: {'ON' if auto_clean_enabled else 'OFF'}",
+        f"ล้างอัตโนมัติ: {'เปิด' if auto_clean_enabled else 'ปิด'}",
+    )
+
     components = [
         {
             "type": 1,
@@ -849,10 +885,15 @@ def build_deck_payload(lang: str | None = None) -> dict:
         {
             "type": 1,
             "components": [
-                {"type": 2, "style": 2, "label": tr(mode, "Snap MuMu", "แคปจอ MuMu"), "custom_id": "cmd:screenshot_mumu"},
-                {"type": 2, "style": 2, "label": tr(mode, "Snap Host", "แคปจอคอม"), "custom_id": "cmd:screenshot_host"},
                 {"type": 2, "style": 2, "label": tr(mode, "Deep Clean", "ล้างขยะ"), "custom_id": "cmd:clean"},
+                {"type": 2, "style": 2, "label": tr(mode, "Compact VMs", "บีบอัด VDI"), "custom_id": "cmd:compact_vdi"},
                 {"type": 2, "style": 2, "label": tr(mode, "Trim VM Cache", "ลดขนาด VM"), "custom_id": "cmd:trim_vm"},
+                {
+                    "type": 2,
+                    "style": 3 if auto_clean_enabled else 2,
+                    "label": auto_btn_label[:80],
+                    "custom_id": "cmd:toggle_auto_clean",
+                },
                 {"type": 2, "style": 4, "label": tr(mode, "Purge Alerts", "ล้างแจ้งเตือน"), "custom_id": "cmd:purge"},
             ],
         },
@@ -869,8 +910,15 @@ def build_deck_payload(lang: str | None = None) -> dict:
         {
             "type": 1,
             "components": [
+                {"type": 2, "style": 2, "label": tr(mode, "Snap MuMu", "แคปจอ MuMu"), "custom_id": "cmd:screenshot_mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Snap Host", "แคปจอคอม"), "custom_id": "cmd:screenshot_host"},
                 {"type": 2, "style": 2, "label": "Command Wall", "custom_id": "cmd:wall"},
                 {"type": 2, "style": 3, "label": tr(mode, "Sync All Intel", "อัปเดตข่าวทุกห้อง"), "custom_id": "cmd:sync_intel"},
+            ],
+        },
+        {
+            "type": 1,
+            "components": [
                 {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:bridge"},
                 {"type": 2, "style": 2, "label": tr(mode, "Refresh Bridge", "รีเฟรชแผง"), "custom_id": "cmd:deck_refresh"},
             ],
@@ -2232,25 +2280,129 @@ async def _execute_command_action(
         return {"embeds": [embed]}, None
 
     if action == "clean":
-        res = await asyncio.to_thread(deep_clean_execute)
-        details = res.get("details", [])
-        summary_lines = [
-            f"- {d['name']}: `{d['freed_mb']} MB` ({d['deleted']} files)"
-            for d in details
-            if d.get("deleted", 0) > 0 or d.get("freed_mb", 0) > 0
-        ]
+        clean_mode = str(opts.get("mode") or "execute").strip().lower()
+        if clean_mode == "preview":
+            preview = await asyncio.to_thread(deep_clean_preview)
+            enabled_items = [p for p in preview if p.get("enabled", True)]
+            total_mb = round(sum(float(p.get("size_mb", 0.0)) for p in enabled_items), 1)
+            total_files = sum(int(p.get("file_count", 0)) for p in enabled_items)
+            lines = [
+                f"- `[{p.get('source', 'builtin')}]` **{p['name']}**: `{p['size_mb']} MB` ({p['file_count']} files)"
+                + ("" if p.get("enabled", True) else " `[DISABLED]`")
+                for p in preview[:20]
+            ]
+            embed = {
+                "title": f"[PREVIEW] {tr(lang, 'Hull Deep Clean Scan', 'ผลสแกนไฟล์ขยะและแคชในระบบ')}",
+                "description": "\n".join(lines)[:3900]
+                if lines
+                else tr(lang, "No cleanable cache targets detected.", "ไม่พบแคชที่ต้องล้างในขณะนี้"),
+                "color": 0x06B6D4,
+                "fields": [
+                    {"name": tr(lang, "Reclaimable", "พื้นที่ที่ล้างได้"), "value": f"`{total_mb} MB`", "inline": True},
+                    {"name": tr(lang, "Files", "จำนวนไฟล์"), "value": f"`{total_files}`", "inline": True},
+                    {"name": tr(lang, "Targets", "จำนวนรายการ"), "value": f"`{len(preview)}`", "inline": True},
+                ],
+                "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
+                "timestamp": _utc_iso_now(),
+            }
+            return {"embeds": [embed]}, None
+
+        if clean_mode == "compact_vdi":
+            action = "compact_vdi"
+        elif clean_mode in ("auto_on", "auto_off"):
+            desired = clean_mode == "auto_on"
+            st = await asyncio.to_thread(update_auto_clean_config, {"auto_deep_clean_enabled": desired})
+            asyncio.create_task(refresh_bridge_console())
+            state_en = "ON" if desired else "OFF"
+            state_th = "เปิด" if desired else "ปิด"
+            embed = {
+                "title": f"[OK] {tr(lang, f'Auto Deep Clean: {state_en}', f'ตั้งค่าล้างขยะอัตโนมัติ: {state_th}')}",
+                "description": (
+                    f"Schedule: `{int(st.get('auto_deep_clean_hour', 4)):02d}:00` | "
+                    f"Threshold: `{st.get('auto_deep_clean_threshold_mb', 500)} MB` | "
+                    f"VDI Compact: `{'ON' if st.get('vdi_auto_compact_enabled', True) else 'OFF'}`"
+                ),
+                "color": 0x10B981 if desired else 0xF59E0B,
+                "timestamp": _utc_iso_now(),
+            }
+            return {"embeds": [embed]}, None
+        else:
+            res = await asyncio.to_thread(deep_clean_execute, None, "discord")
+            details = res.get("details", [])
+            summary_lines = [
+                f"- {d['name']}: `{d['freed_mb']} MB` ({d['deleted']} files)"
+                for d in details
+                if d.get("deleted", 0) > 0 or d.get("freed_mb", 0) > 0
+            ]
+            embed = {
+                "title": f"[OK] {tr(lang, 'Hull Deep Clean Completed', 'ล้างไฟล์ขยะทั้งระบบเสร็จสิ้น')}",
+                "description": "\n".join(summary_lines)[:3900]
+                if summary_lines
+                else tr(lang, "All tracked cache targets are already clean.", "แคชทั้งหมดสะอาดอยู่แล้ว"),
+                "color": 0x10B981,
+                "fields": [
+                    {"name": tr(lang, "Total Freed", "พื้นที่ที่ได้คืน"), "value": f"`{res.get('total_freed_mb', 0)} MB`", "inline": True},
+                    {"name": tr(lang, "Files Deleted", "จำนวนไฟล์ที่ลบ"), "value": f"`{res.get('total_deleted', 0)}`", "inline": True},
+                ],
+                "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
+                "timestamp": _utc_iso_now(),
+            }
+            return {"embeds": [embed]}, None
+
+    if action == "compact_vdi":
+        vdi_res = await asyncio.to_thread(compact_stopped_mumu_vdis, "discord")
+        vm_lines: list[str] = []
+        for vm in vdi_res.get("vms", []):
+            st = vm.get("status")
+            if st == "compacted":
+                vm_lines.append(
+                    f"- **{vm['vm_name']}**: `{vm['before_mb']} -> {vm['after_mb']} MB` (freed `{vm['freed_mb']} MB`)"
+                )
+            elif st == "skipped_running":
+                vm_lines.append(f"- **{vm['vm_name']}**: `Skipped (Running)` (`{vm['before_mb']} MB`)")
+            else:
+                vm_lines.append(f"- **{vm['vm_name']}**: `Error` ({vm.get('error', 'unknown')})")
+        ok = bool(vdi_res.get("ok"))
         embed = {
-            "title": f"[OK] {tr(lang, 'Hull Deep Clean Completed', 'ล้างไฟล์ขยะทั้งระบบเสร็จสิ้น')}",
-            "description": "\n".join(summary_lines) if summary_lines else tr(lang, "All tracked cache targets are already clean.", "แคชทั้งหมดสะอาดอยู่แล้ว"),
-            "color": 0x10B981,
+            "title": (
+                f"[OK] {tr(lang, 'Offline VDI Compact Completed', 'บีบอัดดิสก์ VDI จอที่ปิดอยู่เสร็จสิ้น')}"
+                if ok
+                else f"[WARN] {tr(lang, 'VDI Compact Warning', 'การบีบอัด VDI พบปัญหา')}"
+            ),
+            "description": "\n".join(vm_lines)[:3900] if vm_lines else str(vdi_res.get("error") or "No VM disks found."),
+            "color": 0x10B981 if ok else 0xF59E0B,
             "fields": [
-                {"name": tr(lang, "Total Freed", "พื้นที่ที่ได้คืน"), "value": f"`{res.get('total_freed_mb', 0)} MB`", "inline": True},
-                {"name": tr(lang, "Files Deleted", "จำนวนไฟล์ที่ลบ"), "value": f"`{res.get('total_deleted', 0)}`", "inline": True},
+                {"name": tr(lang, "Total Freed", "พื้นที่ที่ได้คืน"), "value": f"`{vdi_res.get('total_freed_mb', 0)} MB`", "inline": True},
+                {"name": tr(lang, "Compacted", "บีบอัดสำเร็จ"), "value": f"`{vdi_res.get('compacted_count', 0)}`", "inline": True},
+                {"name": tr(lang, "Running Skipped", "ข้ามจอที่เปิดอยู่"), "value": f"`{vdi_res.get('skipped_count', 0)}`", "inline": True},
             ],
             "footer": {"text": f"Genesis Motherboard | Host: {socket.gethostname()}"},
             "timestamp": _utc_iso_now(),
         }
         return {"embeds": [embed]}, None
+
+    if action == "toggle_auto_clean":
+        cur_st = await asyncio.to_thread(get_auto_clean_status)
+        next_enabled = not bool(cur_st.get("auto_deep_clean_enabled", True))
+        new_st = await asyncio.to_thread(update_auto_clean_config, {"auto_deep_clean_enabled": next_enabled})
+        if opts.get("inline_board_update"):
+            return await asyncio.to_thread(build_deck_payload, lang), None
+        asyncio.create_task(refresh_bridge_console())
+        state_en = "ON" if next_enabled else "OFF"
+        state_th = "เปิด" if next_enabled else "ปิด"
+        return {
+            "embeds": [
+                {
+                    "title": f"[OK] {tr(lang, f'Auto Deep Clean: {state_en}', f'สลับล้างขยะอัตโนมัติ: {state_th}')}",
+                    "description": (
+                        f"Schedule: `{int(new_st.get('auto_deep_clean_hour', 4)):02d}:00` | "
+                        f"Threshold: `{new_st.get('auto_deep_clean_threshold_mb', 500)} MB`"
+                    ),
+                    "color": 0x10B981 if next_enabled else 0xF59E0B,
+                    "timestamp": _utc_iso_now(),
+                }
+            ]
+        }, None
 
     if action == "trim_vm":
         vm_list = await asyncio.to_thread(get_vm_disk_status)
@@ -2657,8 +2809,10 @@ class DiscordBotService:
                 opts["from_button"] = True
                 if action in ("deck_refresh", "wall_refresh") or action.startswith("lang_cycle:"):
                     ack_type = 6
-                elif action in ("bridge", "deck") and channel_id == str(state.get("command_deck_channel_id", "")) and clicked_msg == board_msg_id:
+                elif action in ("bridge", "deck", "toggle_auto_clean") and channel_id == str(state.get("command_deck_channel_id", "")) and clicked_msg == board_msg_id:
                     ack_type = 6
+                    if action == "toggle_auto_clean":
+                        opts["inline_board_update"] = True
                 elif action == "wall" and channel_id == str(state.get("command_wall_channel_id", "")) and clicked_msg == board_msg_id:
                     ack_type = 6
                 elif action in VALID_FEED_CATEGORIES:

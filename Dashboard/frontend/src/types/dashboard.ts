@@ -295,6 +295,8 @@ export interface AutoBoostConfig {
   next_boost: NextBoostInfo | null;
 }
 
+export type DeepCleanSource = 'builtin' | 'discovered' | 'custom';
+
 export interface DeepCleanPreviewItem {
   name: string;
   category: string;
@@ -303,12 +305,89 @@ export interface DeepCleanPreviewItem {
   file_count: number;
   size_mb: number;
   requires_service_stop: string | null;
+  source?: DeepCleanSource;
+  enabled?: boolean;
+  max_age_days?: number | null;
 }
 
 export interface DeepCleanExecuteResult {
   total_freed_mb: number;
   total_deleted: number;
-  details: Array<{ name: string; deleted: number; freed_mb: number }>;
+  trigger?: string;
+  timestamp?: string;
+  details: Array<{
+    name: string;
+    deleted: number;
+    freed_mb: number;
+    source?: DeepCleanSource;
+  }>;
+}
+
+export interface CustomCleanTarget {
+  name: string;
+  category: string;
+  path: string;
+  file_pattern?: string | null;
+  max_age_days?: number | null;
+  enabled: boolean;
+}
+
+export interface VdiCompactVmResult {
+  vm_name: string;
+  status: 'compacted' | 'skipped_running' | 'error' | string;
+  before_mb: number;
+  after_mb: number;
+  freed_mb: number;
+  error?: string;
+}
+
+export interface VdiCompactResult {
+  ok: boolean;
+  trigger?: string;
+  timestamp?: string;
+  total_freed_mb: number;
+  compacted_count: number;
+  skipped_count: number;
+  error_count: number;
+  vms: VdiCompactVmResult[];
+  error?: string;
+}
+
+export interface AutoCleanStatus {
+  auto_deep_clean_enabled: boolean;
+  auto_deep_clean_hour: number;
+  auto_deep_clean_threshold_mb: number;
+  auto_deep_clean_min_free_gb: number;
+  auto_deep_clean_cooldown_hours: number;
+  auto_deep_clean_notify_min_mb: number;
+  auto_discovery_enabled: boolean;
+  auto_discovery_min_mb: number;
+  auto_discovery_excludes: string[];
+  disabled_clean_targets: string[];
+  custom_clean_targets: CustomCleanTarget[];
+  vdi_auto_compact_enabled: boolean;
+  last_auto_clean_at: string | null;
+  last_auto_clean_freed_mb: number;
+  last_trigger: string | null;
+  next_scheduled_run: string | null;
+  last_vdi_compact_at: string | null;
+  last_vdi_compact_result: VdiCompactResult | null;
+  is_cleaning?: boolean;
+  is_compacting_vdi?: boolean;
+}
+
+export interface AutoCleanConfigUpdatePayload {
+  auto_deep_clean_enabled?: boolean;
+  auto_deep_clean_hour?: number;
+  auto_deep_clean_threshold_mb?: number;
+  auto_deep_clean_min_free_gb?: number;
+  auto_deep_clean_cooldown_hours?: number;
+  auto_deep_clean_notify_min_mb?: number;
+  auto_discovery_enabled?: boolean;
+  auto_discovery_min_mb?: number;
+  auto_discovery_excludes?: string[];
+  disabled_clean_targets?: string[];
+  vdi_auto_compact_enabled?: boolean;
 }
 
 export interface NetworkObservatory {
@@ -415,7 +494,8 @@ export type AlertToggleKey =
   | 'notify_on_vm_disk_critical'
   | 'notify_on_drift'
   | 'notify_on_tunnel_change'
-  | 'notify_on_net_outage';
+  | 'notify_on_net_outage'
+  | 'notify_on_auto_clean';
 
 export interface AlertsStatus {
   discord_webhook_configured: boolean;
@@ -439,6 +519,7 @@ export interface AlertsStatus {
   notify_on_drift: boolean;
   notify_on_tunnel_change: boolean;
   notify_on_net_outage: boolean;
+  notify_on_auto_clean: boolean;
   queue_size: number;
   delivered_count: number;
   failed_count: number;
@@ -498,6 +579,7 @@ export interface AlertsConfigUpdatePayload {
   notify_on_drift?: boolean;
   notify_on_tunnel_change?: boolean;
   notify_on_net_outage?: boolean;
+  notify_on_auto_clean?: boolean;
 }
 
 export type TunnelStatusCode =
@@ -570,6 +652,18 @@ export interface ClientConfig {
     standby_purge_min_available_gb: number;
     standby_purge_min_standby_gb: number;
     standby_purge_min_free_gb: number;
+    auto_deep_clean_enabled?: boolean;
+    auto_deep_clean_hour?: number;
+    auto_deep_clean_threshold_mb?: number;
+    auto_deep_clean_min_free_gb?: number;
+    auto_deep_clean_cooldown_hours?: number;
+    auto_deep_clean_notify_min_mb?: number;
+    auto_discovery_enabled?: boolean;
+    auto_discovery_min_mb?: number;
+    auto_discovery_excludes?: string[];
+    disabled_clean_targets?: string[];
+    custom_clean_targets?: CustomCleanTarget[];
+    vdi_auto_compact_enabled?: boolean;
   };
   alerts: {
     discord_webhook_url: string;
@@ -596,6 +690,7 @@ export interface ClientConfig {
     notify_on_drift: boolean;
     notify_on_tunnel_change: boolean;
     notify_on_net_outage: boolean;
+    notify_on_auto_clean: boolean;
   };
   tunnel: {
     provider: string;

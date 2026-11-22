@@ -448,6 +448,40 @@ export function App() {
                 sendCommand('deep_clean_execute');
               })
             }
+            onCompactVdi={() =>
+              requireAuthGuard(() => {
+                const store = useDashboardStore.getState();
+                store.setIsCompactingVdi(true);
+                store.setPendingOp('deepclean:compact_vdi');
+                sendCommand('deep_clean_compact_vdi');
+              })
+            }
+            onUpdateDeepCleanConfig={(updates) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('deepclean:config');
+                sendCommand('deep_clean_config_update', { config: updates });
+                if (
+                  updates.auto_discovery_excludes !== undefined ||
+                  updates.auto_discovery_enabled !== undefined
+                ) {
+                  sendCommand('deep_clean_preview');
+                }
+              })
+            }
+            onAddCustomCleanTarget={(payload) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('deepclean:add_target');
+                sendCommand('deep_clean_add_target', payload);
+                sendCommand('deep_clean_preview');
+              })
+            }
+            onRemoveCustomCleanTarget={(name) =>
+              requireAuthGuard(() => {
+                useDashboardStore.getState().setPendingOp('deepclean:remove_target');
+                sendCommand('deep_clean_remove_target', { name });
+                sendCommand('deep_clean_preview');
+              })
+            }
             onRefreshDefender={() => {
               useDashboardStore.getState().setPendingOp('defender:refresh');
               sendCommand('defender_status');

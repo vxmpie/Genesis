@@ -30,14 +30,19 @@ from backend.core.config import (
 from backend.core.events import add_event, get_recent_events
 from backend.services.discord_notifier import notifier, purge_discord_channel_messages
 from backend.services.maintenance import (
+    add_custom_clean_target,
     check_hardening_drift,
+    compact_stopped_mumu_vdis,
     deep_clean_execute,
     deep_clean_preview,
+    get_auto_clean_status,
     get_defender_status,
     get_growth_data,
     get_vm_disk_status,
     ram_boost,
+    remove_custom_clean_target,
     trim_vm_caches,
+    update_auto_clean_config,
 )
 from backend.services.mumu_monitor import (
     add_game_preset,
@@ -504,12 +509,82 @@ async def api_deep_clean_preview():
     return JSONResponse(await asyncio.to_thread(deep_clean_preview))
 
 
+@router.get("/api/deep-clean/status")
+async def api_deep_clean_status():
+    return JSONResponse(await asyncio.to_thread(get_auto_clean_status))
+
+
 @router.post("/api/deep-clean/execute")
 async def api_deep_clean_execute(request: Request):
     auth_err = _require_auth(request)
     if auth_err:
         return auth_err
-    result = await asyncio.to_thread(deep_clean_execute)
+    targets: list[str] | None = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and isinstance(body.get("targets"), list):
+            targets = [str(t) for t in body["targets"]]
+    except Exception:
+        pass
+    result = await asyncio.to_thread(deep_clean_execute, targets, "manual")
+    status = await asyncio.to_thread(get_auto_clean_status)
+    await broadcast_event({"type": "deep_clean_result", "data": result, "result": result})
+    await broadcast_event({"type": "auto_clean_status", "data": status})
+    return JSONResponse(result)
+
+
+@router.post("/api/deep-clean/config")
+async def api_deep_clean_config(request: Request, payload: dict):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    try:
+        status = await asyncio.to_thread(update_auto_clean_config, payload)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    masked_cfg = mask_config_for_client(CONFIG)
+    await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+    return JSONResponse({"ok": True, "status": status, "config": masked_cfg})
+
+
+@router.post("/api/deep-clean/custom-targets")
+async def api_deep_clean_add_target(request: Request, payload: dict):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    try:
+        target = await asyncio.to_thread(add_custom_clean_target, payload)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    status = await asyncio.to_thread(get_auto_clean_status)
+    masked_cfg = mask_config_for_client(CONFIG)
+    await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+    return JSONResponse({"ok": True, "target": target, "status": status, "config": masked_cfg})
+
+
+@router.delete("/api/deep-clean/custom-targets/{name}")
+async def api_deep_clean_delete_target(request: Request, name: str):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    removed = await asyncio.to_thread(remove_custom_clean_target, name)
+    if not removed:
+        return JSONResponse({"error": f"Custom target '{name}' not found"}, status_code=404)
+    status = await asyncio.to_thread(get_auto_clean_status)
+    masked_cfg = mask_config_for_client(CONFIG)
+    await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+    return JSONResponse({"ok": True, "deleted": name, "status": status, "config": masked_cfg})
+
+
+@router.post("/api/deep-clean/compact-vdi")
+async def api_deep_clean_compact_vdi(request: Request):
+    auth_err = _require_auth(request)
+    if auth_err:
+        return auth_err
+    result = await asyncio.to_thread(compact_stopped_mumu_vdis, "manual")
+    status = await asyncio.to_thread(get_auto_clean_status)
+    await broadcast_event({"type": "vdi_compact_result", "data": result})
+    await broadcast_event({"type": "auto_clean_status", "data": status})
     return JSONResponse(result)
 
 

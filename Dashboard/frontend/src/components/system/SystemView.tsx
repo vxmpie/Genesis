@@ -1,4 +1,5 @@
 import React from 'react';
+import type { AutoCleanConfigUpdatePayload } from '../../types/dashboard';
 import { AutoBoostCard } from './AutoBoostCard';
 import { KernelTuningCard } from './KernelTuningCard';
 import { HardeningCard } from './HardeningCard';
@@ -21,6 +22,15 @@ export interface SystemViewProps {
   onRefreshHardening: () => void;
   onScanDeepClean: () => void;
   onExecuteDeepClean: () => void;
+  onCompactVdi: () => void;
+  onUpdateDeepCleanConfig: (updates: AutoCleanConfigUpdatePayload) => void;
+  onAddCustomCleanTarget: (payload: {
+    name: string;
+    category?: string;
+    path: string;
+    max_age_days?: number | null;
+  }) => void;
+  onRemoveCustomCleanTarget: (name: string) => void;
   onRefreshDefender: () => void;
   onQuickScanDefender: () => void;
   onTrimProcess: (pid: number) => void;
@@ -42,6 +52,10 @@ export const SystemView: React.FC<SystemViewProps> = ({
   onRefreshHardening,
   onScanDeepClean,
   onExecuteDeepClean,
+  onCompactVdi,
+  onUpdateDeepCleanConfig,
+  onAddCustomCleanTarget,
+  onRemoveCustomCleanTarget,
   onRefreshDefender,
   onQuickScanDefender,
   onTrimProcess,
@@ -80,6 +94,10 @@ export const SystemView: React.FC<SystemViewProps> = ({
       <DeepCleanCard
         onScan={onScanDeepClean}
         onExecuteClean={onExecuteDeepClean}
+        onCompactVdi={onCompactVdi}
+        onUpdateConfig={onUpdateDeepCleanConfig}
+        onAddCustomTarget={onAddCustomCleanTarget}
+        onRemoveCustomTarget={onRemoveCustomCleanTarget}
       />
 
       <TopProcsCard

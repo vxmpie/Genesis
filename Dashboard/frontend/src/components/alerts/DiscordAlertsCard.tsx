@@ -86,6 +86,11 @@ const OPS_TOGGLES: readonly ToggleMeta[] = [
     label: 'Core Startup',
     desc: 'Dispatch online status & ingress URL at boot',
   },
+  {
+    key: 'notify_on_auto_clean',
+    label: 'Auto Deep Clean',
+    desc: 'Scheduled or threshold cleanup when >=50 MB reclaimed',
+  },
 ];
 
 const COOLDOWN_PRESETS = [15, 60, 180, 300] as const;
@@ -248,6 +253,7 @@ const DiscordAlertsForm: React.FC<DiscordAlertsCardProps> = ({
       notify_on_drift: getToggleValue('notify_on_drift'),
       notify_on_tunnel_change: getToggleValue('notify_on_tunnel_change'),
       notify_on_net_outage: getToggleValue('notify_on_net_outage'),
+      notify_on_auto_clean: getToggleValue('notify_on_auto_clean'),
     };
 
     if (trimmedWebhook) payload.discord_webhook_url = trimmedWebhook;

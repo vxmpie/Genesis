@@ -30,6 +30,7 @@ EVENT_ICON_SHORTCODES: dict[str, str] = {
     "vm_disk_critical": ":warning:",
     "drift": ":shield:",
     "net_outage": ":white_check_mark:",
+    "auto_clean": ":broom:",
     "test": ":wrench:",
 }
 
@@ -42,6 +43,7 @@ EVENT_TOGGLE_MAP: dict[str, str] = {
     "drift": "notify_on_drift",
     "tunnel_change": "notify_on_tunnel_change",
     "net_outage": "notify_on_net_outage",
+    "auto_clean": "notify_on_auto_clean",
 }
 
 

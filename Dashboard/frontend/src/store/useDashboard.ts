@@ -5,6 +5,7 @@ import type {
   AlertsStatus,
   AlertTestResult,
   AutoBoostConfig,
+  AutoCleanStatus,
   AutoRejoinUpdateResult,
   ChartHistory,
   ClientConfig,
@@ -28,6 +29,7 @@ import type {
   ToastMessage,
   TopProcess,
   TunnelStatus,
+  VdiCompactResult,
   VmDiskItem,
   WorkspaceView,
 } from '../types/dashboard';
@@ -186,9 +188,11 @@ interface DashboardState {
   chartHistory: ChartHistory;
   chartZoom: 5 | 15 | 30;
   deepCleanPreview: DeepCleanPreviewItem[];
+  autoCleanStatus: AutoCleanStatus | null;
 
   isDeepCleaning: boolean;
   isScanningClean: boolean;
+  isCompactingVdi: boolean;
   isBoosting: boolean;
   isTestingAlert: boolean;
   isSavingAlerts: boolean;
@@ -196,6 +200,7 @@ interface DashboardState {
   isRestartingTunnel: boolean;
   pendingOps: Record<string, number>;
   lastDeepCleanResult: DeepCleanExecuteResult | null;
+  lastVdiCompactResult: VdiCompactResult | null;
   lastAlertTestResult: AlertTestResult | null;
   lastAlertPurgeResult: AlertsPurgeResult | null;
   lastAlertsSavedAt: number | null;
@@ -229,6 +234,7 @@ interface DashboardState {
   setTunnel: (tunnel: TunnelStatus) => void;
   setChartZoom: (zoom: 5 | 15 | 30) => void;
   setDeepCleanPreview: (items: DeepCleanPreviewItem[]) => void;
+  setAutoCleanStatus: (status: AutoCleanStatus) => void;
   updateAutoBoost: (partial: Partial<AutoBoostConfig>) => void;
   setTimerResolution: (t: TimerResolutionInfo) => void;
   setPcoreAffinity: (a: CoreAffinityInfo) => void;
@@ -237,6 +243,7 @@ interface DashboardState {
   // Loading Flags
   setIsDeepCleaning: (v: boolean) => void;
   setIsScanningClean: (v: boolean) => void;
+  setIsCompactingVdi: (v: boolean) => void;
   setIsBoosting: (v: boolean) => void;
   setIsTestingAlert: (v: boolean) => void;
   setIsSavingAlerts: (v: boolean) => void;
@@ -247,6 +254,7 @@ interface DashboardState {
   clearPendingPrefix: (prefix: string) => void;
   pruneStalePendingOps: (maxAgeMs?: number) => void;
   setLastDeepCleanResult: (res: DeepCleanExecuteResult | null) => void;
+  setLastVdiCompactResult: (res: VdiCompactResult | null) => void;
   applyAutoRejoinUpdate: (update: AutoRejoinUpdateResult) => void;
   applyGamePresetsUpdate: (presets: GamePreset[], config?: ClientConfig) => void;
   applyInstanceGameUpdate: (
@@ -317,9 +325,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
   chartZoom: 30,
   deepCleanPreview: [],
+  autoCleanStatus: null,
 
   isDeepCleaning: false,
   isScanningClean: false,
+  isCompactingVdi: false,
   isBoosting: false,
   isTestingAlert: false,
   isSavingAlerts: false,
@@ -327,6 +337,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   isRestartingTunnel: false,
   pendingOps: {},
   lastDeepCleanResult: null,
+  lastVdiCompactResult: null,
   lastAlertTestResult: null,
   lastAlertPurgeResult: null,
   lastAlertsSavedAt: null,
@@ -419,6 +430,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setTunnel: (tunnel) => set({ tunnel }),
   setChartZoom: (chartZoom) => set({ chartZoom }),
   setDeepCleanPreview: (deepCleanPreview) => set({ deepCleanPreview }),
+  setAutoCleanStatus: (autoCleanStatus) => set({ autoCleanStatus }),
 
   updateAutoBoost: (partial) =>
     set((s) => {
@@ -440,6 +452,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setIsDeepCleaning: (isDeepCleaning) => set({ isDeepCleaning }),
   setIsScanningClean: (isScanningClean) => set({ isScanningClean }),
+  setIsCompactingVdi: (isCompactingVdi) => set({ isCompactingVdi }),
   setIsBoosting: (isBoosting) => set({ isBoosting }),
   setIsTestingAlert: (isTestingAlert) => set({ isTestingAlert }),
   setIsSavingAlerts: (isSavingAlerts) => set({ isSavingAlerts }),
@@ -479,6 +492,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       return changed ? { pendingOps: next } : s;
     }),
   setLastDeepCleanResult: (lastDeepCleanResult) => set({ lastDeepCleanResult }),
+  setLastVdiCompactResult: (lastVdiCompactResult) => set({ lastVdiCompactResult }),
   applyAutoRejoinUpdate: (update) =>
     set((s) => {
       const nextConfig = s.config
@@ -650,6 +664,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       pendingOps: {},
       isDeepCleaning: false,
       isScanningClean: false,
+      isCompactingVdi: false,
       isBoosting: false,
       isTestingAlert: false,
       isSavingAlerts: false,
@@ -670,6 +685,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
             pendingOps: {},
             isDeepCleaning: false,
             isScanningClean: false,
+            isCompactingVdi: false,
             isBoosting: false,
             isTestingAlert: false,
             isSavingAlerts: false,
@@ -691,6 +707,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       pendingOps: {},
       isDeepCleaning: false,
       isScanningClean: false,
+      isCompactingVdi: false,
       isBoosting: false,
       isTestingAlert: false,
       isSavingAlerts: false,
@@ -779,6 +796,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         timerResolution: data.timer_resolution ?? s.timerResolution,
         pcoreAffinity: data.pcore_affinity ?? s.pcoreAffinity,
         shaderCache: data.shader_cache ?? s.shaderCache,
+        autoCleanStatus: data.auto_clean_status ?? s.autoCleanStatus,
+        lastVdiCompactResult:
+          data.auto_clean_status?.last_vdi_compact_result ?? s.lastVdiCompactResult,
         alertsStatus: data.alerts_status ?? s.alertsStatus,
         alertsHistory: Array.isArray(data.alerts_history) ? data.alerts_history : s.alertsHistory,
         tunnel: data.tunnel ?? s.tunnel,

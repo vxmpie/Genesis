@@ -158,7 +158,14 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
         self.assertIn("แผงควบคุมหลักประจำยาน", deck_dual["embeds"][0]["title"])
         self.assertEqual(deck_th["embeds"][0]["title"], "[GENESIS MOTHERBOARD] แผงควบคุมหลักประจำยาน")
         self.assertEqual(wall_en["embeds"][0]["title"], "[COMMAND WALL] GENESIS MOTHERBOARD MASTER DIRECTORY")
-        self.assertEqual(len(deck_dual["components"]), 4)
+        self.assertEqual(len(deck_dual["components"]), 5)
+        deck_custom_ids = {
+            btn.get("custom_id")
+            for row in deck_dual["components"]
+            for btn in row.get("components", [])
+        }
+        self.assertIn("cmd:compact_vdi", deck_custom_ids)
+        self.assertIn("cmd:toggle_auto_clean", deck_custom_ids)
         self.assertEqual(len(hud), 4)
 
     def test_dynamic_feeds_lang_cycle_and_custom_commands_encapsulation(self) -> None:

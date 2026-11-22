@@ -14,17 +14,22 @@ from backend.core.config import (
 from backend.core.events import add_event, get_recent_events
 from backend.services.discord_notifier import notifier, purge_discord_channel_messages
 from backend.services.maintenance import (
+    add_custom_clean_target,
     check_hardening_drift,
+    compact_stopped_mumu_vdis,
     deep_clean_execute,
     deep_clean_preview,
+    get_auto_clean_status,
     get_cached_defender_status,
     get_cached_drift_result,
     get_defender_status,
     get_growth_data,
     get_vm_disk_status,
     ram_boost,
+    remove_custom_clean_target,
     run_quick_scan,
     trim_vm_caches,
+    update_auto_clean_config,
 )
 from backend.services.mumu_monitor import (
     add_game_preset,
@@ -63,6 +68,7 @@ from backend.services.win32_ops import (
 READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "deep_clean_preview",
+        "deep_clean_status",
         "scan_deep_clean",
         "scan_targets",
         "defender_status",
@@ -129,12 +135,13 @@ async def broadcast_event(data: dict) -> None:
 
 
 async def _build_init_payload(is_authed: bool) -> dict:
-    observatory, summary, timer_res, pcore_aff, shader_cache = await asyncio.gather(
+    observatory, summary, timer_res, pcore_aff, shader_cache, auto_clean_status = await asyncio.gather(
         asyncio.to_thread(get_network_observatory),
         asyncio.to_thread(get_session_summary),
         asyncio.to_thread(get_timer_resolution_status),
         asyncio.to_thread(get_affinity_status),
         asyncio.to_thread(scan_and_flush_shader_cache, True),
+        asyncio.to_thread(get_auto_clean_status),
     )
     return {
         "type": "init",
@@ -151,6 +158,7 @@ async def _build_init_payload(is_authed: bool) -> dict:
         "timer_resolution": timer_res,
         "pcore_affinity": pcore_aff,
         "shader_cache": shader_cache,
+        "auto_clean_status": auto_clean_status,
         "chart_history": get_chart_history(),
         "alerts_status": notifier.get_status(),
         "alerts_history": notifier.get_history(),
@@ -353,8 +361,60 @@ async def handle_ws_command(ws: WebSocket, data: dict) -> None:
 
     elif cmd in ("deep_clean_execute", "clean_all"):
         targets = data.get("targets")
-        result = await asyncio.to_thread(deep_clean_execute, targets)
+        result = await asyncio.to_thread(deep_clean_execute, targets, "manual")
+        status = await asyncio.to_thread(get_auto_clean_status)
         await manager.send_to(ws, {"type": "deep_clean_result", "data": result, "result": result})
+        await broadcast_event({"type": "auto_clean_status", "data": status})
+
+    elif cmd == "deep_clean_status":
+        status = await asyncio.to_thread(get_auto_clean_status)
+        await manager.send_to(ws, {"type": "auto_clean_status", "data": status})
+
+    elif cmd == "deep_clean_config_update":
+        updates = data.get("config") if isinstance(data.get("config"), dict) else data
+        try:
+            status = await asyncio.to_thread(update_auto_clean_config, updates)
+            masked_cfg = mask_config_for_client(CONFIG)
+            await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+            await manager.send_to(
+                ws,
+                {"type": "deep_clean_config_updated", "data": status, "config": masked_cfg},
+            )
+        except (TypeError, ValueError) as exc:
+            await manager.send_to(ws, {"type": "error", "error": str(exc)})
+
+    elif cmd == "deep_clean_add_target":
+        try:
+            target = await asyncio.to_thread(add_custom_clean_target, data)
+            status = await asyncio.to_thread(get_auto_clean_status)
+            masked_cfg = mask_config_for_client(CONFIG)
+            await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+            await manager.send_to(
+                ws,
+                {"type": "deep_clean_target_added", "target": target, "data": status},
+            )
+        except (TypeError, ValueError) as exc:
+            await manager.send_to(ws, {"type": "error", "error": str(exc)})
+
+    elif cmd == "deep_clean_remove_target":
+        name = str(data.get("name", "") or "").strip()
+        removed = await asyncio.to_thread(remove_custom_clean_target, name)
+        if not removed:
+            await manager.send_to(ws, {"type": "error", "error": f"Custom target '{name}' not found"})
+            return
+        status = await asyncio.to_thread(get_auto_clean_status)
+        masked_cfg = mask_config_for_client(CONFIG)
+        await broadcast_event({"type": "auto_clean_status", "data": status, "config": masked_cfg})
+        await manager.send_to(
+            ws,
+            {"type": "deep_clean_target_removed", "name": name, "data": status},
+        )
+
+    elif cmd == "deep_clean_compact_vdi":
+        result = await asyncio.to_thread(compact_stopped_mumu_vdis, "manual")
+        status = await asyncio.to_thread(get_auto_clean_status)
+        await broadcast_event({"type": "vdi_compact_result", "data": result})
+        await broadcast_event({"type": "auto_clean_status", "data": status})
 
     elif cmd == "vm_disk_refresh":
         vm_data = await asyncio.to_thread(get_vm_disk_status)

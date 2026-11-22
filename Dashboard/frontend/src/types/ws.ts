@@ -5,10 +5,13 @@ import type {
   AlertsStatus,
   AlertTestResult,
   AutoBoostConfig,
+  AutoCleanConfigUpdatePayload,
+  AutoCleanStatus,
   AutoRejoinUpdateResult,
   ChartHistory,
   ClientConfig,
   CoreAffinityInfo,
+  CustomCleanTarget,
   DeepCleanExecuteResult,
   DeepCleanPreviewItem,
   DefenderStatus,
@@ -32,6 +35,7 @@ import type {
   TrimSingleProcessResult,
   TunnelRestartResult,
   TunnelStatus,
+  VdiCompactResult,
   VmDiskItem,
 } from './dashboard';
 
@@ -51,6 +55,7 @@ export interface WsInitMessage {
   timer_resolution: TimerResolutionInfo;
   pcore_affinity: CoreAffinityInfo;
   shader_cache: ShaderCacheInfo;
+  auto_clean_status?: AutoCleanStatus;
   chart_history: ChartHistory;
   alerts_status: AlertsStatus;
   alerts_history: AlertDeliveryEntry[];
@@ -114,6 +119,11 @@ export type WsServerMessage =
       data: DeepCleanExecuteResult;
       result: DeepCleanExecuteResult;
     }
+  | { type: 'auto_clean_status'; data: AutoCleanStatus; config?: ClientConfig }
+  | { type: 'deep_clean_config_updated'; data: AutoCleanStatus; config?: ClientConfig }
+  | { type: 'deep_clean_target_added'; target: CustomCleanTarget; data: AutoCleanStatus }
+  | { type: 'deep_clean_target_removed'; name: string; data: AutoCleanStatus }
+  | { type: 'vdi_compact_result'; data: VdiCompactResult }
   | { type: 'vm_disk_status'; data: VmDiskItem[] }
   | { type: 'vm_trim_result'; port: number; success: boolean }
   | { type: 'hardening_status'; data: HardeningStatus | Record<string, never> }
@@ -164,7 +174,18 @@ export interface WsCommandMap {
   set_boost_interval: { interval_minutes: number };
   update_config: { config: Record<string, unknown> };
   deep_clean_preview: Record<string, never>;
+  deep_clean_status: Record<string, never>;
   deep_clean_execute: { targets?: string[] };
+  deep_clean_config_update: { config: AutoCleanConfigUpdatePayload };
+  deep_clean_add_target: {
+    name: string;
+    category?: string;
+    path: string;
+    file_pattern?: string;
+    max_age_days?: number | null;
+  };
+  deep_clean_remove_target: { name: string };
+  deep_clean_compact_vdi: Record<string, never>;
   vm_disk_refresh: Record<string, never>;
   vm_trim_cache: { port: number };
   check_hardening: Record<string, never>;
@@ -231,6 +252,11 @@ const KNOWN_WS_TYPES: ReadonlySet<string> = new Set([
   'config_updated',
   'deep_clean_preview',
   'deep_clean_result',
+  'auto_clean_status',
+  'deep_clean_config_updated',
+  'deep_clean_target_added',
+  'deep_clean_target_removed',
+  'vdi_compact_result',
   'vm_disk_status',
   'vm_trim_result',
   'hardening_status',

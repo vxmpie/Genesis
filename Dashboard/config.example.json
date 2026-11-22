@@ -52,7 +52,19 @@
     "drift_check_hours": 1,
     "standby_purge_min_available_gb": 4.0,
     "standby_purge_min_standby_gb": 4.0,
-    "standby_purge_min_free_gb": 1.5
+    "standby_purge_min_free_gb": 1.5,
+    "auto_deep_clean_enabled": true,
+    "auto_deep_clean_hour": 4,
+    "auto_deep_clean_threshold_mb": 500,
+    "auto_deep_clean_min_free_gb": 30.0,
+    "auto_deep_clean_cooldown_hours": 6,
+    "auto_deep_clean_notify_min_mb": 50,
+    "auto_discovery_enabled": true,
+    "auto_discovery_min_mb": 20,
+    "auto_discovery_excludes": [],
+    "disabled_clean_targets": [],
+    "custom_clean_targets": [],
+    "vdi_auto_compact_enabled": true
   },
   "alerts": {
     "discord_webhook_url": "",
@@ -72,7 +84,8 @@
     "notify_on_vm_disk_critical": true,
     "notify_on_drift": true,
     "notify_on_tunnel_change": true,
-    "notify_on_net_outage": true
+    "notify_on_net_outage": true,
+    "notify_on_auto_clean": true
   },
   "tunnel": {
     "provider": "ngrok",

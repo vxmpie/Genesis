@@ -148,6 +148,47 @@ export function useWebSocket() {
         );
         break;
       }
+      case 'auto_clean_status':
+        store.clearPendingOp('deepclean:config');
+        store.setAutoCleanStatus(msg.data);
+        if (msg.config) {
+          store.setConfig(msg.config);
+        }
+        if (msg.data.last_vdi_compact_result) {
+          store.setLastVdiCompactResult(msg.data.last_vdi_compact_result);
+        }
+        break;
+      case 'deep_clean_config_updated':
+        store.clearPendingOp('deepclean:config');
+        store.setAutoCleanStatus(msg.data);
+        if (msg.config) {
+          store.setConfig(msg.config);
+        }
+        store.addToast('success', 'Auto Deep Clean configuration updated');
+        break;
+      case 'deep_clean_target_added':
+        store.clearPendingOp('deepclean:add_target');
+        store.setAutoCleanStatus(msg.data);
+        store.addToast('success', `Added custom clean target: ${msg.target.name}`);
+        break;
+      case 'deep_clean_target_removed':
+        store.clearPendingOp('deepclean:remove_target');
+        store.setAutoCleanStatus(msg.data);
+        store.addToast('system', `Removed custom target: ${msg.name}`);
+        break;
+      case 'vdi_compact_result':
+        store.setIsCompactingVdi(false);
+        store.clearPendingOp('deepclean:compact_vdi');
+        store.setLastVdiCompactResult(msg.data);
+        if (msg.data.ok) {
+          store.addToast(
+            'success',
+            `VDI Compact freed ${msg.data.total_freed_mb} MB (${msg.data.compacted_count} compacted, ${msg.data.skipped_count} running skipped)`
+          );
+        } else {
+          store.addToast('error', msg.data.error || 'VDI compact failed');
+        }
+        break;
       case 'vm_disk_status':
         store.clearPendingOp('vmdisk:refresh');
         store.setVmDisk(msg.data);
