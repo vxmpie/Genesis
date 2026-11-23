@@ -408,6 +408,60 @@ class TestDiscordNotifier(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res_periodic["deleted_count"], 2)
             self.assertNotIn(brand_new, deleted_ids)
 
+    async def test_purge_discord_channel_respects_channel_override_and_exclusions(self) -> None:
+        now_sec = 1_795_000_000.0
+
+        def make_snowflake(age_sec: float) -> str:
+            ts_ms = int((now_sec - age_sec) * 1000)
+            return str((ts_ms - DISCORD_EPOCH_MS) << 22)
+
+        pinned_id = make_snowflake(3600)
+        alert_1 = make_snowflake(120)
+        alert_2 = make_snowflake(60)
+        requested_urls: list[str] = []
+        bulk_deleted_ids: list[str] = []
+
+        def fake_bot_http(method: str, url: str, _token: str, payload: dict | None):
+            requested_urls.append(f"{method} {url}")
+            if method == "GET":
+                return 200, {}, json.dumps([
+                    {"id": alert_2, "author": {"bot": True}},
+                    {"id": alert_1, "author": {"bot": True}},
+                    {"id": pinned_id, "author": {"bot": True}},
+                ])
+            if method == "POST" and url.endswith("/bulk-delete"):
+                bulk_deleted_ids.extend(payload.get("messages", []))
+                return 204, {}, ""
+            return 204, {}, ""
+
+        async def no_sleep(_sec: float):
+            return None
+
+        cfg = {
+            "alerts": {
+                **copy.deepcopy(DEFAULT_ALERTS_CONFIG),
+                "discord_bot_token": "FAKE_BOT_TOKEN_FOR_TEST",
+                "discord_channel_id": "111111111111111111",
+            }
+        }
+        with patch("backend.services.discord_notifier.add_event"):
+            res = await purge_discord_channel_messages(
+                limit=50,
+                keep_latest=0,
+                channel_id="222222222222222222",
+                exclude_message_ids={pinned_id},
+                config_provider=lambda: cfg,
+                bot_http_fn=fake_bot_http,
+                clock=lambda: now_sec,
+                sleep_fn=no_sleep,
+            )
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["deleted_count"], 2)
+        self.assertTrue(any("/channels/222222222222222222/messages" in u for u in requested_urls))
+        self.assertIn(alert_1, bulk_deleted_ids)
+        self.assertIn(alert_2, bulk_deleted_ids)
+        self.assertNotIn(pinned_id, bulk_deleted_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -484,6 +484,8 @@ async def purge_discord_channel_messages(
     bot_only: bool = False,
     keep_latest: int = 0,
     min_age_seconds: float = 0.0,
+    channel_id: str | None = None,
+    exclude_message_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     config_provider: Callable[[], dict] | None = None,
     bot_http_fn: Callable[[str, str, str, dict | None], tuple[int, dict[str, str], str]] | None = None,
     clock: Callable[[], float] | None = None,
@@ -492,15 +494,16 @@ async def purge_discord_channel_messages(
     cfg = (config_provider or (lambda: CONFIG))()
     alerts_cfg = cfg.get("alerts", {})
     bot_token = str(alerts_cfg.get("discord_bot_token", "") or "").strip()
-    channel_id = str(alerts_cfg.get("discord_channel_id", "") or "").strip()
+    target_channel_id = (channel_id or "").strip() or str(alerts_cfg.get("discord_channel_id", "") or "").strip()
 
-    if not bot_token or not channel_id:
+    if not bot_token or not target_channel_id:
         return {
             "ok": False,
             "error": "Discord Bot Token and Channel ID must be configured",
             "deleted_count": 0,
         }
 
+    exclude_ids = {str(mid).strip() for mid in (exclude_message_ids or ()) if str(mid).strip()}
     req_fn = bot_http_fn or _default_bot_http_request
     now_fn = clock or time.time
     sleeper = sleep_fn or asyncio.sleep
@@ -511,7 +514,7 @@ async def purge_discord_channel_messages(
 
     while len(collected) < target_limit:
         batch_size = min(100, target_limit - len(collected))
-        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages?limit={batch_size}"
+        url = f"{DISCORD_API_BASE}/channels/{target_channel_id}/messages?limit={batch_size}"
         if before_id:
             url += f"&before={before_id}"
 
@@ -545,6 +548,9 @@ async def purge_discord_channel_messages(
     else:
         candidates = collected
 
+    if exclude_ids:
+        candidates = [m for m in candidates if str(m.get("id", "")) not in exclude_ids]
+
     if keep_latest > 0:
         candidates = candidates[keep_latest:]
 
@@ -571,7 +577,7 @@ async def purge_discord_channel_messages(
     for i in range(0, len(recent_ids), 100):
         chunk = recent_ids[i : i + 100]
         if len(chunk) >= 2:
-            bulk_url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/bulk-delete"
+            bulk_url = f"{DISCORD_API_BASE}/channels/{target_channel_id}/messages/bulk-delete"
             st, _h, _b = await _bot_request_with_429(
                 "POST", bulk_url, bot_token, {"messages": chunk}, req_fn, sleeper
             )
@@ -583,7 +589,7 @@ async def purge_discord_channel_messages(
             old_ids.extend(chunk)
 
     for mid in old_ids:
-        del_url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{mid}"
+        del_url = f"{DISCORD_API_BASE}/channels/{target_channel_id}/messages/{mid}"
         st, _h, _b = await _bot_request_with_429("DELETE", del_url, bot_token, None, req_fn, sleeper)
         if 200 <= st < 300:
             single_deleted += 1
@@ -593,7 +599,7 @@ async def purge_discord_channel_messages(
     total_deleted = bulk_deleted + single_deleted
     add_event(
         "system",
-        f"Discord Purge: deleted {total_deleted} message(s) in channel {channel_id} (bulk={bulk_deleted}, single={single_deleted}, errors={errors})",
+        f"Discord Purge: deleted {total_deleted} message(s) in channel {target_channel_id} (bulk={bulk_deleted}, single={single_deleted}, errors={errors})",
     )
     return {
         "ok": errors == 0 or total_deleted > 0,

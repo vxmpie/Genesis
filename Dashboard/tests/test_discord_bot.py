@@ -461,6 +461,73 @@ class TestDiscordBot(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"/channels/ch_bridge/messages/{second_popup}", deleted_paths)
             self.assertNotIn("ch_bridge", svc._active_popups)
 
+    async def test_central_command_and_one_click_alert_sweeper(self) -> None:
+        mock_state = {
+            "lang": "dual",
+            "reactor_channel_id": "ch_reactor",
+            "command_deck_channel_id": "ch_bridge",
+            "deck_message_id": "msg_bridge_pinned",
+            "command_wall_channel_id": "ch_wall",
+            "command_wall_message_id": "msg_wall_pinned",
+            "central_command_channel_id": "ch_central",
+            "central_command_message_id": "msg_central_pinned",
+            "intel_channel_ids": {"google": "ch_google", "ai": "ch_ai"},
+            "intel_message_ids": {"google": "msg_google_pinned", "ai": "msg_ai_pinned"},
+            "active_popups": {"ch_bridge": "old_popup_1"},
+        }
+
+        locked = discord_bot.get_locked_board_channel_ids(mock_state)
+        self.assertIn("ch_central", locked)
+        self.assertEqual(
+            discord_bot.get_pinned_board_msg_id_for_channel("ch_central", mock_state),
+            "msg_central_pinned",
+        )
+
+        with patch.object(discord_bot, "load_station_state", return_value=mock_state):
+            central_payload = discord_bot.build_central_command_payload("dual")
+        self.assertIsNone(_EMOJI_RE.search(json.dumps(central_payload)))
+        central_custom_ids = {
+            btn.get("custom_id")
+            for row in central_payload["components"]
+            for btn in row.get("components", [])
+        }
+        self.assertIn("cmd:purge_all_alerts", central_custom_ids)
+        self.assertIn("cmd:central_refresh", central_custom_ids)
+
+        cmd_names = {c["name"] for c in discord_bot.get_discord_api_commands()}
+        self.assertIn("central", cmd_names)
+        self.assertIn("clear-alerts", cmd_names)
+
+        purge_calls: list[dict] = []
+
+        async def fake_purge(**kwargs):
+            purge_calls.append(kwargs)
+            return {"ok": True, "deleted_count": 3, "scanned": 4, "errors": 0}
+
+        with patch.object(discord_bot, "CONFIG", {"alerts": {"discord_channel_id": "ch_reactor"}}), patch.object(
+            discord_bot, "load_station_state", return_value=mock_state
+        ), patch.object(
+            discord_bot, "save_station_state"
+        ) as mock_save, patch.object(
+            discord_bot, "purge_discord_channel_messages", side_effect=fake_purge
+        ):
+            payload_all, _ = await discord_bot._execute_command_action("purge_all_alerts", {"from_button": True})
+            self.assertIn("Station-Wide Alert Sweep Completed", payload_all["embeds"][0]["title"])
+            self.assertEqual(len(purge_calls), 6)
+            self.assertTrue(all(c["keep_latest"] == 0 for c in purge_calls))
+
+            google_call = next(c for c in purge_calls if c["channel_id"] == "ch_google")
+            self.assertIn("msg_google_pinned", google_call["exclude_message_ids"])
+            central_call = next(c for c in purge_calls if c["channel_id"] == "ch_central")
+            self.assertIn("msg_central_pinned", central_call["exclude_message_ids"])
+            self.assertEqual(mock_state["active_popups"], {})
+            mock_save.assert_called_once()
+
+            purge_calls.clear()
+            await discord_bot._execute_command_action("purge", {"from_button": True})
+            self.assertEqual(len(purge_calls), 1)
+            self.assertEqual(purge_calls[0]["keep_latest"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

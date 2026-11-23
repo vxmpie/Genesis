@@ -89,6 +89,7 @@ ROLE_DEFINITIONS: list[dict] = [
 CHANNEL_TOPICS: dict[str, str] = {
     "bridge-command": "Main Bridge Console & Interactive Hardware/Intel Controls | แผงควบคุมหลักสั่งการระบบเครื่องและเรดาร์ข่าวกรอง",
     "command-wall": "Dynamic Slash Command Directory, Custom Macros & Active Feeds | กำแพงคู่มือคำสั่งแบบไดนามิก คำสั่งลัด และแหล่งข่าวทั้งหมด",
+    "central-command": "Central Command Hub: One-Click Alert Sweeper, Board Sync & Station Controls | ห้องคำสั่งส่วนกลาง กดปุ่มเดียวล้างข้อความแจ้งเตือนค้างทุกห้องและสั่งการระบบทันที",
     "reactor-telemetry": "Automated System Incident, Watchdog Recovery & Memory Guard Alerts | ห้องแจ้งเตือนสถานะระบบ การกู้คืนบอท และหน่วยความจำอัตโนมัติ",
     "captain-datacore": "Personal Vault & Dropzone: Drop text/links/files here or use /log to auto-archive | คลังเก็บโน้ตและลิงก์ส่วนตัว พิมพ์หรือวางลิงก์ในห้องนี้เพื่อบันทึกเข้า Vault อัตโนมัติ",
     "google-gemini-radar": "Official Google AI, Gemini Models, DeepMind, Gemini CLI & Local Antigravity Updates | เรดาร์แจ้งเตือนอัปเดต Google, โมเดล Gemini ใหม่ และเวอร์ชัน Antigravity ทันที",
@@ -130,6 +131,22 @@ SLASH_COMMANDS: list[dict] = [
         "_desc_th": "แสดงและซิงค์กำแพงคู่มือคำสั่งทั้งหมด (#command-wall)",
         "name": "wall",
         "description": "Display and sync the dynamic Master Command Wall",
+        "type": 1,
+    },
+    {
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "เปิดหรือรีเฟรชห้องคำสั่งส่วนกลาง (#central-command)",
+        "name": "central",
+        "description": "Spawn or refresh the Central Command Hub (#central-command)",
+        "type": 1,
+    },
+    {
+        "_group_en": "Bridge & Overview",
+        "_group_th": "แผงควบคุมหลักและภาพรวม",
+        "_desc_th": "กดครั้งเดียวล้างข้อความแจ้งเตือนค้างทุกห้องในระบบ",
+        "name": "clear-alerts",
+        "description": "One-click sweep of all lingering alert and notification messages across all station channels",
         "type": 1,
     },
     {
@@ -1035,6 +1052,106 @@ def build_command_wall_payload(lang: str | None = None) -> dict:
     return {"embeds": [embed_directory, embed_dynamic], "components": components}
 
 
+def build_central_command_payload(lang: str | None = None) -> dict:
+    mode = normalize_lang(lang or get_current_lang())
+    state = load_station_state()
+    reactor_cid = str(state.get("reactor_channel_id") or CONFIG.get("alerts", {}).get("discord_channel_id") or "").strip()
+    intel_chs = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
+    google_cid = str(intel_chs.get("google") or "").strip()
+    bridge_cid = str(state.get("command_deck_channel_id") or "").strip()
+    wall_cid = str(state.get("command_wall_channel_id") or "").strip()
+
+    target_mentions = [
+        f"<#{cid}>"
+        for cid in (reactor_cid, google_cid, bridge_cid, wall_cid)
+        if cid
+    ]
+    targets_text = " | ".join(target_mentions) if target_mentions else "`#reactor-telemetry` & all board rooms"
+
+    embed = {
+        "title": f"[CENTRAL COMMAND] {tr(mode, 'STATION-WIDE CONTROL & ALERT SWEEPER', 'ศูนย์คำสั่งส่วนกลางและปุ่มล้างแจ้งเตือนทุกห้อง')}",
+        "description": tr_block(
+            mode,
+            "One-click central command hub. Press **Clear All Alerts (1-Click)** below to immediately delete all lingering notifications, breaking radar alerts, and stale popups across every alert and board channel while preserving pinned boards.",
+            "ห้องคำสั่งส่วนกลางของสถานี กดปุ่ม **ล้างแจ้งเตือนค้างทุกห้อง (กดครั้งเดียว)** ด้านล่างเพื่อลบข้อความแจ้งเตือนใหม่ๆ ที่เข้ามาแล้วไม่ยอมหายไป รวมถึงข้อความค้างในทุกห้องแจ้งเตือนและห้องบอร์ด โดยไม่ลบกระดานหลักที่ปักหมุดไว้",
+        ),
+        "color": 0xEF4444,
+        "fields": [
+            {
+                "name": tr(mode, "1-Click Alert Sweeper Scope", "ขอบเขตการล้างแจ้งเตือนอัตโนมัติ"),
+                "value": (
+                    f"{targets_text}\n"
+                    + tr(
+                        mode,
+                        "Includes `#reactor-telemetry`, `#google-gemini-radar`, all `#intel` feeds, `#bridge-command`, `#command-wall`, and `#central-command` (pinned boards preserved).",
+                        "ครอบคลุม `#reactor-telemetry`, `#google-gemini-radar`, ห้องข่าวทุกห้อง, `#bridge-command`, `#command-wall` และ `#central-command` (เก็บกระดานปักหมุดไว้ครบ)",
+                    )
+                ),
+                "inline": False,
+            },
+            {
+                "name": tr(mode, "Quick Slash Equivalents", "คำสั่งลัดที่เรียกใช้ได้ทันที"),
+                "value": "`/clear-alerts` | `/purge` | `/central` | `/sync` (`Sync All Intel`) | `/briefing`",
+                "inline": False,
+            },
+        ],
+        "footer": {"text": f"Genesis Motherboard Central Command | Lang: {mode.upper()} | Host: {socket.gethostname()}"},
+        "timestamp": _utc_iso_now(),
+    }
+
+    components = [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 4,
+                    "label": tr(mode, "Clear All Alerts (1-Click)", "ล้างแจ้งเตือนค้างทุกห้อง (กดครั้งเดียว)")[:80],
+                    "custom_id": "cmd:purge_all_alerts",
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": tr(mode, "Purge Reactor Only", "ล้างเฉพาะห้องแจ้งเตือน")[:80],
+                    "custom_id": "cmd:purge",
+                },
+                {
+                    "type": 2,
+                    "style": 3,
+                    "label": tr(mode, "Sync All Intel", "อัปเดตข่าวทุกห้อง")[:80],
+                    "custom_id": "cmd:sync_intel",
+                },
+                {
+                    "type": 2,
+                    "style": 1,
+                    "label": tr(mode, "Omni-Briefing", "สรุปครบชุด")[:80],
+                    "custom_id": "cmd:briefing",
+                },
+            ],
+        },
+        {
+            "type": 1,
+            "components": [
+                {"type": 2, "style": 1, "label": tr(mode, "Live Status", "สถานะเครื่อง"), "custom_id": "cmd:status"},
+                {"type": 2, "style": 3, "label": tr(mode, "RAM Boost", "เคลียร์แรม"), "custom_id": "cmd:boost"},
+                {"type": 2, "style": 2, "label": tr(mode, "MuMu Fleet", "จอ MuMu"), "custom_id": "cmd:mumu"},
+                {"type": 2, "style": 2, "label": tr(mode, "Deep Clean", "ล้างขยะ"), "custom_id": "cmd:clean"},
+                {"type": 2, "style": 2, "label": tr(mode, "Top Procs", "โปรเซสหนัก"), "custom_id": "cmd:processes"},
+            ],
+        },
+        {
+            "type": 1,
+            "components": [
+                {"type": 2, "style": 2, "label": tr(mode, "Bridge Console", "แผงควบคุมหลัก"), "custom_id": "cmd:bridge"},
+                {"type": 2, "style": 2, "label": tr(mode, "Command Wall", "กำแพงคำสั่ง"), "custom_id": "cmd:wall"},
+                {"type": 2, "style": 3, "label": lang_button_label(mode), "custom_id": "cmd:lang_cycle:central"},
+                {"type": 2, "style": 2, "label": tr(mode, "Refresh Central", "รีเฟรชหน้านี้"), "custom_id": "cmd:central_refresh"},
+            ],
+        },
+    ]
+    return {"embeds": [embed], "components": components}
+
+
 def build_status_payload(lang: str | None = None) -> dict:
     mode = normalize_lang(lang or get_current_lang())
     metrics = get_system_metrics()
@@ -1416,7 +1533,7 @@ def build_readonly_board_overwrites(
 def get_locked_board_channel_ids(state: dict | None = None) -> set[str]:
     st = state if isinstance(state, dict) else load_station_state()
     ids: set[str] = set()
-    for key in ("command_deck_channel_id", "command_wall_channel_id", "reactor_channel_id"):
+    for key in ("command_deck_channel_id", "command_wall_channel_id", "central_command_channel_id", "reactor_channel_id"):
         val = str(st.get(key, "") or "").strip()
         if val:
             ids.add(val)
@@ -1441,6 +1558,8 @@ def get_pinned_board_msg_id_for_channel(channel_id: str, state: dict | None = No
         return str(st.get("deck_message_id", "") or "") or None
     if cid == str(st.get("command_wall_channel_id", "")):
         return str(st.get("command_wall_message_id", "") or "") or None
+    if cid == str(st.get("central_command_channel_id", "")):
+        return str(st.get("central_command_message_id", "") or "") or None
     intel_chs = st.get("intel_channel_ids", {})
     intel_msgs = st.get("intel_message_ids", {})
     if isinstance(intel_chs, dict) and isinstance(intel_msgs, dict):
@@ -1560,6 +1679,29 @@ async def refresh_command_wall(bot_token: str | None = None) -> dict:
         state["command_wall_message_id"] = msg_id
         save_station_state(state)
     return {"ok": True, "command_wall_message_id": msg_id}
+
+
+async def refresh_central_command(bot_token: str | None = None) -> dict:
+    alerts_cfg = CONFIG.get("alerts", {})
+    token = (bot_token or str(alerts_cfg.get("discord_bot_token", "") or "")).strip()
+    state = load_station_state()
+    central_cid = state.get("central_command_channel_id")
+    if not token or not central_cid:
+        return {"ok": False, "error": "Central command channel not provisioned"}
+
+    lang = get_current_lang()
+    central_payload = await asyncio.to_thread(build_central_command_payload, lang)
+    msg_id = await _upsert_board_message(
+        token,
+        str(central_cid),
+        state.get("central_command_message_id"),
+        central_payload,
+        pin=True,
+    )
+    if msg_id:
+        state["central_command_message_id"] = msg_id
+        save_station_state(state)
+    return {"ok": True, "central_command_message_id": msg_id}
 
 
 async def sync_intel_channels(bot_token: str | None = None, categories: tuple[str, ...] | None = None) -> dict:
@@ -1786,6 +1928,18 @@ async def provision_guild_station(
         known_id=state.get("command_wall_channel_id"),
         topic=CHANNEL_TOPICS["command-wall"],
     )
+    central_ch = await _find_or_create_channel(
+        token,
+        guild_id,
+        channels,
+        "central-command",
+        0,
+        parent_id=cat_bridge["id"],
+        position=2,
+        permission_overwrites=readonly_board_overwrites,
+        known_id=state.get("central_command_channel_id"),
+        topic=CHANNEL_TOPICS["central-command"],
+    )
     reactor_ch = await _find_or_create_channel(
         token,
         guild_id,
@@ -1793,7 +1947,7 @@ async def provision_guild_station(
         "reactor-telemetry",
         0,
         parent_id=cat_bridge["id"],
-        position=2,
+        position=3,
         permission_overwrites=readonly_board_overwrites,
         legacy_names=("dashboard",),
         known_id=dash_ch_id,
@@ -1806,7 +1960,7 @@ async def provision_guild_station(
         "captain-datacore",
         0,
         parent_id=cat_bridge["id"],
-        position=3,
+        position=4,
         legacy_names=("dropzone",),
         known_id=state.get("dropzone_channel_id"),
         topic=CHANNEL_TOPICS["captain-datacore"],
@@ -1814,6 +1968,7 @@ async def provision_guild_station(
 
     state["command_deck_channel_id"] = str(bridge_ch["id"])
     state["command_wall_channel_id"] = str(wall_ch["id"])
+    state["central_command_channel_id"] = str(central_ch["id"])
     state["reactor_channel_id"] = str(reactor_ch["id"])
     state["dropzone_channel_id"] = str(datacore_ch["id"])
 
@@ -1947,6 +2102,7 @@ async def provision_guild_station(
     save_station_state(state)
     bridge_res = await refresh_bridge_console(token)
     wall_res = await refresh_command_wall(token)
+    central_res = await refresh_central_command(token)
     intel_res = await sync_intel_channels(token)
 
     add_event(
@@ -1962,23 +2118,92 @@ async def provision_guild_station(
         "roles": roles_map,
         "bridge_channel_id": state["command_deck_channel_id"],
         "command_wall_channel_id": state["command_wall_channel_id"],
+        "central_command_channel_id": state["central_command_channel_id"],
         "reactor_channel_id": str(reactor_ch["id"]),
         "datacore_channel_id": state["dropzone_channel_id"],
         "intel_channel_ids": state["intel_channel_ids"],
         "hud_channel_ids": resolved_hud_ids,
         "deck_message_id": bridge_res.get("deck_message_id"),
         "command_wall_message_id": wall_res.get("command_wall_message_id"),
+        "central_command_message_id": central_res.get("central_command_message_id"),
         "commands_registered": [c["name"] for c in api_commands],
         "intel_sync": intel_res,
     }
 
 
 # --- Interaction Handlers ---
+async def purge_all_station_alerts(limit: int = 200) -> dict:
+    state = load_station_state()
+    channel_excludes: dict[str, set[str]] = {}
+
+    def _register_target(cid_raw: object, pinned_mid_raw: object = None) -> None:
+        cid = str(cid_raw or "").strip()
+        if not cid:
+            return
+        excludes = channel_excludes.setdefault(cid, set())
+        pinned_mid = str(pinned_mid_raw or "").strip()
+        if pinned_mid:
+            excludes.add(pinned_mid)
+
+    _register_target(state.get("reactor_channel_id"))
+    _register_target(CONFIG.get("alerts", {}).get("discord_channel_id"))
+    _register_target(state.get("command_deck_channel_id"), state.get("deck_message_id"))
+    _register_target(state.get("command_wall_channel_id"), state.get("command_wall_message_id"))
+    _register_target(state.get("central_command_channel_id"), state.get("central_command_message_id"))
+
+    intel_chs = state.get("intel_channel_ids", {})
+    intel_msgs = state.get("intel_message_ids", {})
+    if isinstance(intel_chs, dict):
+        for cat, icid in intel_chs.items():
+            pinned = intel_msgs.get(cat) if isinstance(intel_msgs, dict) else None
+            _register_target(icid, pinned)
+
+    total_deleted = 0
+    total_scanned = 0
+    total_errors = 0
+    channels_swept = 0
+    per_channel: dict[str, int] = {}
+
+    for cid, excludes in channel_excludes.items():
+        res = await purge_discord_channel_messages(
+            limit=limit,
+            bot_only=False,
+            keep_latest=0,
+            channel_id=cid,
+            exclude_message_ids=excludes,
+        )
+        deleted = int(res.get("deleted_count", 0) or 0)
+        scanned = int(res.get("scanned", 0) or 0)
+        errors = int(res.get("errors", 0) or 0)
+        total_deleted += deleted
+        total_scanned += scanned
+        total_errors += errors
+        if res.get("ok"):
+            channels_swept += 1
+        per_channel[cid] = deleted
+
+    if isinstance(state.get("active_popups"), dict) and state["active_popups"]:
+        state["active_popups"] = {}
+        save_station_state(state)
+
+    return {
+        "ok": channels_swept > 0 and (total_errors == 0 or total_deleted > 0),
+        "deleted_count": total_deleted,
+        "scanned": total_scanned,
+        "channels_swept": channels_swept,
+        "total_channels": len(channel_excludes),
+        "errors": total_errors,
+        "per_channel": per_channel,
+    }
+
+
 async def _render_board_for_key(board_key: str, lang: str) -> dict:
     if board_key in ("bridge", "deck"):
         return await asyncio.to_thread(build_deck_payload, lang)
     if board_key == "wall":
         return await asyncio.to_thread(build_command_wall_payload, lang)
+    if board_key == "central":
+        return await asyncio.to_thread(build_central_command_payload, lang)
     if board_key == "status":
         return await asyncio.to_thread(build_status_payload, lang)
     if board_key == "mumu":
@@ -2021,6 +2246,7 @@ async def _execute_command_action(
         new_mode = set_station_lang(requested) if requested in VALID_LANG_MODES else cycle_station_lang()
         asyncio.create_task(refresh_bridge_console())
         asyncio.create_task(refresh_command_wall())
+        asyncio.create_task(refresh_central_command())
         asyncio.create_task(sync_intel_channels())
         return {
             "embeds": [
@@ -2028,8 +2254,8 @@ async def _execute_command_action(
                     "title": f"[OK] {tr(new_mode, f'Language Mode: {new_mode.upper()}', f'เปลี่ยนโหมดภาษาเป็น {new_mode.upper()} แล้ว')}",
                     "description": tr_block(
                         new_mode,
-                        "Bridge Console, Command Wall, and Intel Cortex boards are syncing to the selected mode.",
-                        "กำลังอัปเดตแผงควบคุม กำแพงคำสั่ง และห้องข่าวกรองทั้งหมดตามโหมดภาษาที่เลือก",
+                        "Bridge Console, Command Wall, Central Command, and Intel Cortex boards are syncing to the selected mode.",
+                        "กำลังอัปเดตแผงควบคุม กำแพงคำสั่ง ห้องคำสั่งส่วนกลาง และห้องข่าวกรองทั้งหมดตามโหมดภาษาที่เลือก",
                     ),
                     "color": 0x10B981,
                     "timestamp": _utc_iso_now(),
@@ -2043,6 +2269,7 @@ async def _execute_command_action(
         payload = await _render_board_for_key(board_key, new_mode)
         asyncio.create_task(refresh_bridge_console())
         asyncio.create_task(refresh_command_wall())
+        asyncio.create_task(refresh_central_command())
         asyncio.create_task(sync_intel_channels())
         return payload, None
 
@@ -2055,6 +2282,10 @@ async def _execute_command_action(
     if action in ("wall", "wall_refresh"):
         await refresh_command_wall()
         return await asyncio.to_thread(build_command_wall_payload, lang), None
+
+    if action in ("central", "central_refresh"):
+        await refresh_central_command()
+        return await asyncio.to_thread(build_central_command_payload, lang), None
 
     if action == "feeds_list":
         feeds = await asyncio.to_thread(list_feed_sources)
@@ -2436,7 +2667,7 @@ async def _execute_command_action(
 
     if action == "purge":
         limit = int(opts.get("limit") or 100)
-        keep_latest = 5 if opts.get("from_button") else 0
+        keep_latest = 0
         res = await purge_discord_channel_messages(limit=limit, bot_only=False, keep_latest=keep_latest)
         ok = bool(res.get("ok"))
         embed = {
@@ -2455,6 +2686,35 @@ async def _execute_command_action(
         }
         if not ok and res.get("error"):
             embed["description"] = str(res["error"])
+        return {"embeds": [embed]}, None
+
+    if action in ("purge_all_alerts", "clear-alerts"):
+        limit = int(opts.get("limit") or 200)
+        res = await purge_all_station_alerts(limit=limit)
+        ok = bool(res.get("ok"))
+        embed = {
+            "title": (
+                f"[OK] {tr(lang, 'Station-Wide Alert Sweep Completed', 'ล้างข้อความแจ้งเตือนค้างทุกห้องเรียบร้อย')}"
+                if ok
+                else f"[WARN] {tr(lang, 'Station-Wide Alert Sweep Partial/Failed', 'ล้างข้อความแจ้งเตือนบางส่วนไม่สำเร็จ')}"
+            ),
+            "description": tr_block(
+                lang,
+                "All lingering notifications, breaking radar alerts, and stale popups have been purged across alert and board rooms (pinned boards preserved).",
+                "ลบข้อความแจ้งเตือนใหม่ๆ ที่ค้างอยู่ ข้อความเรดาร์ข่าว และหน้าต่างชั่วคราวในทุกห้องแจ้งเตือนและห้องบอร์ดออกทั้งหมดแล้ว (เก็บกระดานปักหมุดไว้ครบ)",
+            ),
+            "color": 0x10B981 if ok else 0xF59E0B,
+            "fields": [
+                {"name": tr(lang, "Total Deleted", "ลบทั้งหมด"), "value": f"`{res.get('deleted_count', 0)}`", "inline": True},
+                {"name": tr(lang, "Scanned", "สแกนทั้งหมด"), "value": f"`{res.get('scanned', 0)}`", "inline": True},
+                {
+                    "name": tr(lang, "Channels Swept", "จำนวนห้องที่ล้าง"),
+                    "value": f"`{res.get('channels_swept', 0)}/{res.get('total_channels', 0)}`",
+                    "inline": True,
+                },
+            ],
+            "timestamp": _utc_iso_now(),
+        }
         return {"embeds": [embed]}, None
 
     if action == "recover" or action.startswith("recover:"):
@@ -2807,13 +3067,15 @@ class DiscordBotService:
             if custom_id.startswith("cmd:"):
                 action = custom_id[4:]
                 opts["from_button"] = True
-                if action in ("deck_refresh", "wall_refresh") or action.startswith("lang_cycle:"):
+                if action in ("deck_refresh", "wall_refresh", "central_refresh") or action.startswith("lang_cycle:"):
                     ack_type = 6
                 elif action in ("bridge", "deck", "toggle_auto_clean") and channel_id == str(state.get("command_deck_channel_id", "")) and clicked_msg == board_msg_id:
                     ack_type = 6
                     if action == "toggle_auto_clean":
                         opts["inline_board_update"] = True
                 elif action == "wall" and channel_id == str(state.get("command_wall_channel_id", "")) and clicked_msg == board_msg_id:
+                    ack_type = 6
+                elif action == "central" and channel_id == str(state.get("central_command_channel_id", "")) and clicked_msg == board_msg_id:
                     ack_type = 6
                 elif action in VALID_FEED_CATEGORIES:
                     ch_map = state.get("intel_channel_ids", {}) if isinstance(state.get("intel_channel_ids"), dict) else {}
@@ -2974,7 +3236,7 @@ class DiscordBotService:
                     continue
                 state = load_station_state()
                 intel_ch = state.get("intel_channel_ids", {})
-                if not isinstance(intel_ch, dict) or "google" not in intel_ch:
+                if not isinstance(intel_ch, dict) or "google" not in intel_ch or not state.get("central_command_channel_id"):
                     try:
                         await provision_guild_station(token)
                     except Exception:
