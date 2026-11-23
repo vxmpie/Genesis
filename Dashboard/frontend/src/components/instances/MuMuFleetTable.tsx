@@ -61,7 +61,11 @@ export const MuMuFleetTable: React.FC<MuMuFleetTableProps> = ({
     const tone = getPresenceTone(dev.presence_status);
     const liveName =
       dev.presence_status === 'InGame' && dev.live_game_name ? dev.live_game_name : null;
-    const targetName = liveName || dev.target_game || dev.active_game || 'Unassigned';
+    const configuredTarget =
+      dev.target_place_id > 0 && dev.target_game && dev.target_game !== 'Unassigned'
+        ? dev.target_game
+        : null;
+    const targetName = liveName || configuredTarget || dev.active_game || 'Unassigned';
     const configuredId = dev.configured_place_id ?? 0;
     const displayTargetId = configuredId > 0 ? configuredId : dev.target_place_id;
     const hasLiveDifferentFromTarget =

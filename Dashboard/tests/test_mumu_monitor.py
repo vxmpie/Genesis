@@ -291,7 +291,7 @@ class TestAutoRejoinControl(unittest.TestCase):
             mock_rec.assert_called_once()
 
     def test_manual_governor_restart_works_when_auto_rejoin_off(self) -> None:
-        mm.CONFIG["mumu"]["instance_places"] = {"1": 98800969324557}
+        mm.CONFIG["mumu"]["instance_places"] = {"1": 2753915549}
         with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
             set_auto_rejoin(1, False)
         with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
@@ -310,7 +310,7 @@ class TestAutoRejoinControl(unittest.TestCase):
         self.assertIn("No target Place ID", res_empty["error"])
         mock_cmd.assert_not_called()
 
-        mm.CONFIG["mumu"]["instance_places"] = {"1": 98800969324557}
+        mm.CONFIG["mumu"]["instance_places"] = {"1": 2753915549}
         with patch.object(mm, "find_mumu_adb", return_value=Path("adb.exe")), patch.object(
             mm,
             "_run_cmd",
@@ -375,9 +375,9 @@ class TestGamePresetsAndPlacePriority(unittest.TestCase):
             with self.assertRaises(KeyError):
                 update_game_preset(111111, 222222, "Missing")
 
-            add_game_preset(98800969324557, "Storage Hunters")
+            add_game_preset(2753915549, "Blox Fruits")
             with self.assertRaises(ValueError):
-                update_game_preset(93898234979111, 98800969324557, "Collision")
+                update_game_preset(93898234979111, 2753915549, "Collision")
 
             deleted = delete_game_preset(93898234979111)
             self.assertEqual(deleted["deleted_place_id"], 93898234979111)
@@ -394,21 +394,34 @@ class TestGamePresetsAndPlacePriority(unittest.TestCase):
         self.assertEqual(get_instance_place_id(1), 93898234979111)
 
         with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
-            set_instance_place_id(1, 98800969324557)
-        self.assertEqual(get_instance_place_id(1), 98800969324557)
+            set_instance_place_id(1, 2753915549)
+        self.assertEqual(get_instance_place_id(1), 2753915549)
 
         fields = _build_device_game_fields(1, "1_Marple")
-        self.assertEqual(fields["configured_place_id"], 98800969324557)
-        self.assertEqual(fields["target_place_id"], 98800969324557)
+        self.assertEqual(fields["configured_place_id"], 2753915549)
+        self.assertEqual(fields["target_place_id"], 2753915549)
         self.assertEqual(fields["active_place_id"], 93898234979111)
         self.assertEqual(fields["live_game_name"], "Net a Fish")
-        self.assertEqual(fields["target_game"], "Storage Hunters")
+        self.assertEqual(fields["target_game"], "Blox Fruits")
 
         with patch.object(mm, "save_config"), patch.object(mm, "add_event"):
             set_instance_place_id(1, 0)
         self.assertNotIn("1", mm.CONFIG["mumu"]["instance_places"])
         self.assertNotIn("1", mm._instance_auto_learned_place)
         self.assertEqual(get_instance_place_id(1), 93898234979111)
+
+    def test_private_in_game_presence_without_target_shows_private(self) -> None:
+        mm._instance_live_presence["3"] = {
+            "username": "2_Marple",
+            "presence_status": "InGame",
+            "place_id": None,
+            "game_name": "",
+        }
+        fields = _build_device_game_fields(3, "2_Marple")
+        self.assertEqual(fields["presence_status"], "InGame")
+        self.assertIsNone(fields["live_game_name"])
+        self.assertEqual(fields["target_place_id"], 0)
+        self.assertEqual(fields["active_game"], "In-Game (Private)")
 
     def test_clear_username_clears_stale_live_presence(self) -> None:
         mm.CONFIG["mumu"]["instance_usernames"]["1"] = "1_Marple"

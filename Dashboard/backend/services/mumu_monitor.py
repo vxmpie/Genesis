@@ -762,8 +762,6 @@ def get_mumu_adb_devices() -> list[str]:
 
 _instance_auto_learned_place: dict[str, int] = {}
 _place_name_cache: dict[int, str] = {
-    98800969324557: "Storage Hunters",
-    9640154: "Storage Hunters",
     17450551531: "Gym League",
     17017769292: "Anime Defenders",
     2753915549: "Blox Fruits",
@@ -970,9 +968,14 @@ def _build_device_game_fields(device_idx: int, saved_username: str) -> dict:
         )
         else (get_game_name_for_place_id(live_place_id) if live_place_id else None)
     )
+    active_game = (
+        live_game_name
+        or (target_game_name if target_place_id > 0 else None)
+        or ("In-Game (Private)" if live_is_in_game else "Unassigned")
+    )
     return {
         "presence_status": presence_status,
-        "active_game": live_game_name or target_game_name or "Unassigned",
+        "active_game": active_game,
         "active_place_id": live_place_id,
         "live_game_name": live_game_name,
         "place_id": target_place_id,
