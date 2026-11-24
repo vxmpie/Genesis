@@ -226,7 +226,7 @@ class TestAutoDeepCleanEngine(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(third)
                 self.assertEqual(mock_exec.call_count, 2)
 
-    def test_compact_stopped_mumu_vdis_skips_running_and_compacts_stopped(self) -> None:
+    def test_compact_stopped_mumu_vdis_skips_all_when_any_vm_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             mumu_root = Path(tmpdir) / "MuMuPlayer"
             vmm_exe = mumu_root / "nx_device" / "12.0" / "hypervisor" / "MuMuVMMManage.exe"
@@ -256,27 +256,105 @@ class TestAutoDeepCleanEngine(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
+            with patch.object(maintenance.psutil, "process_iter", return_value=[fake_proc]), patch.object(
+                maintenance, "_is_vdi_file_locked", return_value=False
+            ), patch.object(maintenance.subprocess, "run") as mock_run, patch.object(
+                maintenance, "add_event"
+            ) as mock_event:
+                res = maintenance.compact_stopped_mumu_vdis(trigger="manual")
+
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["compacted_count"], 0)
+            self.assertEqual(res["skipped_count"], 2)
+            self.assertEqual(res["error_count"], 0)
+            self.assertEqual(res["total_freed_mb"], 0.0)
+            mock_run.assert_not_called()
+            by_name = {v["vm_name"]: v for v in res["vms"]}
+            self.assertEqual(by_name["MuMuPlayerGlobal-12.0-1"]["status"], "skipped_running")
+            self.assertEqual(
+                by_name["MuMuPlayerGlobal-12.0-1"]["reason"],
+                "All MuMu VMs must be offline before VDI compact",
+            )
+            self.assertEqual(by_name["MuMuPlayerGlobal-15.0-0"]["status"], "skipped_running")
+            self.assertEqual(
+                by_name["MuMuPlayerGlobal-15.0-0"]["reason"],
+                "All MuMu VMs must be offline before VDI compact",
+            )
+            mock_event.assert_called_once()
+            self.assertEqual(mock_event.call_args[0][0], "clean")
+            self.assertIn("all VMs must be offline", mock_event.call_args[0][1])
+
+    def test_compact_stopped_mumu_vdis_compacts_when_all_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mumu_root = Path(tmpdir) / "MuMuPlayer"
+            vmm_exe = mumu_root / "nx_device" / "12.0" / "hypervisor" / "MuMuVMMManage.exe"
+            vmm_exe.parent.mkdir(parents=True)
+            vmm_exe.write_bytes(b"MZ")
+
+            vm_one = mumu_root / "vms" / "MuMuPlayerGlobal-12.0-1"
+            vm_two = mumu_root / "vms" / "MuMuPlayerGlobal-15.0-0"
+            vm_one.mkdir(parents=True)
+            vm_two.mkdir(parents=True)
+            (vm_one / "data.vdi").write_bytes(b"1" * (2 * 1024 * 1024))
+            (vm_two / "data.vdi").write_bytes(b"2" * (4 * 1024 * 1024))
+
+            with maintenance.CONFIG_LOCK:
+                maintenance.CONFIG["mumu"]["install_path"] = str(mumu_root)
+
             def fake_sub_run(cmd, **kwargs):
                 self.assertIn("creationflags", kwargs)
                 vdi_arg = Path(cmd[3])
                 vdi_arg.write_bytes(b"2" * (1 * 1024 * 1024))
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-            with patch.object(maintenance.psutil, "process_iter", return_value=[fake_proc]), patch.object(
+            with patch.object(maintenance.psutil, "process_iter", return_value=[]), patch.object(
                 maintenance, "_is_vdi_file_locked", return_value=False
-            ), patch.object(maintenance.subprocess, "run", side_effect=fake_sub_run) as mock_run:
-                res = maintenance.compact_stopped_mumu_vdis(trigger="manual")
+            ), patch.object(maintenance.subprocess, "run", side_effect=fake_sub_run) as mock_run, patch.object(
+                maintenance, "add_event"
+            ) as mock_event:
+                res = maintenance.compact_stopped_mumu_vdis(trigger="scheduled")
 
             self.assertTrue(res["ok"])
-            self.assertEqual(res["compacted_count"], 1)
-            self.assertEqual(res["skipped_count"], 1)
-            self.assertEqual(res["total_freed_mb"], 3.0)
-            self.assertEqual(mock_run.call_count, 1)
-            called_cmd = mock_run.call_args[0][0]
-            self.assertIn("MuMuPlayerGlobal-15.0-0", called_cmd[3])
+            self.assertEqual(res["compacted_count"], 2)
+            self.assertEqual(res["skipped_count"], 0)
+            self.assertEqual(res["error_count"], 0)
+            self.assertEqual(res["total_freed_mb"], 4.0)
+            self.assertEqual(mock_run.call_count, 2)
             by_name = {v["vm_name"]: v for v in res["vms"]}
-            self.assertEqual(by_name["MuMuPlayerGlobal-12.0-1"]["status"], "skipped_running")
+            self.assertEqual(by_name["MuMuPlayerGlobal-12.0-1"]["status"], "compacted")
             self.assertEqual(by_name["MuMuPlayerGlobal-15.0-0"]["status"], "compacted")
+            mock_event.assert_called_once()
+            self.assertEqual(mock_event.call_args[0][0], "clean")
+
+    def test_compact_stopped_mumu_vdis_logs_warning_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mumu_root = Path(tmpdir) / "MuMuPlayer"
+            vmm_exe = mumu_root / "nx_device" / "12.0" / "hypervisor" / "MuMuVMMManage.exe"
+            vmm_exe.parent.mkdir(parents=True)
+            vmm_exe.write_bytes(b"MZ")
+
+            vm_offline = mumu_root / "vms" / "MuMuPlayerGlobal-15.0-0"
+            vm_offline.mkdir(parents=True)
+            (vm_offline / "data.vdi").write_bytes(b"2" * (4 * 1024 * 1024))
+
+            with maintenance.CONFIG_LOCK:
+                maintenance.CONFIG["mumu"]["install_path"] = str(mumu_root)
+
+            failed_proc = SimpleNamespace(returncode=1, stdout="", stderr="VBoxManage error")
+            with patch.object(maintenance.psutil, "process_iter", return_value=[]), patch.object(
+                maintenance, "_is_vdi_file_locked", return_value=False
+            ), patch.object(maintenance.subprocess, "run", return_value=failed_proc), patch.object(
+                maintenance, "add_event"
+            ) as mock_event:
+                res = maintenance.compact_stopped_mumu_vdis(trigger="manual")
+
+            self.assertFalse(res["ok"])
+            self.assertEqual(res["compacted_count"], 0)
+            self.assertEqual(res["error_count"], 1)
+            self.assertEqual(res["vms"][0]["status"], "error")
+            mock_event.assert_called_once()
+            self.assertEqual(mock_event.call_args[0][0], "warning")
+            self.assertIn("1 errors", mock_event.call_args[0][1])
 
     async def test_discord_clean_modes_and_notifier_toggle(self) -> None:
         self.assertEqual(discord_notifier.EVENT_TOGGLE_MAP["auto_clean"], "notify_on_auto_clean")

@@ -868,6 +868,45 @@ def compact_stopped_mumu_vdis(trigger: str = "manual") -> dict:
             vm_dirs = sorted([d for d in vms_dir.iterdir() if d.is_dir()], key=lambda d: d.name.lower())
             running_vms, unknown_running = _get_running_mumu_vm_names([d.name for d in vm_dirs])
 
+            if bool(running_vms) or unknown_running:
+                vm_results = []
+                for vm_dir in vm_dirs:
+                    vdi_path = vm_dir / "data.vdi"
+                    if not vdi_path.exists() or not vdi_path.is_file():
+                        continue
+                    before_mb = round(vdi_path.stat().st_size / (1024 * 1024), 1)
+                    vm_results.append(
+                        {
+                            "vm_name": vm_dir.name,
+                            "status": "skipped_running",
+                            "before_mb": before_mb,
+                            "after_mb": before_mb,
+                            "freed_mb": 0.0,
+                            "reason": "All MuMu VMs must be offline before VDI compact",
+                        }
+                    )
+
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                res = {
+                    "ok": True,
+                    "trigger": trigger,
+                    "timestamp": now_str,
+                    "total_freed_mb": 0.0,
+                    "compacted_count": 0,
+                    "skipped_count": len(vm_results),
+                    "error_count": 0,
+                    "vms": vm_results,
+                }
+                with _AUTO_CLEAN_STATE_LOCK:
+                    _auto_clean_state["last_vdi_compact_at"] = now_str
+                    _auto_clean_state["last_vdi_compact_result"] = res
+
+                add_event(
+                    "clean",
+                    f"VDI Compact ({trigger}): skipped -- active MuMu instance(s) detected (all VMs must be offline)",
+                )
+                return res
+
             vm_results: list[dict] = []
             total_freed_mb = 0.0
             compacted_count = 0
@@ -962,11 +1001,16 @@ def compact_stopped_mumu_vdis(trigger: str = "manual") -> dict:
                 _auto_clean_state["last_vdi_compact_at"] = now_str
                 _auto_clean_state["last_vdi_compact_result"] = res
 
-            add_event(
-                "clean",
+            event_type = "warning" if error_count > 0 else "clean"
+            event_msg = (
                 f"VDI Compact ({trigger}): {res['total_freed_mb']} MB freed "
-                f"({compacted_count} compacted, {skipped_count} running skipped)",
+                f"({compacted_count} compacted, {skipped_count} running skipped"
             )
+            if error_count > 0:
+                event_msg += f", {error_count} errors)"
+            else:
+                event_msg += ")"
+            add_event(event_type, event_msg)
             return res
         finally:
             with _AUTO_CLEAN_STATE_LOCK:
